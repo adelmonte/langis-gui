@@ -26,6 +26,16 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
             if chats.on_hover_text("Chats").clicked() {
                 app.tab = Tab::Chats;
             }
+            let calls = tab_item(ui, &palette, if app.tab == Tab::Calls { Icon::PhoneFill } else { Icon::Phone }, app.tab == Tab::Calls, 0);
+            if calls.on_hover_text("Calls").clicked() {
+                app.tab = Tab::Calls;
+                app.panes.calls_loaded = false;
+            }
+            let unseen = crate::stories_unread(app);
+            let stories = tab_item(ui, &palette, if app.tab == Tab::Stories { Icon::StoriesFill } else { Icon::Stories }, app.tab == Tab::Stories, unseen);
+            if stories.on_hover_text("Stories").clicked() {
+                app.tab = Tab::Stories;
+            }
             // Settings and our avatar sit at the bottom.
             let bottom = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 100.), full.max);
             ui.scope_builder(egui::UiBuilder::new().max_rect(bottom), |ui| {
@@ -38,7 +48,9 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
                 ui.add_space(6.);
                 ui.vertical_centered(|ui| {
                     let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
-                    widgets::avatar(ui, &spec, 28.).on_hover_text("Profile");
+                    if widgets::avatar(ui, &spec, 28.).on_hover_text("Profile").clicked() {
+                        crate::profile::open(app);
+                    }
                 });
             });
         });
@@ -79,12 +91,23 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             // Header: "Chats", and the compose button.
             ui.add_space(12.);
             ui.horizontal(|ui| {
+                if app.panes.archived {
+                    ui.add_space(12.);
+                    if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() {
+                        app.panes.archived = false;
+                    }
+                    ui.label(RichText::new("Archived chats").font(theme::semibold(18.)));
+                    return;
+                }
                 ui.add_space(24.);
                 ui.label(RichText::new("Chats").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(14.);
-                    widgets::icon_button(ui, Icon::More, 20., "More");
-                    widgets::icon_button(ui, Icon::Edit, 20., "New chat");
+                    let more = widgets::icon_button(ui, Icon::More, 20., "More");
+                    egui::Popup::menu(&more).show(|ui| crate::panes::list_menu(app, ui));
+                    if widgets::icon_button(ui, Icon::Edit, 20., "New chat").clicked() {
+                        app.panes.compose = Some(crate::panes::Compose::Chat { query: String::new(), searching: false, found: None });
+                    }
                 });
             });
             ui.add_space(6.);
@@ -95,12 +118,16 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             });
             ui.add_space(6.);
             status_banner(app, ui, &palette);
+            crate::panes::list_notices(app, ui, &palette);
+            if !app.panes.archived {
+                crate::panes::folder_tabs(app, ui, &palette);
+            }
 
             let query = app.search.trim().to_lowercase();
             let rows: Vec<Conversation> = app
                 .conversations
                 .iter()
-                .filter(|c| !c.archived && (query.is_empty() || c.title.to_lowercase().contains(&query)))
+                .filter(|c| crate::panes::visible(app, c) && (query.is_empty() || c.title.to_lowercase().contains(&query)))
                 .cloned()
                 .collect();
             let mut open = None;
@@ -109,9 +136,22 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                 for c in &rows {
                     let typing = app.typing.get(&c.id).is_some_and(|t| !t.is_empty());
                     let selected = app.selected.as_ref() == Some(&c.id);
-                    if chat_row(ui, &palette, c, selected, typing).clicked() {
+                    let row = chat_row(ui, &palette, c, selected, typing);
+                    if row.clicked() {
                         open = Some(c.id.clone());
                     }
+                    row.context_menu(|ui| crate::panes::chat_menu(app, ui, c));
+                }
+                // Desktop's "Archived chats (n)" at the end of the list.
+                let archived = app.conversations.iter().filter(|c| c.archived).count();
+                if !app.panes.archived && archived > 0 && query.is_empty() {
+                    ui.add_space(4.);
+                    ui.horizontal(|ui| {
+                        ui.add_space(14.);
+                        if crate::panes::menu_row(ui, Some(Icon::Archive), &format!("Archived chats ({archived})"), false).clicked() {
+                            app.panes.archived = true;
+                        }
+                    });
                 }
                 if rows.is_empty() && !query.is_empty() {
                     ui.add_space(24.);
@@ -121,6 +161,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                 }
             });
             if let Some(id) = open {
+                app.panes.details = None;
                 app.open(id);
             }
         });

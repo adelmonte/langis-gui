@@ -143,7 +143,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     };
     header(app, ui, &palette, &conversation);
-    composer(app, ui, &palette, &mut chat, &conversation);
+    if !crate::panes::message_request_bar(app, ui, &palette, &conversation) {
+        composer(app, ui, &palette, &mut chat, &conversation);
+    }
     let mut actions = Vec::new();
     egui::CentralPanel::no_frame().show(ui, |ui| {
         timeline(app, ui, &palette, &mut chat, &conversation, &mut actions);
@@ -187,11 +189,15 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
             ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1., palette.border));
             ui.horizontal_centered(|ui| {
                 ui.add_space(16.);
-                widgets::avatar(ui, &widgets::AvatarSpec::of(c), 32.);
+                if widgets::avatar(ui, &widgets::AvatarSpec::of(c), 32.).on_hover_text("Chat settings").clicked() {
+                    crate::details::open(app, c.id.clone());
+                }
                 ui.add_space(4.);
                 ui.vertical(|ui| {
                     ui.add_space(if c.kind == ConversationKind::Group || c.expire_timer > 0 { 8. } else { 16. });
-                    ui.label(RichText::new(&c.title).font(theme::semibold(14.)));
+                    if ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(14.))).sense(egui::Sense::click())).clicked() {
+                        crate::details::open(app, c.id.clone());
+                    }
                     let mut sub = Vec::new();
                     if c.kind == ConversationKind::Group {
                         sub.push(format!("{} members", c.members.len() + 1));
@@ -206,13 +212,29 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(12.);
-                    widgets::icon_button(ui, Icon::More, 20., "More");
+                    let more = widgets::icon_button(ui, Icon::More, 20., "More");
+                    egui::Popup::menu(&more).show(|ui| {
+                        if crate::panes::menu_row(ui, Some(Icon::Settings), "Chat settings", false).clicked() {
+                            crate::details::open(app, c.id.clone());
+                            ui.close();
+                        }
+                        crate::panes::chat_menu(app, ui, c);
+                    });
                     if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
+                        let group = c.kind == ConversationKind::Group;
                         if widgets::icon_button(ui, Icon::Phone, 20., "Start a voice call").clicked() {
-                            app.send(Command::StartCall { conversation: c.id.clone(), video: false });
+                            if group {
+                                crate::panes::open_lobby(app, c.id.clone(), false);
+                            } else {
+                                app.send(Command::StartCall { conversation: c.id.clone(), video: false });
+                            }
                         }
                         if widgets::icon_button(ui, Icon::Video, 20., "Start a video call").clicked() {
-                            app.send(Command::StartCall { conversation: c.id.clone(), video: true });
+                            if group {
+                                crate::panes::open_lobby(app, c.id.clone(), true);
+                            } else {
+                                app.send(Command::StartCall { conversation: c.id.clone(), video: true });
+                            }
                         }
                     }
                 });

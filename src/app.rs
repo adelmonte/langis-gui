@@ -46,6 +46,8 @@ pub enum Loaded {
     Me { name: Option<String>, photo: Option<String> },
     /// A desktop notification to show.
     Notify { title: String, body: String },
+    /// Anything else: applied to the app as it comes.
+    Apply(Box<dyn FnOnce(&mut App) + Send>),
 }
 
 /// A send held until the user answers the safety number prompt.
@@ -61,6 +63,8 @@ type Started = Result<(Backend, futures::channel::mpsc::UnboundedReceiver<Event>
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Chats,
+    Calls,
+    Stories,
     Settings,
 }
 
@@ -116,6 +120,8 @@ pub struct App {
     pub notify: (bool, String),
     /// Our profile name and photo, for the nav avatar and mentions of us.
     pub me: (String, Option<String>),
+    /// The calls and stories tabs, chat details, dialogs and menus.
+    pub panes: crate::panes::Panes,
 }
 
 impl App {
@@ -164,6 +170,7 @@ impl App {
             focused: true,
             notify: (true, "all".into()),
             me: (String::new(), None),
+            panes: Default::default(),
         };
         let dir = &app.data_dir;
         if app.demo || dir.join("database.key").exists() {
@@ -311,6 +318,7 @@ impl App {
                 self.load_notify_prefs();
                 self.load_me();
                 self.send(Command::LoadCallDevices);
+                crate::panes::on_ready(self);
             }
             Event::Unlinked => {
                 self.conversations.clear();
@@ -389,7 +397,7 @@ impl App {
                 self.load_notify_prefs();
             }
             Event::Error(text) => self.toast(text),
-            _ => {}
+            other => crate::panes::on_event(self, other),
         }
     }
 
@@ -442,6 +450,7 @@ impl App {
                     }
                 });
             }
+            Loaded::Apply(apply) => apply(self),
             Loaded::Theme(theme) => {
                 self.theme = theme.unwrap_or_else(|| "system".into());
                 self.apply_theme();
