@@ -112,6 +112,7 @@ enum Action {
     /// Show a photo or video in the viewer.
     Lightbox { message_id: i64, index: usize },
     Vote { message_id: i64, options: Vec<u32> },
+    Played(i64),
     PollVotes(i64),
     /// Their view-once message, its one viewing.
     ViewOnce(i64),
@@ -328,6 +329,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             Action::ViewOnce(message_id) => app.send(Command::OpenViewOnce { message_id }),
             Action::Vote { message_id, options } => app.send(Command::VotePoll { message_id, options }),
+            Action::Played(message_id) => app.send(Command::MarkViewed { message_id }),
             Action::PollVotes(message) => {
                 if let Some(chat) = app.chat.as_mut() {
                     chat.dialog = Some(crate::actions::Dialog::PollVotes { message });
@@ -897,6 +899,11 @@ fn message(
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., 44.));
         if file_row(ui, palette, a, rect, in_color, meta_color, ui.scope_id().with(("file", m.id, *index))) {
             match &a.local_path {
+                // A voice message played: viewed, as Desktop marks it.
+                Some(path) if a.voice && !outgoing => {
+                    actions.push(Action::Open(path.clone()));
+                    actions.push(Action::Played(m.id));
+                }
                 Some(path) => actions.push(Action::Open(path.clone())),
                 None => actions.push(Action::Fetch { message_id: m.id, index: *index }),
             }

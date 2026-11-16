@@ -350,3 +350,22 @@ fn screenshots_polls() {
     save(&mut harness, "poll-votes");
     finish(harness);
 }
+
+/// Recording a voice message (from a test tone, through ffmpeg).
+#[test]
+#[ignore = "renders with a GPU driver and needs ffmpeg; run explicitly"]
+fn screenshots_voice() {
+    // SAFETY: set before anything else reads it.
+    unsafe { std::env::set_var("LANGIS_GUI_VOICE_INPUT", "lavfi:sine=frequency=300:sample_rate=48000,volume=0.6") };
+    let mut harness = demo_harness();
+    open_chat(&mut harness, langis_store::ConversationKind::Direct);
+    harness.state_mut().chat.as_mut().unwrap().recording = Some(crate::voice::Recording::start().unwrap());
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        harness.step();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    save(&mut harness, "voice-recording");
+    harness.state_mut().chat.as_mut().unwrap().recording = None;
+    finish(harness);
+}
