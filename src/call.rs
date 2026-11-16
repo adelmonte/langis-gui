@@ -212,6 +212,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         if hang_up {
             app.send(Command::HangUp);
         }
+        crate::calls_tab::in_call_extras(app, ui, full);
     });
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
 }

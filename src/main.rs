@@ -3,21 +3,41 @@
 
 mod app;
 mod call;
+mod calls_tab;
 mod chat;
+mod details;
 mod emoji_picker;
 mod format;
 mod icons;
 mod notices;
+mod panes;
+mod profile;
 #[cfg(test)]
 mod screenshots;
 mod settings;
 mod sidebar;
 mod startup;
+mod stories;
 mod theme;
 mod view;
 mod widgets;
 
 use std::path::PathBuf;
+
+/// How many people's stories are unread, for the Stories tab's badge.
+pub fn stories_unread(app: &app::App) -> u32 {
+    let mut whose: Vec<String> = app
+        .panes
+        .stories
+        .list
+        .iter()
+        .filter(|s| !s.read && s.author.is_some())
+        .map(|s| s.group.as_ref().map(|g| g.to_string()).or_else(|| s.author.clone()).unwrap_or_default())
+        .collect();
+    whose.sort();
+    whose.dedup();
+    whose.len() as u32
+}
 
 #[derive(Default, Clone)]
 pub struct Args {

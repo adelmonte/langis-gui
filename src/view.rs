@@ -23,17 +23,23 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 crate::sidebar::chat_list(app, ui);
                 egui::CentralPanel::no_frame().show(ui, |ui| {
                     ui.painter().rect_filled(ui.max_rect(), 0, palette.background);
-                    if app.chat.is_some() {
+                    let details = app.panes.details.as_ref().is_some_and(|d| app.selected.as_ref() == Some(&d.conversation));
+                    if details {
+                        crate::details::show(app, ui);
+                    } else if app.chat.is_some() {
                         crate::chat::show(app, ui);
                     } else {
                         empty_chat(ui, &palette);
                     }
                 });
             }
+            Tab::Calls => crate::calls_tab::show(app, ui),
+            Tab::Stories => crate::stories::show(app, ui),
             Tab::Settings => crate::settings::show(app, ui),
         }
         crate::call::incoming_bar(app, ui);
     }
+    crate::panes::overlays(app, ui);
     safety_dialog(app, ui);
     share_picker(app, ui);
     toasts(app, ui);
