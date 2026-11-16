@@ -749,8 +749,12 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
     counts.truncate(3);
     let mut pills = Vec::new();
     for (emoji, count, mine) in &counts {
-        let label = if *count > 1 { format!("{emoji} {count}") } else { emoji.clone() };
-        let g = ui.painter().layout_no_wrap(label, theme::semibold(12.), palette.text);
+        let mut job = egui::text::LayoutJob::default();
+        append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::emoji(14.), color: palette.text, ..Default::default() });
+        if *count > 1 {
+            job.append(&format!(" {count}"), 0., egui::TextFormat { font_id: theme::semibold(11.), color: palette.text, valign: egui::Align::Center, ..Default::default() });
+        }
+        let g = ui.fonts_mut(|f| f.layout_job(job));
         let w = (g.size().x + 14.).max(28.);
         pills.push((g, w, *mine, emoji.clone()));
     }
@@ -802,6 +806,7 @@ pub struct Rich {
 
 pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, link_color: Color32, revealed: bool, size: f32) -> Rich {
     use langis_store::TextStyle;
+    let mention_fill = if color == Color32::WHITE { Color32::from_white_alpha(56) } else { Color32::from_black_alpha(20) };
     let body = m.long_text.as_ref().map(|_| m.body.as_str()).unwrap_or(&m.body);
     let links = find_links(body);
     let mut cuts = vec![0, body.len()];
@@ -838,6 +843,9 @@ pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, lin
         if active(TextStyle::Bold) || mention.is_some() {
             format.font_id = theme::semibold(size);
         }
+        if mention.is_some() {
+            format.background = mention_fill;
+        }
         if active(TextStyle::Italic) {
             format.font_id = theme::italic(size);
         }
@@ -864,10 +872,39 @@ pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, lin
         if let Some((_, url)) = link {
             out_links.push((chars..chars + n, url.clone()));
         }
-        job.append(&text, 0., format);
+        append_with_emoji(&mut job, &text, format);
         chars += n;
     }
     Rich { job, links: out_links, spoilers }
+}
+
+/// Appends `text`, with its emoji in the color emoji font: Inter has
+/// plain glyphs for some (❤ ☀ ✔) that would otherwise win.
+pub fn append_with_emoji(job: &mut egui::text::LayoutJob, text: &str, format: egui::TextFormat) {
+    let chars: Vec<char> = text.chars().collect();
+    let is_emoji = |i: usize| {
+        let c = chars[i] as u32;
+        let next_vs16 = chars.get(i + 1) == Some(&'\u{FE0F}');
+        c >= 0x1F000 || (next_vs16 && (c < 0x80 || (0x2000..=0x2BFF).contains(&c) || c == 0xA9 || c == 0xAE || (0x3000..=0x33FF).contains(&c)))
+    };
+    let mut run = String::new();
+    let mut run_emoji = false;
+    let emoji_format = egui::TextFormat { font_id: theme::emoji(format.font_id.size), ..format.clone() };
+    for i in 0..chars.len() {
+        let c = chars[i];
+        // Joiners, variation selectors and keycaps stay with what they follow.
+        let joins = matches!(c as u32, 0x200D | 0xFE0F | 0x20E3) || (run_emoji && (0x1F3FB..=0x1F3FF).contains(&(c as u32)));
+        let emoji = if joins { run_emoji } else { is_emoji(i) || (run_emoji && i > 0 && chars[i - 1] == '\u{200D}') };
+        if emoji != run_emoji && !run.is_empty() {
+            job.append(&run, 0., if run_emoji { emoji_format.clone() } else { format.clone() });
+            run.clear();
+        }
+        run_emoji = emoji;
+        run.push(c);
+    }
+    if !run.is_empty() {
+        job.append(&run, 0., if run_emoji { emoji_format } else { format });
+    }
 }
 
 /// Web links in `text`: http(s) URLs and bare `www.` hosts, as Desktop
@@ -937,6 +974,14 @@ fn composer(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 let has_text = !chat.composer.trim().is_empty();
                 let right_w = 2. * 32. + 8.;
                 let width = (ui.available_width() - right_w).max(100.);
+                let text_color = palette.text;
+                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+                    let mut job = egui::text::LayoutJob::default();
+                    let format = egui::TextFormat { font_id: theme::regular(14.), color: text_color, line_height: Some(20.), ..Default::default() };
+                    append_with_emoji(&mut job, text.as_str(), format);
+                    job.wrap.max_width = wrap;
+                    ui.fonts_mut(|f| f.layout_job(job))
+                };
                 let response = egui::Frame::new()
                     .fill(palette.bubble_in)
                     .corner_radius(CornerRadius::same(18))
@@ -950,6 +995,7 @@ fn composer(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                                 .desired_rows(1)
                                 .desired_width(width - 24.)
                                 .font(theme::regular(14.))
+                                .layouter(&mut layouter)
                                 .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
                                 .id(egui::Id::unique(("composer", &c.id.0))),
                         )

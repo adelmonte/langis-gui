@@ -52,7 +52,7 @@ impl Picker {
                                         if r.hovered() {
                                             ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                                         }
-                                        ui.painter().text(rect.center(), Align2::CENTER_CENTER, e.glyph, theme::regular(24.), palette.text);
+                                        ui.painter().text(rect.center(), Align2::CENTER_CENTER, e.glyph, theme::emoji(24.), palette.text);
                                         if r.on_hover_text(e.shortcode().map(|s| format!(":{s}:")).unwrap_or_default()).clicked() {
                                             picked = Some(e.glyph);
                                         }
@@ -69,7 +69,7 @@ impl Picker {
                                 if selected || r.hovered() {
                                     ui.painter().rect_filled(rect, CornerRadius::same(8), if selected { palette.fill_pressed } else { palette.fill });
                                 }
-                                ui.painter().text(rect.center(), Align2::CENTER_CENTER, group.icon(), theme::regular(18.), palette.text);
+                                ui.painter().text(rect.center(), Align2::CENTER_CENTER, group.icon(), theme::emoji(18.), palette.text);
                                 if r.on_hover_text(group.label()).clicked() {
                                     self.group = Some(group);
                                     self.query.clear();

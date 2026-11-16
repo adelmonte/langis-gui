@@ -139,6 +139,13 @@ pub fn name_color(service_id: &str, dark: bool) -> Color32 {
 pub const MEDIUM: &str = "Inter Medium";
 pub const SEMIBOLD: &str = "Inter SemiBold";
 pub const ITALIC: &str = "Inter Italic";
+/// Color emoji first, for emoji shown on their own (reactions, the picker)
+/// and emoji runs in text, where Inter's plain hearts and stars would win.
+pub const EMOJI: &str = "Emoji";
+
+pub fn emoji(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(EMOJI.into()))
+}
 
 pub fn medium(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(MEDIUM.into()))
@@ -179,6 +186,13 @@ pub fn fonts() -> FontDefinitions {
         (SEMIBOLD, include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
         (ITALIC, include_bytes!("../assets/fonts/Inter-Italic.ttf")),
     ];
+    let mut emoji_family: Vec<String> = Vec::new();
+    if fonts.font_data.contains_key("Color Emoji") {
+        emoji_family.push("Color Emoji".into());
+    }
+    emoji_family.push("Inter".into());
+    emoji_family.extend(fallbacks.iter().filter(|f| f.as_str() != "Color Emoji").cloned());
+    fonts.families.insert(FontFamily::Name(EMOJI.into()), emoji_family);
     for (name, bytes) in faces {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
         let mut family = vec![name.to_owned()];

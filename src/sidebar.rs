@@ -37,9 +37,7 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
                 }
                 ui.add_space(6.);
                 ui.vertical_centered(|ui| {
-                    let me = app.conversations.iter().find(|c| c.kind == langis_store::ConversationKind::NoteToSelf);
-                    let (name, photo) = me.map(|c| (c.title.as_str(), c.avatar_path.as_deref())).unwrap_or(("", None));
-                    let spec = widgets::AvatarSpec { name, color: 0, photo, group: false, note_to_self: false };
+                    let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
                     widgets::avatar(ui, &spec, 28.).on_hover_text("Profile");
                 });
             });
@@ -220,10 +218,10 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
         job.append("typing…", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
     } else if let Some(draft) = c.draft.as_deref().filter(|d| !d.is_empty()) {
         job.append("Draft: ", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
-        job.append(&crate::format::one_line(draft), 0., body(palette.text_secondary));
+        crate::chat::append_with_emoji(&mut job, &crate::format::one_line(draft), body(palette.text_secondary));
     } else {
         let preview = c.last_message_preview.as_deref().map(crate::format::one_line).unwrap_or_default();
-        job.append(&preview, 0., body(palette.text_secondary));
+        crate::chat::append_with_emoji(&mut job, &preview, body(palette.text_secondary));
     }
     job.wrap = egui::text::TextWrapping { max_width: (preview_right - left).max(20.), max_rows: 2, break_anywhere: false, overflow_character: Some('…') };
     let preview = ui.fonts_mut(|f| f.layout_job(job));

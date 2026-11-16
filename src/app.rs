@@ -42,6 +42,8 @@ pub enum Loaded {
     Theme(Option<String>),
     /// Our notification settings: shown at all, and what they show.
     NotifyPrefs { on: bool, content: String },
+    /// Our own profile name and photo.
+    Me { name: Option<String>, photo: Option<String> },
     /// A desktop notification to show.
     Notify { title: String, body: String },
 }
@@ -112,6 +114,8 @@ pub struct App {
     pub focused: bool,
     /// Desktop notifications on, and what they show ("all", "name", "none").
     pub notify: (bool, String),
+    /// Our profile name and photo, for the nav avatar and mentions of us.
+    pub me: (String, Option<String>),
 }
 
 impl App {
@@ -159,6 +163,7 @@ impl App {
             theme: "system".into(),
             focused: true,
             notify: (true, "all".into()),
+            me: (String::new(), None),
         };
         let dir = &app.data_dir;
         if app.demo || dir.join("database.key").exists() {
@@ -304,6 +309,7 @@ impl App {
                 self.phase = Phase::Ready;
                 self.reload_conversations();
                 self.load_notify_prefs();
+                self.load_me();
                 self.send(Command::LoadCallDevices);
             }
             Event::Unlinked => {
@@ -377,6 +383,7 @@ impl App {
                     Err(why) => self.toast(format!("Can't share your screen: {why}")),
                 }
             }
+            Event::OwnProfileChanged => self.load_me(),
             Event::AccountSettingsChanged => {
                 self.settings.stale = true;
                 self.load_notify_prefs();
@@ -391,6 +398,9 @@ impl App {
             Loaded::Conversations(list) => {
                 // Names for group authors and mentions come with the list.
                 for c in &list {
+                    if c.kind == langis_store::ConversationKind::NoteToSelf {
+                        continue;
+                    }
                     if let Some(sid) = c.id.as_direct() {
                         self.names.insert(sid.to_owned(), c.title.clone());
                     }
@@ -418,6 +428,12 @@ impl App {
             }
             Loaded::Settings(snapshot) => self.settings.snapshot = Some(*snapshot),
             Loaded::NotifyPrefs { on, content } => self.notify = (on, content),
+            Loaded::Me { name, photo } => {
+                if let Some(name) = &name {
+                    self.names.insert(self.aci.clone(), name.clone());
+                }
+                self.me = (name.unwrap_or_default(), photo);
+            }
             Loaded::Notify { title, body } => {
                 std::thread::spawn(move || {
                     let shown = notify_rust::Notification::new().appname("langis-gui").summary(&title).body(&body).show();
@@ -431,6 +447,14 @@ impl App {
                 self.apply_theme();
             }
         }
+    }
+
+    pub fn load_me(&self) {
+        let aci = self.aci.clone();
+        self.load(move |db| async move {
+            let profile = langis_core::own_profile(&db, &aci).await;
+            Some(Loaded::Me { name: profile.name(), photo: profile.photo.map(|p| p.to_string_lossy().into_owned()) })
+        });
     }
 
     pub fn load_notify_prefs(&self) {

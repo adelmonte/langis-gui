@@ -63,6 +63,27 @@ fn screenshots() {
         harness.state().ctx.set_theme(egui::ThemePreference::Light);
     }
 
+    // The composer with text and the emoji picker open.
+    if let Some(chat) = harness.state_mut().chat.as_mut() {
+        chat.composer = "On my way ❤️".into();
+        chat.emoji_open = true;
+    }
+    wait(&mut harness, "emoji picker", |_| true);
+    save(&mut harness, "emoji-picker");
+    if let Some(chat) = harness.state_mut().chat.as_mut() {
+        chat.composer.clear();
+        chat.emoji_open = false;
+    }
+
+    // The safety number prompt, for a made-up held send.
+    harness.state_mut().safety = Some(crate::app::SafetyPrompt {
+        people: vec![("demo-aci".into(), "Maya Chen".into())],
+        then: crate::app::PendingSend::Retry(0),
+    });
+    wait(&mut harness, "safety prompt", |_| true);
+    save(&mut harness, "safety-number");
+    harness.state_mut().safety = None;
+
     // Settings.
     harness.state_mut().tab = Tab::Settings;
     harness.state_mut().settings.section = crate::settings::Section::Calls;
@@ -108,4 +129,7 @@ fn screenshots() {
     save(&mut harness, "setup");
 
     harness.state_mut().shutdown();
+    // Tearing down the software renderer crashes under lavapipe; the
+    // pictures are written, so skip it.
+    std::mem::forget(harness);
 }
