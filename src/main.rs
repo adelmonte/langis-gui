@@ -14,6 +14,8 @@ mod panes;
 mod profile;
 #[cfg(test)]
 mod screenshots;
+#[cfg(test)]
+mod screenshots_b;
 mod settings;
 mod sidebar;
 mod startup;
