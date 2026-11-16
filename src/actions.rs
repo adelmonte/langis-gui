@@ -30,6 +30,7 @@ pub enum Dialog {
     Forward { messages: Vec<i64>, query: String, chosen: Vec<ConversationId> },
     Info { message: i64, details: Option<Details> },
     Poll(crate::polls::NewPoll),
+    PollVotes { message: i64 },
 }
 
 /// Desktop's `MessageDetail`: each recipient's state and the edits.
@@ -211,6 +212,13 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
                         out.push(Do::Open(Dialog::Pin { message: id, choice: 0 }));
                     }
                 }
+                if m.direction == Direction::Outgoing
+                    && m.poll.as_ref().is_some_and(|p| !p.ended)
+                    && !m.deleted
+                    && menu_row_with(ui, |ui, rect, color| crate::glyphs::poll(ui, rect, color), true, "End poll", false)
+                {
+                    out.push(Do::Command(Command::EndPoll { message_id: id }));
+                }
                 if menu_row(ui, Some(Icon::Info), "Info", false) {
                     out.push(Do::Open(Dialog::Info { message: id, details: None }));
                 }
@@ -391,6 +399,21 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 });
             });
             if modal.should_close() || !out.is_empty() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::PollVotes { message } => {
+            let Some(poll) = chat.iter().find(|m| m.id == *message).and_then(|m| m.poll.clone()) else { return vec![Do::Close] };
+            let modal = egui::Modal::new(egui::Id::unique("poll-votes")).frame(frame).show(ui.ctx(), |ui| {
+                crate::polls::votes_dialog(app, ui, &palette, &poll);
+                ui.add_space(12.);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::pill_button(ui, "Done", true).clicked() {
+                        out.push(Do::Close);
+                    }
+                });
+            });
+            if modal.should_close() {
                 out.push(Do::Close);
             }
         }

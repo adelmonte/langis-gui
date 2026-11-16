@@ -111,6 +111,8 @@ enum Action {
     JumpToQuote { author: Option<String>, sent_at: i64 },
     /// Show a photo or video in the viewer.
     Lightbox { message_id: i64, index: usize },
+    Vote { message_id: i64, options: Vec<u32> },
+    PollVotes(i64),
     /// Their view-once message, its one viewing.
     ViewOnce(i64),
     FetchLongText(i64),
@@ -325,6 +327,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::ViewOnce(message_id) => app.send(Command::OpenViewOnce { message_id }),
+            Action::Vote { message_id, options } => app.send(Command::VotePoll { message_id, options }),
+            Action::PollVotes(message) => {
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.dialog = Some(crate::actions::Dialog::PollVotes { message });
+                }
+            }
             Action::FetchLongText(message_id) => app.send(Command::FetchLongText { message_id }),
             Action::JumpToQuote { author, sent_at } => {
                 let here = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.sent_at == sent_at && m.author == author).map(|m| m.id));
@@ -748,7 +756,8 @@ fn message(
         .collect();
     let files: Vec<(usize, &langis_store::AttachmentMeta)> =
         m.attachments.iter().enumerate().filter(|(_, a)| !a.sticker && !a.content_type.starts_with("image/") && !a.content_type.starts_with("video/")).collect();
-    let body_text = if m.deleted { String::new() } else { m.body.clone() };
+    // A poll's body is its question, drawn by the poll.
+    let body_text = if m.deleted || m.poll.is_some() { String::new() } else { m.body.clone() };
     let jumbo = !m.deleted && m.attachments.is_empty() && m.quote.is_none() && langis_emoji::jumbo_count(&body_text).is_some_and(|n| n <= 5);
 
     let rich = if m.deleted {
@@ -764,6 +773,7 @@ fn message(
     };
 
     let inner_max = max_bubble - 24.;
+    let poll_view = m.poll.as_ref().filter(|_| !m.deleted).map(|p| crate::polls::layout(ui, p, inner_max.min(300.), in_color));
     let galley = rich.as_ref().map(|r| {
         let mut job = r.job.clone();
         job.wrap.max_width = inner_max;
@@ -809,7 +819,7 @@ fn message(
     if let Some(n) = &name_galley {
         content_w = content_w.max(n.size().x.min(inner_max));
     }
-    if m.quote.is_some() || m.link_preview.is_some() || !files.is_empty() {
+    if m.quote.is_some() || m.link_preview.is_some() || !files.is_empty() || poll_view.is_some() {
         content_w = content_w.max(inner_max.min(300.));
     }
     let bubble_w = (content_w + pad.x * 2.).max(media_w).min(max_bubble).max(if jumbo { 0. } else { 48. });
@@ -820,6 +830,7 @@ fn message(
     let media_h: f32 = images.iter().map(|(_, a)| media_size(a, bubble_w).y + 2.).sum();
     let files_h = files.len() as f32 * 48.;
     let preview_h = if m.link_preview.is_some() { 84. } else { 0. };
+    let poll_h = poll_view.as_ref().map(|p| p.height).unwrap_or(0.);
     // Desktop's line under a long message's start, while the rest isn't here.
     let long_line = m.long_text.as_ref().filter(|_| !m.deleted).map(|l| match l.state {
         langis_store::LongTextState::Downloading => ("Downloading the rest…", false),
@@ -831,7 +842,7 @@ fn message(
     let meta_h = if show_meta && !meta_inline { 16. } else { 0. };
     let media_only = !images.is_empty() && galley.is_none() && m.quote.is_none() && name_galley.is_none() && files.is_empty();
     let top_pad = if media_only || (images.first().is_some() && name_galley.is_none() && m.quote.is_none()) { 0. } else { pad.y };
-    let text_block = name_h + quote_h + files_h + preview_h + text_h + meta_h;
+    let text_block = name_h + quote_h + files_h + preview_h + poll_h + text_h + meta_h;
     let bubble_h = top_pad + media_h + if media_only && meta_h > 0. { 0. } else if text_block > 0. { text_block + pad.y + if media_h > 0. { pad.y } else { 0. } } else { 0. };
     let bubble_h = bubble_h.max(if media_only { media_h } else { 36. });
 
@@ -898,6 +909,15 @@ fn message(
             actions.push(Action::Open(p.url.clone()));
         }
         y += preview_h;
+    }
+    if let (Some(view), Some(poll)) = (poll_view, m.poll.as_ref()) {
+        let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., poll_h));
+        match crate::polls::paint(ui, view, poll, m.id, rect, outgoing, palette) {
+            Some(Some(options)) => actions.push(Action::Vote { message_id: m.id, options }),
+            Some(None) => actions.push(Action::PollVotes(m.id)),
+            None => {}
+        }
+        y += poll_h;
     }
     let mut revealed_now = None;
     if let (Some(g), Some(rich)) = (galley, rich.as_ref()) {

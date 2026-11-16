@@ -328,3 +328,25 @@ fn screenshots_composer() {
     save(&mut harness, "poll-dialog");
     finish(harness);
 }
+
+/// A poll: voted in, and who voted for what.
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_polls() {
+    let mut harness = demo_harness();
+    let chat = harness.state().conversations.iter().find(|c| c.title.contains("Maple")).map(|c| c.id.clone()).expect("the demo's poll chat");
+    harness.state_mut().open(chat.clone());
+    wait(&mut harness, "messages", |app| app.chat.as_ref().is_some_and(|c| c.loaded));
+    let poll = message_id(&harness, |m| m.poll.is_some());
+    harness.state_mut().open_at(chat, poll);
+    wait(&mut harness, "the poll", |app| app.chat.as_ref().is_some_and(|c| c.scroll_target.is_none()));
+    harness.state().send(langis_core::Command::VotePoll { message_id: poll, options: vec![1] });
+    wait(&mut harness, "our vote", |app| {
+        app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == poll)).and_then(|m| m.poll.as_ref()).is_some_and(|p| p.votes.iter().any(|v| v.author.is_none()))
+    });
+    save(&mut harness, "poll");
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(crate::actions::Dialog::PollVotes { message: poll });
+    wait(&mut harness, "votes", |_| true);
+    save(&mut harness, "poll-votes");
+    finish(harness);
+}

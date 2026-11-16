@@ -670,6 +670,7 @@ pub fn input_id(conversation: &langis_store::ConversationId) -> egui::Id {
 }
 
 /// Selects chars `from..to` in the composer and focuses it.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn select(ctx: &egui::Context, id: egui::Id, from: usize, to: usize) {
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(egui::text::CharIndex(from)), CCursor::new(egui::text::CharIndex(to)))));
