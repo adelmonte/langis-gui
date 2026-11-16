@@ -133,3 +133,83 @@ fn screenshots() {
     // pictures are written, so skip it.
     std::mem::forget(harness);
 }
+
+fn demo_harness() -> Harness<'static, App> {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1200., 800.))
+        .with_theme(egui::Theme::Light)
+        .with_max_steps(10_000)
+        .wgpu()
+        .build_eframe(|cc| App::new(cc, crate::Args { demo: true, data_dir: None }));
+    wait(&mut harness, "the demo account", |app| matches!(app.phase, Phase::Ready) && !app.conversations.is_empty());
+    harness.state().ctx.set_theme(egui::ThemePreference::Light);
+    harness
+}
+
+fn open_chat(harness: &mut Harness<'_, App>, kind: langis_store::ConversationKind) -> langis_store::ConversationId {
+    let id = harness.state().conversations.iter().find(|c| c.kind == kind).map(|c| c.id.clone()).unwrap();
+    harness.state_mut().open(id.clone());
+    wait(harness, "messages", |app| app.chat.as_ref().is_some_and(|c| c.loaded));
+    id
+}
+
+/// The last message matching `pick` in the open chat.
+fn message_id(harness: &Harness<'_, App>, pick: impl Fn(&langis_store::Message) -> bool) -> i64 {
+    harness.state().chat.as_ref().unwrap().messages.iter().rev().find(|m| pick(m)).map(|m| m.id).expect("a matching message")
+}
+
+fn finish(mut harness: Harness<'_, App>) {
+    harness.state_mut().shutdown();
+    std::mem::forget(harness);
+}
+
+/// Message actions: the menu, reaction bar, dialogs and pinned bar.
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_message_actions() {
+    use crate::actions::{Dialog, Popup};
+    let mut harness = demo_harness();
+    open_chat(&mut harness, langis_store::ConversationKind::Direct);
+    let theirs = message_id(&harness, |m| m.direction == langis_store::Direction::Incoming && m.notice.is_none() && !m.body.is_empty());
+    let ours = message_id(&harness, |m| m.direction == langis_store::Direction::Outgoing && m.notice.is_none() && !m.deleted);
+
+    harness.state_mut().chat.as_mut().unwrap().popup = Some(Popup::Menu { message: ours, at: egui::pos2(700., 420.) });
+    wait(&mut harness, "menu", |_| true);
+    save(&mut harness, "menu");
+
+    harness.state_mut().chat.as_mut().unwrap().popup = Some(Popup::Reactions { message: theirs, at: egui::pos2(420., 500.), full: false, picker: Default::default() });
+    wait(&mut harness, "reaction bar", |_| true);
+    save(&mut harness, "reaction-bar");
+    harness.state_mut().chat.as_mut().unwrap().popup = None;
+
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Delete { message: ours });
+    wait(&mut harness, "delete dialog", |_| true);
+    save(&mut harness, "delete-dialog");
+
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Pin { message: theirs, choice: 1 });
+    wait(&mut harness, "pin dialog", |_| true);
+    save(&mut harness, "pin-dialog");
+
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Info { message: ours, details: None });
+    crate::actions::load_details(harness.state(), ours);
+    wait(&mut harness, "info dialog", |app| {
+        matches!(app.chat.as_ref().and_then(|c| c.dialog.as_ref()), Some(Dialog::Info { details: Some(_), .. }))
+    });
+    save(&mut harness, "info-dialog");
+
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Forward { messages: vec![theirs], query: String::new(), chosen: Vec::new() });
+    wait(&mut harness, "forward dialog", |_| true);
+    save(&mut harness, "forward-dialog");
+    harness.state_mut().chat.as_mut().unwrap().dialog = None;
+
+    harness.state().send(langis_core::Command::PinMessage { message_id: theirs, duration: None });
+    wait(&mut harness, "pinned bar", |app| app.chat.as_ref().is_some_and(|c| !c.pinned.is_empty()));
+    let ours_msg = harness.state().chat.as_ref().unwrap().messages.iter().find(|m| m.id == ours).cloned().unwrap();
+    let app = harness.state_mut();
+    let mut chat = app.chat.take().unwrap();
+    chat.start_editing(app, ours_msg);
+    app.chat = Some(chat);
+    wait(&mut harness, "editing", |_| true);
+    save(&mut harness, "pinned-and-editing");
+    finish(harness);
+}

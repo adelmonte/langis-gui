@@ -46,6 +46,10 @@ pub enum Loaded {
     Me { name: Option<String>, photo: Option<String> },
     /// A desktop notification to show.
     Notify { title: String, body: String },
+    /// For the open chat.
+    Chat(crate::chat::ChatLoaded),
+    /// The reaction bar's emoji.
+    Reactions(Vec<String>),
 }
 
 /// A send held until the user answers the safety number prompt.
@@ -116,6 +120,8 @@ pub struct App {
     pub notify: (bool, String),
     /// Our profile name and photo, for the nav avatar and mentions of us.
     pub me: (String, Option<String>),
+    /// The reaction bar's emoji (Desktop's preferred reactions).
+    pub reactions: Vec<String>,
 }
 
 impl App {
@@ -164,6 +170,7 @@ impl App {
             focused: true,
             notify: (true, "all".into()),
             me: (String::new(), None),
+            reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
         };
         let dir = &app.data_dir;
         if app.demo || dir.join("database.key").exists() {
@@ -310,6 +317,7 @@ impl App {
                 self.reload_conversations();
                 self.load_notify_prefs();
                 self.load_me();
+                self.load_reactions();
                 self.send(Command::LoadCallDevices);
             }
             Event::Unlinked => {
@@ -387,6 +395,12 @@ impl App {
             Event::AccountSettingsChanged => {
                 self.settings.stale = true;
                 self.load_notify_prefs();
+                self.load_reactions();
+            }
+            Event::PinsChanged(conversation) => {
+                if self.selected.as_ref() == Some(&conversation) {
+                    self.load_pinned(conversation);
+                }
             }
             Event::Error(text) => self.toast(text),
             _ => {}
@@ -442,6 +456,13 @@ impl App {
                     }
                 });
             }
+            Loaded::Chat(crate::chat::ChatLoaded::Jump { conversation, message_id }) => self.open_at(conversation, message_id),
+            Loaded::Chat(loaded) => {
+                if let Some(chat) = self.chat.as_mut() {
+                    chat.on_loaded(loaded);
+                }
+            }
+            Loaded::Reactions(list) => self.reactions = list,
             Loaded::Theme(theme) => {
                 self.theme = theme.unwrap_or_else(|| "system".into());
                 self.apply_theme();
@@ -454,6 +475,33 @@ impl App {
         self.load(move |db| async move {
             let profile = langis_core::own_profile(&db, &aci).await;
             Some(Loaded::Me { name: profile.name(), photo: profile.photo.map(|p| p.to_string_lossy().into_owned()) })
+        });
+    }
+
+    /// The reaction bar's emoji: the account's, with Desktop's defaults
+    /// for any missing.
+    pub fn load_reactions(&self) {
+        self.load(|db| async move {
+            let saved: Vec<String> = db
+                .setting(langis_core::SETTING_PREFERRED_REACTIONS)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
+            let list = crate::actions::DEFAULT_REACTIONS
+                .iter()
+                .enumerate()
+                .map(|(i, d)| saved.get(i).filter(|e| !e.is_empty()).cloned().unwrap_or_else(|| d.to_string()))
+                .collect();
+            Some(Loaded::Reactions(list))
+        });
+    }
+
+    pub fn load_pinned(&self, conversation: ConversationId) {
+        self.load(move |db| async move {
+            let messages = db.pinned_messages(&conversation).await.unwrap_or_default();
+            Some(Loaded::Chat(crate::chat::ChatLoaded::Pinned { conversation, messages }))
         });
     }
 
@@ -531,7 +579,28 @@ impl App {
         if !members.is_empty() {
             self.load(move |db| async move { db.display_names(&members).await.ok().map(Loaded::Names) });
         }
+        self.load_pinned(id.clone());
         self.send(Command::MarkRead { conversation: id });
+    }
+
+    /// Opens a chat at one of its messages (a search result, a pin, a
+    /// quote): the messages around it, scrolled to and flashed.
+    pub fn open_at(&mut self, conversation: ConversationId, message_id: i64) {
+        let loaded_here = self.chat.as_ref().is_some_and(|c| c.id == conversation && c.messages.iter().any(|m| m.id == message_id));
+        if loaded_here {
+            if let Some(chat) = self.chat.as_mut() {
+                chat.scroll_target = Some(message_id);
+            }
+            return;
+        }
+        if self.selected.as_ref() != Some(&conversation) {
+            self.open(conversation.clone());
+        }
+        let around = crate::chat::AROUND;
+        self.load(move |db| async move {
+            let messages = db.messages_around(&conversation, message_id, around, around).await.ok()?;
+            Some(Loaded::Chat(crate::chat::ChatLoaded::Around { conversation, target: message_id, messages }))
+        });
     }
 
     pub fn load_older(&mut self) {

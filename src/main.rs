@@ -1,11 +1,13 @@
 //! langis-gui: a desktop Signal client for Linux, drawn with egui on top of
 //! the langis library, laid out like Signal Desktop.
 
+mod actions;
 mod app;
 mod call;
 mod chat;
 mod emoji_picker;
 mod format;
+mod glyphs;
 mod icons;
 mod notices;
 #[cfg(test)]

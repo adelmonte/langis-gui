@@ -16,6 +16,9 @@ use crate::widgets;
 /// Messages per page of the timeline.
 pub const PAGE: u32 = 60;
 
+/// Messages each side of one jumped to.
+pub const AROUND: u32 = 30;
+
 /// Messages from one person this close together are drawn as one group
 /// (Desktop's `areMessagesInSameGroup`: three minutes).
 const GROUP_GAP_MS: i64 = 3 * 60 * 1000;
@@ -50,6 +53,41 @@ pub struct ChatView {
     want_older: bool,
     /// Where to scroll to on the next frame.
     pending_offset: Option<f32>,
+    /// The context menu or reaction bar, if open.
+    pub popup: Option<crate::actions::Popup>,
+    pub dialog: Option<crate::actions::Dialog>,
+    /// Pinned messages, newest pin first.
+    pub pinned: Vec<Message>,
+    /// Which pin the pinned bar shows.
+    pinned_index: usize,
+    /// Our message being edited in the composer.
+    pub editing: Option<i64>,
+    /// The newest messages are loaded (false after jumping back in time,
+    /// until scrolling down reaches them).
+    pub at_end: bool,
+    loading_newer: bool,
+    want_newer: bool,
+    /// A message to bring into view, and one to flash once it is.
+    pub scroll_target: Option<i64>,
+    highlight: Option<(i64, Instant)>,
+    /// Scrolled up from the bottom (for the jump-down button).
+    scrolled_up: bool,
+    /// Reload the newest page (the jump-down button, away from the end).
+    want_latest: bool,
+    /// A message to load around and jump to, once the frame is drawn.
+    pending_jump: Option<i64>,
+}
+
+/// Store reads for the open chat.
+pub enum ChatLoaded {
+    Details { message: i64, details: crate::actions::Details },
+    Pinned { conversation: ConversationId, messages: Vec<Message> },
+    /// Messages around `target`, after a jump to it.
+    Around { conversation: ConversationId, target: i64, messages: Vec<Message> },
+    /// The page after the newest loaded.
+    Newer { conversation: ConversationId, messages: Vec<Message> },
+    /// A message found to jump to (a quote's original).
+    Jump { conversation: ConversationId, message_id: i64 },
 }
 
 /// What the timeline asked for, applied after it's drawn.
@@ -59,6 +97,12 @@ enum Action {
     React { message_id: i64, emoji: String, remove: bool },
     Reply(i64),
     Open(String),
+    /// The context menu for a message, at a point.
+    Menu { message_id: i64, at: Pos2 },
+    /// The reaction bar for a message, at a point.
+    ReactBar { message_id: i64, at: Pos2 },
+    /// Scroll to the message a quote quotes.
+    JumpToQuote { author: Option<String>, sent_at: i64 },
 }
 
 impl ChatView {
@@ -82,6 +126,63 @@ impl ChatView {
             draft_at_open: draft,
             want_older: false,
             pending_offset: None,
+            popup: None,
+            dialog: None,
+            pinned: Vec::new(),
+            pinned_index: 0,
+            editing: None,
+            at_end: true,
+            loading_newer: false,
+            want_newer: false,
+            scroll_target: None,
+            highlight: None,
+            scrolled_up: false,
+            want_latest: false,
+            pending_jump: None,
+        }
+    }
+
+    pub fn on_loaded(&mut self, loaded: ChatLoaded) {
+        match loaded {
+            ChatLoaded::Details { message, details } => {
+                if let Some(crate::actions::Dialog::Info { message: open, details: slot }) = self.dialog.as_mut()
+                    && *open == message
+                {
+                    *slot = Some(details);
+                }
+            }
+            ChatLoaded::Pinned { conversation, messages } => {
+                if conversation == self.id {
+                    self.pinned = messages;
+                    self.pinned_index = self.pinned_index.min(self.pinned.len().saturating_sub(1));
+                }
+            }
+            ChatLoaded::Around { conversation, target, messages } => {
+                if conversation != self.id || messages.is_empty() {
+                    return;
+                }
+                let before = messages.iter().position(|m| m.id == target).unwrap_or(0);
+                let after = messages.len() - before - 1;
+                self.at_start = (before as u32) < AROUND;
+                self.at_end = (after as u32) < AROUND;
+                self.messages = messages;
+                self.loaded = true;
+                self.loading_older = false;
+                self.loading_newer = false;
+                self.scroll_to_bottom = 0;
+                self.scroll_target = Some(target);
+            }
+            // Handled by the app (it needs to load around the message).
+            ChatLoaded::Jump { .. } => {}
+            ChatLoaded::Newer { conversation, mut messages } => {
+                if conversation != self.id {
+                    return;
+                }
+                self.loading_newer = false;
+                self.at_end = (messages.len() as u32) < PAGE;
+                messages.retain(|m| !self.messages.iter().any(|have| have.id == m.id));
+                self.messages.append(&mut messages);
+            }
         }
     }
 
@@ -108,8 +209,11 @@ impl ChatView {
 
     /// A message that's new or changed.
     pub fn upsert(&mut self, message: Message) {
+        // Past what's loaded: it comes with the next page down.
+        let beyond = !self.at_end && self.messages.last().is_some_and(|l| (message.sent_at, message.id) > (l.sent_at, l.id));
         match self.messages.iter_mut().find(|m| m.id == message.id) {
             Some(have) => *have = message,
+            None if beyond => {}
             None => {
                 let at = self.messages.partition_point(|m| (m.sent_at, m.id) <= (message.sent_at, message.id));
                 if message.direction == Direction::Outgoing {
@@ -118,6 +222,13 @@ impl ChatView {
                 self.messages.insert(at, message);
             }
         }
+    }
+
+    /// Puts our message in the composer to edit (Desktop's edit mode).
+    pub fn start_editing(&mut self, app: &App, m: Message) {
+        self.composer = crate::actions::plain_text(app, &m);
+        self.editing = Some(m.id);
+        self.quote = None;
     }
 
     /// Keeps the composer's text as the chat's draft (a frontend's own
@@ -143,6 +254,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     };
     header(app, ui, &palette, &conversation);
+    pinned_bar(app, ui, &palette, &mut chat);
     composer(app, ui, &palette, &mut chat, &conversation);
     let mut actions = Vec::new();
     egui::CentralPanel::no_frame().show(ui, |ui| {
@@ -150,9 +262,26 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     let id = chat.id.clone();
     let older = std::mem::take(&mut chat.want_older);
+    let newer = std::mem::take(&mut chat.want_newer);
+    let latest = std::mem::take(&mut chat.want_latest);
+    let jump = chat.pending_jump.take();
+    if newer && let Some(last) = chat.messages.last().map(|m| m.id) {
+        chat.loading_newer = true;
+        let conversation = id.clone();
+        app.load(move |db| async move {
+            let messages = db.messages_after(&conversation, last, PAGE).await.ok()?;
+            Some(crate::app::Loaded::Chat(ChatLoaded::Newer { conversation, messages }))
+        });
+    }
     app.chat = Some(chat);
     if older {
         app.load_older();
+    }
+    if latest {
+        app.open(id.clone());
+    }
+    if let Some(message_id) = jump {
+        app.open_at(id.clone(), message_id);
     }
     for action in actions {
         match action {
@@ -165,7 +294,120 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::Open(path) => open_externally(&path),
+            Action::Menu { message_id, at } => {
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.popup = Some(crate::actions::Popup::Menu { message: message_id, at });
+                }
+            }
+            Action::JumpToQuote { author, sent_at } => {
+                let here = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.sent_at == sent_at && m.author == author).map(|m| m.id));
+                match here {
+                    Some(message_id) => app.open_at(id.clone(), message_id),
+                    None => {
+                        let conversation = id.clone();
+                        app.load(move |db| async move {
+                            let m = db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten()?;
+                            Some(crate::app::Loaded::Chat(ChatLoaded::Jump { conversation, message_id: m.id }))
+                        });
+                    }
+                }
+            }
+            Action::ReactBar { message_id, at } => {
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.popup = Some(crate::actions::Popup::Reactions { message: message_id, at, full: false, picker: Default::default() });
+                }
+            }
         }
+    }
+    popups(app, ui);
+}
+
+/// The open chat's context menu, reaction bar and dialogs.
+fn popups(app: &mut App, ui: &mut Ui) {
+    use crate::actions::{Do, Popup};
+    let Some(mut chat) = app.chat.take() else { return };
+    let Some(conversation) = app.conversation(&chat.id).cloned() else {
+        app.chat = Some(chat);
+        return;
+    };
+    let mut todo = Vec::new();
+    let pinned: Vec<i64> = chat.pinned.iter().map(|m| m.id).collect();
+    let mut popup_at: Option<Pos2> = None;
+    if let Some(popup) = chat.popup.as_mut() {
+        popup_at = Some(match popup {
+            Popup::Menu { at, .. } | Popup::Reactions { at, .. } => *at,
+        });
+        for d in crate::actions::show_popup(app, ui.ctx(), popup, &chat.messages, &pinned, &conversation) {
+            todo.push((true, d));
+        }
+    }
+    if let Some(dialog) = chat.dialog.as_mut() {
+        for d in crate::actions::show_dialog(app, ui, dialog, &chat.messages, &conversation) {
+            todo.push((false, d));
+        }
+    }
+    // The menu's "React" opens the reaction bar in its place.
+    let mut replaced = false;
+    for (from_popup, d) in todo {
+        match d {
+            Do::Close => {
+                if from_popup {
+                    if !replaced {
+                        chat.popup = None;
+                    }
+                } else {
+                    chat.dialog = None;
+                }
+            }
+            Do::Reply(id) => {
+                chat.quote = Some(id);
+                chat.editing = None;
+            }
+            Do::Edit(id) => {
+                if let Some(m) = chat.messages.iter().find(|m| m.id == id) {
+                    chat.start_editing(app, m.clone());
+                }
+            }
+            Do::Command(command) => app.send(command),
+            Do::Copy(text) => {
+                ui.ctx().copy_text(text);
+                app.toast("Copied to clipboard");
+            }
+            Do::Save(id, index) => {
+                if let Some(m) = chat.messages.iter().find(|m| m.id == id).cloned() {
+                    crate::actions::save_attachment(app, &m, index);
+                }
+            }
+            Do::ReactBar(id) => {
+                let at = popup_at.unwrap_or_default();
+                chat.popup = Some(Popup::Reactions { message: id, at, full: false, picker: Default::default() });
+                replaced = true;
+            }
+            Do::Open(dialog) => {
+                if let crate::actions::Dialog::Info { message, .. } = &dialog {
+                    crate::actions::load_details(app, *message);
+                }
+                chat.dialog = Some(dialog);
+            }
+        }
+    }
+    app.chat = Some(chat);
+}
+
+/// A file extension for a content type, for naming saved attachments.
+pub fn extension_for(content_type: &str) -> &'static str {
+    match content_type {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "video/mp4" => "mp4",
+        "video/quicktime" => "mov",
+        "audio/aac" => "m4a",
+        "audio/mpeg" => "mp3",
+        "audio/ogg" => "ogg",
+        "application/pdf" => "pdf",
+        _ => "bin",
     }
 }
 
@@ -220,10 +462,76 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
         });
 }
 
+/// Desktop's `PinnedMessagesBar`: the pinned message under the header;
+/// clicking shows it, and with several, the next click shows the next.
+fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
+    if chat.pinned.is_empty() {
+        return;
+    }
+    let index = chat.pinned_index.min(chat.pinned.len() - 1);
+    let m = chat.pinned[index].clone();
+    let mut jump = false;
+    let mut unpin = false;
+    egui::Panel::top("pinned-bar")
+        .exact_size(48.)
+        .show_separator_line(false)
+        .frame(egui::Frame::new().fill(palette.background))
+        .show(ui, |ui| {
+            let rect = ui.max_rect();
+            ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1., palette.border));
+            let r = ui.interact(rect, ui.scope_id().with("pinned-bar"), Sense::click());
+            if r.hovered() {
+                ui.painter().rect_filled(rect, 0, palette.fill);
+            }
+            // Which pin of how many: Desktop's stacked marks on the left.
+            let n = chat.pinned.len().min(3);
+            for i in 0..n {
+                let h = (rect.height() - 16.) / n as f32;
+                let mark = Rect::from_min_size(Pos2::new(rect.left() + 16., rect.top() + 8. + i as f32 * h), Vec2::new(2., h - 2.));
+                let on = i == index.min(n - 1);
+                ui.painter().rect_filled(mark, 1, if on { palette.text } else { palette.text_secondary.gamma_multiply(0.4) });
+            }
+            crate::glyphs::pin(ui, Rect::from_center_size(Pos2::new(rect.left() + 38., rect.center().y), Vec2::splat(18.)), palette.text);
+            let who = match &m.author {
+                None => "You".to_owned(),
+                Some(a) => app.name(a),
+            };
+            ui.painter().text(Pos2::new(rect.left() + 56., rect.top() + 8.), Align2::LEFT_TOP, who, theme::semibold(13.), palette.text);
+            let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { crate::format::one_line(&m.body) };
+            let mut job = egui::text::LayoutJob::simple_singleline(text, theme::regular(13.), palette.text_secondary);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 120.);
+            let g = ui.fonts_mut(|f| f.layout_job(job));
+            ui.painter().galley(Pos2::new(rect.left() + 56., rect.top() + 26.), g, palette.text_secondary);
+            let close = Rect::from_center_size(Pos2::new(rect.right() - 28., rect.center().y), Vec2::splat(28.));
+            let cr = ui.interact(close, ui.scope_id().with("unpin"), Sense::click()).on_hover_text("Unpin");
+            if cr.hovered() {
+                ui.painter().rect_filled(close, CornerRadius::same(8), palette.fill_pressed);
+            }
+            Icon::XCompact.paint(ui, close, 16., palette.text_secondary);
+            if cr.clicked() {
+                unpin = true;
+            } else if r.clicked() {
+                jump = true;
+            }
+        });
+    if unpin {
+        app.send(Command::UnpinMessage { message_id: m.id });
+    } else if jump {
+        chat.pinned_index = (index + 1) % chat.pinned.len();
+        let id = chat.id.clone();
+        let _ = id;
+        if chat.messages.iter().any(|x| x.id == m.id) {
+            chat.scroll_target = Some(m.id);
+        } else {
+            chat.pending_jump = Some(m.id);
+        }
+    }
+}
+
 fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_store::Conversation, actions: &mut Vec<Action>) {
     let group = c.kind == ConversationKind::Group;
     let typing: Vec<String> = app.typing.get(&chat.id).map(|t| t.iter().cloned().collect()).unwrap_or_default();
-    let mut scroll = egui::ScrollArea::vertical().id_salt(("timeline", &chat.id.0)).auto_shrink(false).stick_to_bottom(true);
+    let mut scroll = egui::ScrollArea::vertical().id_salt(("timeline", &chat.id.0)).auto_shrink(false).stick_to_bottom(chat.at_end);
     let to_bottom = chat.scroll_to_bottom > 0;
     if to_bottom {
         if chat.loaded {
@@ -242,8 +550,12 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         } else if !chat.loaded || chat.loading_older {
             ui.vertical_centered(|ui| ui.spinner());
         }
-        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id };
+        let menu_for = chat.popup.as_ref().map(|p| match p {
+            crate::actions::Popup::Menu { message, .. } | crate::actions::Popup::Reactions { message, .. } => *message,
+        });
+        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for };
         let messages = &chat.messages;
+        let mut reached = None;
         for (i, m) in messages.iter().enumerate() {
             let prev = i.checked_sub(1).map(|p| &messages[p]);
             let next = messages.get(i + 1);
@@ -251,11 +563,35 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 date_header(ui, palette, m.sent_at);
             }
             let revealed = chat.revealed.contains(&m.id);
+            let top = ui.cursor().top();
             if let Some(reveal) = message(ui, &ctx, m, prev, next, revealed, actions) {
                 if reveal {
                     chat.revealed.insert(m.id);
                 }
             }
+            let area = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+            if chat.scroll_target == Some(m.id) {
+                ui.scroll_to_rect(area, Some(egui::Align::Center));
+                reached = Some(m.id);
+            }
+            if let Some((id, since)) = chat.highlight
+                && id == m.id
+            {
+                // Desktop's flash on a message jumped to.
+                let t = since.elapsed().as_secs_f32();
+                if t < 2. {
+                    let alpha = ((1. - t / 2.) * 60.) as u8;
+                    ui.painter().rect_filled(area, 0, palette.accent.gamma_multiply_u8(alpha));
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+        if let Some(id) = reached {
+            chat.scroll_target = None;
+            chat.highlight = Some((id, Instant::now()));
+        }
+        if !chat.at_end && chat.loaded {
+            ui.vertical_centered(|ui| ui.spinner());
         }
         for author in &typing {
             typing_bubble(ui, &ctx, author);
@@ -274,6 +610,26 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
     if output.state.clamped_offset().y < 80. && chat.loaded && !chat.at_start && !chat.loading_older && !chat.messages.is_empty() {
         chat.want_older = true;
     }
+    let from_bottom = output.content_size.y - output.inner_rect.height() - output.state.clamped_offset().y;
+    if from_bottom < 80. && chat.loaded && !chat.at_end && !chat.loading_newer && chat.scroll_target.is_none() {
+        chat.want_newer = true;
+    }
+    chat.scrolled_up = from_bottom > 400. || !chat.at_end;
+    // Desktop's "scroll to bottom" button.
+    if chat.scrolled_up {
+        let rect = Rect::from_min_size(output.inner_rect.right_bottom() - Vec2::new(56., 56.), Vec2::splat(40.));
+        let r = ui.interact(rect, ui.scope_id().with("to-bottom"), Sense::click());
+        ui.painter().circle_filled(rect.center(), 20., palette.popover);
+        ui.painter().circle_stroke(rect.center(), 20., Stroke::new(1., palette.border));
+        Icon::ChevronShallowDown.paint(ui, rect, 20., palette.text);
+        if r.on_hover_text("Scroll to bottom").clicked() {
+            if chat.at_end {
+                chat.scroll_to_bottom = 10;
+            } else {
+                chat.want_latest = true;
+            }
+        }
+    }
 }
 
 /// What the timeline's drawing needs from the app.
@@ -284,6 +640,8 @@ struct Ctx<'a> {
     width: f32,
     #[allow(dead_code)]
     chat_id: &'a ConversationId,
+    /// The message whose menu or reaction bar is open: its hover bar stays.
+    menu_for: Option<i64>,
 }
 
 /// The top of a chat's history: Desktop's `ConversationHero`.
@@ -466,6 +824,9 @@ fn message(
     if let Some(q) = &m.quote {
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., 52.));
         quote(ui, palette, outgoing, q, rect, ctx);
+        if !q.story && ui.interact(rect, ui.scope_id().with(("quote", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            actions.push(Action::JumpToQuote { author: q.author.clone(), sent_at: q.sent_at });
+        }
         y += quote_h;
     }
     for (index, a) in &images {
@@ -558,30 +919,23 @@ fn message(
         avatar_for(ui, ctx, m, Pos2::new(row.left() + side, bubble.bottom() - 28.));
     }
 
-    // Desktop's hover actions: react and reply, beside the bubble.
+    // Desktop's hover bar: react, reply and more, beside the bubble; and
+    // its context menu on right-click.
     let hover_zone = Rect::from_min_max(Pos2::new(row.left(), bubble.top()), Pos2::new(row.right(), bubble.bottom()));
-    if !m.deleted && ui.rect_contains_pointer(hover_zone) {
-        let bx = if outgoing { bubble.left() - 64. } else { bubble.right() + 4. };
-        let react = Rect::from_min_size(Pos2::new(bx, bubble.center().y - 14.), Vec2::splat(28.));
-        let reply = react.translate(Vec2::new(30., 0.));
-        for (rect, icon, tip, what) in [(react, Icon::Emoji, "React", 0), (reply, Icon::Reply, "Reply", 1)] {
-            let r = ui.interact(rect, ui.scope_id().with(("hover-action", m.id, what)), Sense::click()).on_hover_text(tip);
-            if r.hovered() {
-                ui.painter().rect_filled(rect, CornerRadius::same(14), palette.fill);
-            }
-            icon.paint(ui, rect, 18., palette.text_secondary);
-            if r.clicked() {
-                actions.push(if what == 0 {
-                    let mine = m.reactions.iter().find(|r| r.author.is_none()).map(|r| r.emoji.clone());
-                    let remove = mine.as_deref() == Some("❤️");
-                    Action::React { message_id: m.id, emoji: "❤️".into(), remove }
-                } else {
-                    Action::Reply(m.id)
-                });
-            }
-        }
+    let menu_open = ctx.menu_for == Some(m.id);
+    if (ui.rect_contains_pointer(hover_zone) || menu_open)
+        && let Some((what, at)) = crate::actions::hover_bar(ui, palette, m.id, bubble, outgoing)
+    {
+        actions.push(match what {
+            0 => Action::ReactBar { message_id: m.id, at },
+            1 => Action::Reply(m.id),
+            _ => Action::Menu { message_id: m.id, at },
+        });
     }
-    let _ = response;
+    if response.secondary_clicked() {
+        let at = response.interact_pointer_pos().unwrap_or(bubble.center());
+        actions.push(Action::Menu { message_id: m.id, at });
+    }
     revealed_now
 }
 
@@ -942,6 +1296,24 @@ fn composer(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 });
                 return;
             }
+            if chat.editing.is_some() {
+                let mut close = false;
+                egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let (icon, _) = ui.allocate_exact_size(Vec2::splat(18.), Sense::hover());
+                        Icon::Edit.paint(ui, icon, 16., palette.text);
+                        ui.label(RichText::new("Edit message").font(theme::semibold(13.)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            close = widgets::icon_button(ui, Icon::XCompact, 16., "Cancel editing").clicked();
+                        });
+                    });
+                });
+                if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    chat.editing = None;
+                    chat.composer.clear();
+                }
+                ui.add_space(6.);
+            }
             if let Some(q) = chat.quote.and_then(|id| chat.messages.iter().find(|m| m.id == id)) {
                 let who = match &q.author {
                     None => "You".to_owned(),
@@ -1050,6 +1422,11 @@ fn composer(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
 fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation) {
     let body = chat.composer.trim().to_owned();
     if body.is_empty() {
+        return;
+    }
+    if let Some(message_id) = chat.editing.take() {
+        app.send(Command::EditMessage { message_id, body, mentions: Vec::new(), styles: Vec::new(), preview: None });
+        chat.composer.clear();
         return;
     }
     let command = Command::SendText {
