@@ -1,0 +1,21 @@
+langis-gui
+Copyright (C) 2026 the langis-gui contributors
+Licensed under the GNU Affero General Public License, version 3 only
+(AGPL-3.0-only). See LICENSE.
+
+langis-gui is an unofficial client. It is not made by, affiliated with, or
+endorsed by Signal Messenger, LLC.
+
+It is built on langis (../langis), a fork of Vernam by Ken Powers
+(https://github.com/knpwrs/vernam, AGPL-3.0). src/notices.rs is ported
+from Vernam's views/notices.rs.
+
+Its look follows Signal Desktop (https://github.com/signalapp/Signal-Desktop,
+Copyright Signal Messenger, LLC, AGPL-3.0-only):
+- assets/icons/*.svg are Signal Desktop's images/icons/v3 icons, recolored
+  white so they can be tinted.
+- Colors, sizes and text come from its stylesheets and ts/axo design tokens.
+
+assets/fonts/Inter-*.ttf: Inter 3.19 by Rasmus Andersson, SIL Open Font
+License 1.1 (https://github.com/rsms/inter), converted from the WOFF2 files
+Signal Desktop ships.
