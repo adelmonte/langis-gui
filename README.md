@@ -47,6 +47,17 @@ cargo run --release -- --data-dir DIR
 
 The first build downloads Signal's prebuilt WebRTC into `target/webrtc`.
 
+### Installing
+
+`./install.sh` builds a release and installs it for your user: the
+program in `~/.cargo/bin`, a launcher entry and the icon under
+`~/.local/share`, so it shows up in app launchers (fuzzel, wofi, rofi and
+the like on niri). `./install.sh --uninstall` removes them; your data in
+`~/.local/share/langis-gui` stays.
+
+The icon (`assets/app/`) is langis-gui's own: a bubble turned the wrong
+way, around a backwards L. It is not Signal's logo.
+
 ## Screenshots
 
 ```sh

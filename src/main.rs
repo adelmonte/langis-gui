@@ -63,8 +63,19 @@ fn main() -> eframe::Result {
             .with_title("langis-gui")
             .with_app_id("langis-gui")
             .with_inner_size([1100., 760.])
-            .with_min_inner_size([640., 480.]),
+            .with_min_inner_size([640., 480.])
+            .with_icon(window_icon()),
         ..Default::default()
     };
     eframe::run_native("langis-gui", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, args)))))
+}
+
+/// The window's icon (the launcher's comes from the installed theme icon).
+fn window_icon() -> std::sync::Arc<egui::IconData> {
+    let png = include_bytes!("../assets/app/langis-gui-128.png");
+    let icon = image::load_from_memory_with_format(png, image::ImageFormat::Png).map(|image| image.into_rgba8());
+    std::sync::Arc::new(match icon {
+        Ok(rgba) => egui::IconData { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() },
+        Err(_) => egui::IconData::default(),
+    })
 }

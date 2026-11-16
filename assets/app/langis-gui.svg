@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- langis-gui's icon: an original mark. A bubble turned the wrong way
+       round (its tail up and to the right), in purple and gold, around an
+       L written backwards. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d1426"/>
+      <stop offset="1" stop-color="#0d0912"/>
+    </linearGradient>
+    <linearGradient id="bubble" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#3b0f6b"/>
+      <stop offset="1" stop-color="#8a2be2"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <!-- An angular bubble: an octagon with a sharp tail out of its top right. -->
+  <path d="M86 58 H160 L178 40 L184 70 L206 92 V164 L170 200 H86 L50 164 V92 Z"
+        fill="url(#bubble)" stroke="#f2b705" stroke-width="7" stroke-linejoin="miter"/>
+  <!-- The L, backwards. -->
+  <path d="M140 84 H160 V170 H96 V150 H140 Z" fill="#f2b705"/>
+</svg>

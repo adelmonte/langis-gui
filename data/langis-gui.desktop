@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=langis-gui
+GenericName=Signal client
+Comment=Unofficial Signal client on langis
+Exec=langis-gui
+Icon=langis-gui
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=signal;messenger;chat;
+StartupWMClass=langis-gui
+SingleMainWindow=true
