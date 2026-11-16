@@ -61,6 +61,24 @@ pub enum Icon {
     Video,
     XCompact,
     X,
+    // Navigation and management screens.
+    Link,
+    Block,
+    Leave,
+    ChevronRight,
+    PersonPlus,
+    PhonePlus,
+    PlusCircle,
+    TextSquare,
+    MinusCircle,
+    Folder,
+    DeviceLaptop,
+    Key,
+    Spam,
+    Recent,
+    Megaphone,
+    CheckCircle,
+    EditCompact,
 }
 
 impl Icon {
@@ -121,6 +139,23 @@ impl Icon {
             Icon::Video => ("bytes://icon/video.svg", include_bytes!("../assets/icons/video.svg")),
             Icon::XCompact => ("bytes://icon/x-compact.svg", include_bytes!("../assets/icons/x-compact.svg")),
             Icon::X => ("bytes://icon/x.svg", include_bytes!("../assets/icons/x.svg")),
+            Icon::Link => ("bytes://icon/link.svg", include_bytes!("../assets/icons/link.svg")),
+            Icon::Block => ("bytes://icon/block.svg", include_bytes!("../assets/icons/block.svg")),
+            Icon::Leave => ("bytes://icon/leave.svg", include_bytes!("../assets/icons/leave.svg")),
+            Icon::ChevronRight => ("bytes://icon/chevron-right.svg", include_bytes!("../assets/icons/chevron-right.svg")),
+            Icon::PersonPlus => ("bytes://icon/person-plus-compact.svg", include_bytes!("../assets/icons/person-plus-compact.svg")),
+            Icon::PhonePlus => ("bytes://icon/phone-plus-bold.svg", include_bytes!("../assets/icons/phone-plus-bold.svg")),
+            Icon::PlusCircle => ("bytes://icon/plus-circle.svg", include_bytes!("../assets/icons/plus-circle.svg")),
+            Icon::TextSquare => ("bytes://icon/text-square-compact.svg", include_bytes!("../assets/icons/text-square-compact.svg")),
+            Icon::MinusCircle => ("bytes://icon/minus-circle.svg", include_bytes!("../assets/icons/minus-circle.svg")),
+            Icon::Folder => ("bytes://icon/folder.svg", include_bytes!("../assets/icons/folder.svg")),
+            Icon::DeviceLaptop => ("bytes://icon/device-laptop.svg", include_bytes!("../assets/icons/device-laptop.svg")),
+            Icon::Key => ("bytes://icon/key.svg", include_bytes!("../assets/icons/key.svg")),
+            Icon::Spam => ("bytes://icon/spam.svg", include_bytes!("../assets/icons/spam.svg")),
+            Icon::Recent => ("bytes://icon/recent.svg", include_bytes!("../assets/icons/recent.svg")),
+            Icon::Megaphone => ("bytes://icon/megaphone-compact.svg", include_bytes!("../assets/icons/megaphone-compact.svg")),
+            Icon::CheckCircle => ("bytes://icon/check-circle.svg", include_bytes!("../assets/icons/check-circle.svg")),
+            Icon::EditCompact => ("bytes://icon/edit-compact.svg", include_bytes!("../assets/icons/edit-compact.svg")),
         }
     }
 
