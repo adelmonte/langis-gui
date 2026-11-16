@@ -158,6 +158,13 @@ fn message_id(harness: &Harness<'_, App>, pick: impl Fn(&langis_store::Message) 
     harness.state().chat.as_ref().unwrap().messages.iter().rev().find(|m| pick(m)).map(|m| m.id).expect("a matching message")
 }
 
+/// Every message of a chat, oldest first, straight from the store.
+fn all_messages(harness: &Harness<'_, App>, chat: &langis_store::ConversationId) -> Vec<langis_store::Message> {
+    let backend = harness.state().backend.as_ref().unwrap();
+    let (db, id) = (backend.db().clone(), chat.clone());
+    futures::executor::block_on(backend.spawn(async move { db.messages(&id, None, 1000).await.unwrap() }))
+}
+
 fn finish(mut harness: Harness<'_, App>) {
     harness.state_mut().shutdown();
     std::mem::forget(harness);
@@ -211,5 +218,39 @@ fn screenshots_message_actions() {
     app.chat = Some(chat);
     wait(&mut harness, "editing", |_| true);
     save(&mut harness, "pinned-and-editing");
+    finish(harness);
+}
+
+/// The photo viewer, and a view-once message opened in it.
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_media() {
+    let mut harness = demo_harness();
+    let chat = open_chat(&mut harness, langis_store::ConversationKind::Direct);
+    // Older pages may hold them: load around the view-once message.
+    let once = all_messages(&harness, &chat).iter().find(|m| m.view_once.is_some()).map(|m| m.id).expect("a view-once message");
+    harness.state_mut().open_at(chat.clone(), once);
+    wait(&mut harness, "view-once bubble", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == once)));
+    save(&mut harness, "view-once-bubble");
+
+    let notes = open_chat(&mut harness, langis_store::ConversationKind::NoteToSelf);
+    let m = all_messages(&harness, &notes)
+        .into_iter()
+        .rev()
+        .find(|m| m.attachments.iter().any(|a| a.content_type.starts_with("image/") && !a.sticker) && m.view_once.is_none())
+        .expect("a photo");
+    harness.state_mut().open_lightbox(&m, 0);
+    wait(&mut harness, "lightbox", |app| app.lightbox.as_ref().is_some_and(|l| l.items.len() > 1));
+    save(&mut harness, "lightbox");
+    harness.state_mut().close_lightbox();
+
+    harness.state_mut().open_at(chat.clone(), once);
+    wait(&mut harness, "back to the view-once chat", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == once)));
+    harness.state().send(langis_core::Command::OpenViewOnce { message_id: once });
+    wait(&mut harness, "view-once viewer", |app| app.lightbox.as_ref().is_some_and(|l| l.view_once.is_some()));
+    save(&mut harness, "view-once-open");
+    harness.state_mut().close_lightbox();
+    wait(&mut harness, "viewed", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == once && m.view_once == Some(langis_store::ViewOnce::Viewed))));
+    save(&mut harness, "view-once-viewed");
     finish(harness);
 }

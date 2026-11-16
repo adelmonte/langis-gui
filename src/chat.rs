@@ -103,6 +103,11 @@ enum Action {
     ReactBar { message_id: i64, at: Pos2 },
     /// Scroll to the message a quote quotes.
     JumpToQuote { author: Option<String>, sent_at: i64 },
+    /// Show a photo or video in the viewer.
+    Lightbox { message_id: i64, index: usize },
+    /// Their view-once message, its one viewing.
+    ViewOnce(i64),
+    FetchLongText(i64),
 }
 
 impl ChatView {
@@ -299,6 +304,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     chat.popup = Some(crate::actions::Popup::Menu { message: message_id, at });
                 }
             }
+            Action::Lightbox { message_id, index } => {
+                if let Some(m) = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == message_id)).cloned() {
+                    app.open_lightbox(&m, index);
+                }
+            }
+            Action::ViewOnce(message_id) => app.send(Command::OpenViewOnce { message_id }),
+            Action::FetchLongText(message_id) => app.send(Command::FetchLongText { message_id }),
             Action::JumpToQuote { author, sent_at } => {
                 let here = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.sent_at == sent_at && m.author == author).map(|m| m.id));
                 match here {
@@ -690,6 +702,10 @@ fn message(
         ui.add_space(10.);
         return None;
     }
+    if let Some(state) = m.view_once {
+        view_once_bubble(ui, ctx, m, state, actions);
+        return None;
+    }
     let outgoing = m.direction == Direction::Outgoing;
     let same = |o: &Message| o.notice.is_none() && o.direction == m.direction && o.author == m.author && (o.sent_at - m.sent_at).abs() < GROUP_GAP_MS && crate::format::same_day(o.sent_at, m.sent_at);
     let collapsed_above = prev.is_some_and(same);
@@ -789,7 +805,14 @@ fn message(
     let media_h: f32 = images.iter().map(|(_, a)| media_size(a, bubble_w).y + 2.).sum();
     let files_h = files.len() as f32 * 48.;
     let preview_h = if m.link_preview.is_some() { 84. } else { 0. };
-    let text_h = galley.as_ref().map(|g| g.size().y).unwrap_or(0.);
+    // Desktop's line under a long message's start, while the rest isn't here.
+    let long_line = m.long_text.as_ref().filter(|_| !m.deleted).map(|l| match l.state {
+        langis_store::LongTextState::Downloading => ("Downloading the rest…", false),
+        langis_store::LongTextState::Failed => ("Download Full Message", true),
+        langis_store::LongTextState::TooBig => ("Message too long to display more", false),
+    });
+    let long_h = if long_line.is_some() { 20. } else { 0. };
+    let text_h = galley.as_ref().map(|g| g.size().y).unwrap_or(0.) + long_h;
     let meta_h = if show_meta && !meta_inline { 16. } else { 0. };
     let media_only = !images.is_empty() && galley.is_none() && m.quote.is_none() && name_galley.is_none() && files.is_empty();
     let top_pad = if media_only || (images.first().is_some() && name_galley.is_none() && m.quote.is_none()) { 0. } else { pad.y };
@@ -835,7 +858,7 @@ fn message(
         let mr = if media_only { radius } else if y <= bubble.top() + 1. { CornerRadius { nw: radius.nw, ne: radius.ne, sw: 0, se: 0 } } else { CornerRadius::ZERO };
         if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
             match &a.local_path {
-                Some(path) => actions.push(Action::Open(path.clone())),
+                Some(_) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
                 None => actions.push(Action::Fetch { message_id: m.id, index: *index }),
             }
         }
@@ -880,7 +903,18 @@ fn message(
                 }
             }
         }
+        let g_h = g.size().y;
         ui.painter().galley(pos, g, in_color);
+        if let Some((label, clickable)) = long_line {
+            let color = if clickable { if outgoing { Color32::WHITE } else { palette.accent_text } } else { meta_color };
+            let at = Pos2::new(left, y + g_h + 2.);
+            let lg = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(13.), color);
+            let r = Rect::from_min_size(at, lg.size());
+            ui.painter().galley(at, lg, color);
+            if clickable && ui.interact(r, ui.scope_id().with(("long-text", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                actions.push(Action::FetchLongText(m.id));
+            }
+        }
         y += text_h;
     }
     if show_meta {
@@ -937,6 +971,65 @@ fn message(
         actions.push(Action::Menu { message_id: m.id, at });
     }
     revealed_now
+}
+
+/// Desktop's `TapToViewMessage`: a small bubble standing for the media.
+fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store::ViewOnce, actions: &mut Vec<Action>) {
+    use langis_store::ViewOnce;
+    let palette = ctx.palette;
+    let outgoing = m.direction == Direction::Outgoing;
+    let a = m.attachments.first();
+    let kind = match a.map(|a| a.content_type.as_str()) {
+        Some(t) if t.starts_with("video/") => "Video",
+        Some(t) if t.starts_with("image/") => "Photo",
+        _ => "Media",
+    };
+    let ready = !outgoing && state == ViewOnce::Ready;
+    let downloaded = a.is_some_and(|a| a.local_path.is_some());
+    let (icon, label) = match state {
+        ViewOnce::Ready if outgoing => (Icon::ViewOnceDashBold, "Media"),
+        ViewOnce::Ready if downloaded => (Icon::ViewOnce, kind),
+        ViewOnce::Ready => (Icon::ArrowDown, kind),
+        ViewOnce::Viewed | ViewOnce::Gone => (Icon::ViewOnceViewedBold, if outgoing { "Media" } else { "Viewed" }),
+        ViewOnce::Invalid => (Icon::ViewOnceDashBold, "Media"),
+    };
+    let text_color = if outgoing { palette.bubble_out_text() } else if ready { palette.text } else { palette.text_secondary };
+    let meta_color = if outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
+    ui.add_space(10.);
+    let show_avatar = ctx.group && !outgoing;
+    let avatar_col = if show_avatar { 36. } else { 0. };
+    let label_g = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(14.), text_color);
+    let meta = ui.painter().layout_no_wrap(crate::format::message_time(m.sent_at), theme::regular(11.), meta_color);
+    let w = 12. + 22. + label_g.size().x + 12. + meta.size().x + if outgoing { 18. } else { 0. } + 12.;
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, 40.), Sense::hover());
+    let x = if outgoing { row.right() - 16. - w } else { row.left() + 16. + avatar_col };
+    let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(w, 40.));
+    let fill = if outgoing { palette.bubble_out } else { palette.bubble_in };
+    ui.painter().rect_filled(bubble, CornerRadius::same(18), fill);
+    let icon_rect = Rect::from_min_size(Pos2::new(bubble.left() + 12., bubble.center().y - 10.), Vec2::splat(20.));
+    icon.paint(ui, icon_rect, 18., text_color);
+    ui.painter().galley(Pos2::new(icon_rect.right() + 4., bubble.center().y - label_g.size().y / 2.), label_g, text_color);
+    let meta_x = bubble.right() - 12. - meta.size().x - if outgoing { 18. } else { 0. };
+    ui.painter().galley(Pos2::new(meta_x, bubble.center().y - 6.), meta, meta_color);
+    if outgoing {
+        let at = Rect::from_min_size(Pos2::new(bubble.right() - 28., bubble.center().y - 8.), Vec2::splat(16.));
+        crate::sidebar::status_icon(m.status).paint(ui, at, 14., meta_color);
+    }
+    if show_avatar {
+        avatar_for(ui, ctx, m, Pos2::new(row.left() + 16., bubble.bottom() - 28.));
+    }
+    let r = ui.interact(bubble, ui.scope_id().with(("view-once", m.id)), Sense::click());
+    if ready {
+        if r.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if r.clicked() {
+            actions.push(if downloaded { Action::ViewOnce(m.id) } else { Action::Fetch { message_id: m.id, index: 0 } });
+        }
+    }
+    if r.secondary_clicked() {
+        actions.push(Action::Menu { message_id: m.id, at: r.interact_pointer_pos().unwrap_or(bubble.center()) });
+    }
 }
 
 fn avatar_for(ui: &Ui, ctx: &Ctx<'_>, m: &Message, at: Pos2) {

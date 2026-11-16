@@ -50,6 +50,8 @@ pub enum Loaded {
     Chat(crate::chat::ChatLoaded),
     /// The reaction bar's emoji.
     Reactions(Vec<String>),
+    /// A chat's photos and videos, oldest first, for the viewer.
+    Lightbox { conversation: ConversationId, message_id: i64, index: usize, items: Vec<crate::lightbox::Item> },
 }
 
 /// A send held until the user answers the safety number prompt.
@@ -122,6 +124,8 @@ pub struct App {
     pub me: (String, Option<String>),
     /// The reaction bar's emoji (Desktop's preferred reactions).
     pub reactions: Vec<String>,
+    /// The photo and video viewer, when open.
+    pub lightbox: Option<crate::lightbox::Lightbox>,
 }
 
 impl App {
@@ -171,6 +175,7 @@ impl App {
             notify: (true, "all".into()),
             me: (String::new(), None),
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
+            lightbox: None,
         };
         let dir = &app.data_dir;
         if app.demo || dir.join("database.key").exists() {
@@ -397,6 +402,7 @@ impl App {
                 self.load_notify_prefs();
                 self.load_reactions();
             }
+            Event::ViewOnceOpened(opened) => self.open_view_once(opened),
             Event::PinsChanged(conversation) => {
                 if self.selected.as_ref() == Some(&conversation) {
                     self.load_pinned(conversation);
@@ -427,6 +433,7 @@ impl App {
                 }
             }
             Loaded::Message(message) => {
+                self.lightbox_update(&message);
                 if let Some(chat) = self.chat.as_mut().filter(|c| c.id == message.conversation_id) {
                     chat.upsert(message);
                 }
@@ -463,6 +470,7 @@ impl App {
                 }
             }
             Loaded::Reactions(list) => self.reactions = list,
+            Loaded::Lightbox { conversation, message_id, index, items } => self.lightbox_loaded(conversation, message_id, index, items),
             Loaded::Theme(theme) => {
                 self.theme = theme.unwrap_or_else(|| "system".into());
                 self.apply_theme();

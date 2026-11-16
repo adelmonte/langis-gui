@@ -9,6 +9,7 @@ mod emoji_picker;
 mod format;
 mod glyphs;
 mod icons;
+mod lightbox;
 mod notices;
 #[cfg(test)]
 mod screenshots;
