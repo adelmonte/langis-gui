@@ -5,12 +5,15 @@ mod actions;
 mod app;
 mod call;
 mod chat;
+mod composer;
 mod emoji_picker;
 mod format;
+mod fun;
 mod glyphs;
 mod icons;
 mod lightbox;
 mod notices;
+mod polls;
 #[cfg(test)]
 mod screenshots;
 mod settings;
@@ -18,6 +21,7 @@ mod sidebar;
 mod startup;
 mod theme;
 mod view;
+mod voice;
 mod widgets;
 
 use std::path::PathBuf;

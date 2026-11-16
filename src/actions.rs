@@ -29,6 +29,7 @@ pub enum Dialog {
     Pin { message: i64, choice: usize },
     Forward { messages: Vec<i64>, query: String, chosen: Vec<ConversationId> },
     Info { message: i64, details: Option<Details> },
+    Poll(crate::polls::NewPoll),
 }
 
 /// Desktop's `MessageDetail`: each recipient's state and the edits.
@@ -390,6 +391,14 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 });
             });
             if modal.should_close() || !out.is_empty() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::Poll(poll) => {
+            let modal = egui::Modal::new(egui::Id::unique("new-poll")).frame(frame).show(ui.ctx(), |ui| {
+                crate::polls::dialog(ui, &palette, poll, &c.id, &mut out);
+            });
+            if modal.should_close() {
                 out.push(Do::Close);
             }
         }

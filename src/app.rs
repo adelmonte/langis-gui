@@ -50,6 +50,7 @@ pub enum Loaded {
     Chat(crate::chat::ChatLoaded),
     /// The reaction bar's emoji.
     Reactions(Vec<String>),
+    LinkPreviews(bool),
     /// A chat's photos and videos, oldest first, for the viewer.
     Lightbox { conversation: ConversationId, message_id: i64, index: usize, items: Vec<crate::lightbox::Item> },
 }
@@ -126,6 +127,8 @@ pub struct App {
     pub reactions: Vec<String>,
     /// The photo and video viewer, when open.
     pub lightbox: Option<crate::lightbox::Lightbox>,
+    /// Link previews on (Settings, Chats).
+    pub link_previews: bool,
 }
 
 impl App {
@@ -176,6 +179,7 @@ impl App {
             me: (String::new(), None),
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
             lightbox: None,
+            link_previews: true,
         };
         let dir = &app.data_dir;
         if app.demo || dir.join("database.key").exists() {
@@ -323,6 +327,7 @@ impl App {
                 self.load_notify_prefs();
                 self.load_me();
                 self.load_reactions();
+                self.load_link_previews();
                 self.send(Command::LoadCallDevices);
             }
             Event::Unlinked => {
@@ -401,8 +406,14 @@ impl App {
                 self.settings.stale = true;
                 self.load_notify_prefs();
                 self.load_reactions();
+                self.load_link_previews();
             }
             Event::ViewOnceOpened(opened) => self.open_view_once(opened),
+            Event::LinkPreview { url, preview } => {
+                if let Some(chat) = self.chat.as_mut() {
+                    chat.preview.arrived(&url, preview);
+                }
+            }
             Event::PinsChanged(conversation) => {
                 if self.selected.as_ref() == Some(&conversation) {
                     self.load_pinned(conversation);
@@ -470,6 +481,7 @@ impl App {
                 }
             }
             Loaded::Reactions(list) => self.reactions = list,
+            Loaded::LinkPreviews(on) => self.link_previews = on,
             Loaded::Lightbox { conversation, message_id, index, items } => self.lightbox_loaded(conversation, message_id, index, items),
             Loaded::Theme(theme) => {
                 self.theme = theme.unwrap_or_else(|| "system".into());
@@ -503,6 +515,13 @@ impl App {
                 .map(|(i, d)| saved.get(i).filter(|e| !e.is_empty()).cloned().unwrap_or_else(|| d.to_string()))
                 .collect();
             Some(Loaded::Reactions(list))
+        });
+    }
+
+    pub fn load_link_previews(&self) {
+        self.load(|db| async move {
+            let on = db.setting(langis_core::SETTING_LINK_PREVIEWS).await.ok().flatten().as_deref() != Some("false");
+            Some(Loaded::LinkPreviews(on))
         });
     }
 
@@ -576,7 +595,10 @@ impl App {
             }
         }
         let draft = self.conversation(&id).and_then(|c| c.draft.clone()).unwrap_or_default();
-        self.chat = Some(ChatView::new(id.clone(), draft));
+        let styles = self.conversation(&id).map(|c| c.draft_styles.clone()).unwrap_or_default();
+        let mut chat = ChatView::new(id.clone(), draft.clone());
+        chat.spans = crate::composer::Spans::new(&draft, styles, Vec::new());
+        self.chat = Some(chat);
         self.selected = Some(id.clone());
         self.tab = Tab::Chats;
         let members: Vec<String> = self.conversation(&id).map(|c| c.members.clone()).unwrap_or_default();

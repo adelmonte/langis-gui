@@ -254,3 +254,77 @@ fn screenshots_media() {
     save(&mut harness, "view-once-viewed");
     finish(harness);
 }
+
+/// The composer: @mentions, the formatting toolbar, styled text, a link
+/// preview, the attachment menu and the poll dialog.
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_composer() {
+    let mut harness = demo_harness();
+    let group = open_chat(&mut harness, langis_store::ConversationKind::Group);
+    let id = crate::composer::input_id(&group);
+    let ctx = harness.state().ctx.clone();
+
+    harness.state_mut().chat.as_mut().unwrap().composer = "Who has the map? @".into();
+    wait(&mut harness, "composer", |_| true);
+    crate::composer::set_cursor(&ctx, id, 18);
+    wait(&mut harness, "mention list", |_| true);
+    save(&mut harness, "composer-mentions");
+
+    // Pick the first suggestion, then format a word.
+    harness.key_press(egui::Key::Enter);
+    wait(&mut harness, "mention", |app| app.chat.as_ref().is_some_and(|c| !c.spans.mentions.is_empty()));
+    let text = {
+        let chat = harness.state_mut().chat.as_mut().unwrap();
+        chat.composer.push_str("bring it on Saturday");
+        chat.composer.clone()
+    };
+    wait(&mut harness, "typed", |_| true);
+    let chars = text.chars().count();
+    crate::composer::select(&ctx, id, chars - 8, chars);
+    wait(&mut harness, "selection", |_| true);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
+    wait(&mut harness, "bold", |app| app.chat.as_ref().is_some_and(|c| !c.spans.styles.is_empty()));
+    crate::composer::select(&ctx, id, 0, 3);
+    wait(&mut harness, "toolbar", |_| true);
+    save(&mut harness, "composer-formatting");
+
+    // A link preview, as one arrives.
+    {
+        let chat = harness.state_mut().chat.as_mut().unwrap();
+        chat.composer = "Trail notes: https://example.org/trails".into();
+        chat.spans.clear();
+        chat.preview.arrived("https://example.org/trails", None);
+        chat.preview.draft = Some(langis_core::LinkPreviewDraft {
+            url: "https://example.org/trails".into(),
+            title: "Ridge loop trail guide".into(),
+            description: Some("Seven miles, 1,800 feet of climbing, views from the top.".into()),
+            date: None,
+            image: None,
+        });
+    }
+    crate::composer::set_cursor(&ctx, id, 10);
+    wait(&mut harness, "preview", |_| true);
+    save(&mut harness, "composer-link-preview");
+
+    {
+        let chat = harness.state_mut().chat.as_mut().unwrap();
+        chat.composer.clear();
+        chat.preview = Default::default();
+        chat.attach_menu = true;
+    }
+    wait(&mut harness, "attach menu", |_| true);
+    save(&mut harness, "composer-attach-menu");
+
+    {
+        let chat = harness.state_mut().chat.as_mut().unwrap();
+        chat.attach_menu = false;
+        let mut poll = crate::polls::NewPoll::default();
+        poll.question = "Which trail on Saturday?".into();
+        poll.options = vec!["Ridge loop".into(), "Lakeside".into(), String::new()];
+        chat.dialog = Some(crate::actions::Dialog::Poll(poll));
+    }
+    wait(&mut harness, "poll dialog", |_| true);
+    save(&mut harness, "poll-dialog");
+    finish(harness);
+}

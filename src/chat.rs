@@ -23,9 +23,6 @@ pub const AROUND: u32 = 30;
 /// (Desktop's `areMessagesInSameGroup`: three minutes).
 const GROUP_GAP_MS: i64 = 3 * 60 * 1000;
 
-/// How long after the last keystroke "typing" stops (Desktop's
-/// `TYPING_IDLE_TIMEOUT`, a little under its 15s pause timer).
-const TYPING_IDLE: Duration = Duration::from_secs(3);
 
 pub struct ChatView {
     pub id: ConversationId,
@@ -37,10 +34,10 @@ pub struct ChatView {
     pub composer: String,
     pub quote: Option<i64>,
     pub typing_sent: bool,
-    last_typed: Option<Instant>,
+    pub last_typed: Option<Instant>,
     pub emoji_open: bool,
     pub emoji: crate::emoji_picker::Picker,
-    revealed: HashSet<i64>,
+    pub revealed: HashSet<i64>,
     /// Content height before older messages were added on top, to keep
     /// the view where it was.
     keep_from_height: Option<f32>,
@@ -48,7 +45,7 @@ pub struct ChatView {
     /// Frames left to hold the view at the bottom (the content's height
     /// settles over a frame or two as images load).
     pub scroll_to_bottom: u8,
-    draft_at_open: String,
+    pub draft_at_open: String,
     /// Scrolled near the top: load the page before.
     want_older: bool,
     /// Where to scroll to on the next frame.
@@ -76,6 +73,15 @@ pub struct ChatView {
     want_latest: bool,
     /// A message to load around and jump to, once the frame is drawn.
     pending_jump: Option<i64>,
+    /// The composer's formatting and mentions.
+    pub spans: crate::composer::Spans,
+    /// The composer's link preview.
+    pub preview: crate::composer::Preview,
+    /// Which @mention suggestion is selected.
+    pub mention_index: usize,
+    pub attach_menu: bool,
+    /// A voice message being recorded.
+    pub recording: Option<crate::voice::Recording>,
 }
 
 /// Store reads for the open chat.
@@ -144,6 +150,11 @@ impl ChatView {
             scrolled_up: false,
             want_latest: false,
             pending_jump: None,
+            spans: Default::default(),
+            preview: Default::default(),
+            mention_index: 0,
+            attach_menu: false,
+            recording: None,
         }
     }
 
@@ -231,7 +242,11 @@ impl ChatView {
 
     /// Puts our message in the composer to edit (Desktop's edit mode).
     pub fn start_editing(&mut self, app: &App, m: Message) {
-        self.composer = crate::actions::plain_text(app, &m);
+        let _ = app;
+        let (text, spans) = crate::composer::editable(&m);
+        self.composer = text;
+        self.spans = spans;
+        self.preview = Default::default();
         self.editing = Some(m.id);
         self.quote = None;
     }
@@ -239,13 +254,13 @@ impl ChatView {
     /// Keeps the composer's text as the chat's draft (a frontend's own
     /// write, as the frontend guide allows).
     pub fn save_draft(&self, app: &App) {
-        if self.composer == self.draft_at_open {
+        if self.composer == self.draft_at_open || self.editing.is_some() {
             return;
         }
-        let (id, text) = (self.id.clone(), self.composer.clone());
+        let (id, text, styles) = (self.id.clone(), self.composer.clone(), self.spans.styles.clone());
         app.load(move |db| async move {
             let draft = Some(text.as_str()).filter(|t| !t.trim().is_empty());
-            let _ = db.set_draft(&id, draft).await;
+            let _ = db.set_draft_with_styles(&id, draft, &styles).await;
             db.conversations().await.ok().map(crate::app::Loaded::Conversations)
         });
     }
@@ -260,7 +275,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     };
     header(app, ui, &palette, &conversation);
     pinned_bar(app, ui, &palette, &mut chat);
-    composer(app, ui, &palette, &mut chat, &conversation);
+    crate::composer::show(app, ui, &palette, &mut chat, &conversation);
     let mut actions = Vec::new();
     egui::CentralPanel::no_frame().show(ui, |ui| {
         timeline(app, ui, &palette, &mut chat, &conversation, &mut actions);
@@ -1373,214 +1388,6 @@ pub fn find_links(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
         start += word.len();
     }
     out
-}
-
-/// Desktop's composition area: emoji, the rounded input, attach, send.
-fn composer(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_store::Conversation) {
-    let blocked = c.blocked || c.left || c.ended;
-    egui::Panel::bottom("composer")
-        .show_separator_line(false)
-        .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin { left: 16, right: 16, top: 10, bottom: 12 }))
-        .show(ui, |ui| {
-            if blocked {
-                ui.vertical_centered(|ui| {
-                    let text = if c.blocked { "You blocked this chat." } else { "You can't send messages to this group." };
-                    ui.label(RichText::new(text).color(palette.text_secondary));
-                });
-                return;
-            }
-            if chat.editing.is_some() {
-                let mut close = false;
-                egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let (icon, _) = ui.allocate_exact_size(Vec2::splat(18.), Sense::hover());
-                        Icon::Edit.paint(ui, icon, 16., palette.text);
-                        ui.label(RichText::new("Edit message").font(theme::semibold(13.)));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            close = widgets::icon_button(ui, Icon::XCompact, 16., "Cancel editing").clicked();
-                        });
-                    });
-                });
-                if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    chat.editing = None;
-                    chat.composer.clear();
-                }
-                ui.add_space(6.);
-            }
-            if let Some(q) = chat.quote.and_then(|id| chat.messages.iter().find(|m| m.id == id)) {
-                let who = match &q.author {
-                    None => "You".to_owned(),
-                    Some(a) => app.name(a),
-                };
-                let text = crate::format::one_line(&q.body);
-                let mut close = false;
-                egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(format!("Replying to {who}")).font(theme::semibold(13.)));
-                            ui.add(egui::Label::new(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary)).truncate());
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            close = widgets::icon_button(ui, Icon::XCompact, 16., "Cancel reply").clicked();
-                        });
-                    });
-                });
-                if close {
-                    chat.quote = None;
-                }
-                ui.add_space(6.);
-            }
-            let mut send = false;
-            ui.horizontal(|ui| {
-                let emoji = widgets::icon_button(ui, Icon::Emoji, 20., "Emoji");
-                if emoji.clicked() {
-                    chat.emoji_open = !chat.emoji_open;
-                }
-                let has_text = !chat.composer.trim().is_empty();
-                let right_w = 2. * 32. + 8.;
-                let width = (ui.available_width() - right_w).max(100.);
-                let text_color = palette.text;
-                let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-                    let mut job = egui::text::LayoutJob::default();
-                    let format = egui::TextFormat { font_id: theme::regular(14.), color: text_color, line_height: Some(20.), ..Default::default() };
-                    append_with_emoji(&mut job, text.as_str(), format);
-                    job.wrap.max_width = wrap;
-                    ui.fonts_mut(|f| f.layout_job(job))
-                };
-                let response = egui::Frame::new()
-                    .fill(palette.bubble_in)
-                    .corner_radius(CornerRadius::same(18))
-                    .inner_margin(egui::Margin::symmetric(12, 8))
-                    .show(ui, |ui| {
-                        ui.set_width(width - 24.);
-                        ui.add(
-                            egui::TextEdit::multiline(&mut chat.composer)
-                                .hint_text("Message")
-                                .frame(egui::Frame::NONE)
-                                .desired_rows(1)
-                                .desired_width(width - 24.)
-                                .font(theme::regular(14.))
-                                .layouter(&mut layouter)
-                                .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
-                                .id(egui::Id::unique(("composer", &c.id.0))),
-                        )
-                    })
-                    .inner;
-                if response.changed() {
-                    chat.last_typed = Some(Instant::now());
-                    if !chat.typing_sent && !chat.composer.is_empty() {
-                        chat.typing_sent = true;
-                        app.send(Command::Typing { conversation: c.id.clone(), started: true });
-                    }
-                }
-                if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) {
-                    send = true;
-                }
-                if !response.has_focus() && app.safety.is_none() && ui.memory(|m| m.focused().is_none()) {
-                    response.request_focus();
-                }
-                if widgets::icon_button(ui, Icon::Plus, 20., "Add attachment").clicked() {
-                    attach(app, chat, c);
-                }
-                if has_text {
-                    let (rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
-                    ui.painter().circle_filled(rect.center(), 16., palette.badge);
-                    Icon::SendFill.paint(ui, rect, 18., Color32::WHITE);
-                    if r.on_hover_text("Send").clicked() {
-                        send = true;
-                    }
-                } else {
-                    widgets::icon_button(ui, Icon::Mic, 20., "Voice message (not available yet)");
-                }
-                if chat.emoji_open {
-                    let anchor = emoji.rect.left_top();
-                    if let Some(picked) = chat.emoji.show(ui.ctx(), anchor, &mut chat.emoji_open) {
-                        chat.composer.push_str(picked);
-                    }
-                }
-            });
-            if send {
-                send_text(app, chat, c);
-            }
-            if chat.typing_sent && chat.last_typed.is_some_and(|t| t.elapsed() > TYPING_IDLE) {
-                chat.typing_sent = false;
-                app.send(Command::Typing { conversation: c.id.clone(), started: false });
-            }
-            if chat.typing_sent {
-                ui.ctx().request_repaint_after(Duration::from_millis(500));
-            }
-        });
-}
-
-fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation) {
-    let body = chat.composer.trim().to_owned();
-    if body.is_empty() {
-        return;
-    }
-    if let Some(message_id) = chat.editing.take() {
-        app.send(Command::EditMessage { message_id, body, mentions: Vec::new(), styles: Vec::new(), preview: None });
-        chat.composer.clear();
-        return;
-    }
-    let command = Command::SendText {
-        conversation: c.id.clone(),
-        body,
-        quote: chat.quote.take(),
-        preview: None,
-        mentions: Vec::new(),
-        styles: Vec::new(),
-    };
-    chat.composer.clear();
-    chat.scroll_to_bottom = 10;
-    if chat.typing_sent {
-        chat.typing_sent = false;
-        app.send(Command::Typing { conversation: c.id.clone(), started: false });
-    }
-    // The draft went out with the message.
-    if !chat.draft_at_open.is_empty() {
-        chat.draft_at_open.clear();
-        let id = c.id.clone();
-        app.load(move |db| async move {
-            let _ = db.set_draft(&id, None).await;
-            db.conversations().await.ok().map(crate::app::Loaded::Conversations)
-        });
-    }
-    app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
-}
-
-/// Picks files to send: images go optimized as photos, the rest as files,
-/// with the composer's text as the caption.
-fn attach(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation) {
-    let Some(paths) = rfd::FileDialog::new().set_title("Add attachment").pick_files() else { return };
-    let caption = std::mem::take(&mut chat.composer).trim().to_owned();
-    let quote = chat.quote.take();
-    let mut images = Vec::new();
-    for path in paths {
-        let Ok(bytes) = std::fs::read(&path) else {
-            app.toast(format!("Couldn't read {}", path.display()));
-            continue;
-        };
-        let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "heic") {
-            images.push(langis_core::OutgoingImage { bytes: std::sync::Arc::new(bytes), file_name });
-        } else {
-            let command = Command::SendFile {
-                conversation: c.id.clone(),
-                file: langis_core::OutgoingFile { bytes: std::sync::Arc::new(bytes), file_name: file_name.unwrap_or_else(|| "file".into()), voice: false },
-                caption: caption.clone(),
-                quote,
-                mentions: Vec::new(),
-                styles: Vec::new(),
-            };
-            app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
-        }
-    }
-    if !images.is_empty() {
-        let command = Command::SendImages { conversation: c.id.clone(), images, caption, quote, mentions: Vec::new(), styles: Vec::new() };
-        app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
-    }
-    chat.scroll_to_bottom = 10;
 }
 
 #[cfg(test)]
