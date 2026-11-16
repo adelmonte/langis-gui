@@ -113,6 +113,8 @@ enum Action {
     Lightbox { message_id: i64, index: usize },
     Vote { message_id: i64, options: Vec<u32> },
     Played(i64),
+    /// A sticker clicked: open its pack.
+    StickerPack(i64),
     PollVotes(i64),
     /// Their view-once message, its one viewing.
     ViewOnce(i64),
@@ -330,6 +332,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             Action::ViewOnce(message_id) => app.send(Command::OpenViewOnce { message_id }),
             Action::Vote { message_id, options } => app.send(Command::VotePoll { message_id, options }),
             Action::Played(message_id) => app.send(Command::MarkViewed { message_id }),
+            Action::StickerPack(message_id) => app.send(Command::FindMessageStickerPack { message_id }),
             Action::PollVotes(message) => {
                 if let Some(chat) = app.chat.as_mut() {
                     chat.dialog = Some(crate::actions::Dialog::PollVotes { message });
@@ -798,6 +801,22 @@ fn message(
         let rect = Rect::from_min_size(Pos2::new(x, row.top()), size);
         if let Some(path) = s.local_path.as_deref().or(s.thumbnail_path.as_deref()) {
             egui::Image::new(format!("file://{path}")).maintain_aspect_ratio(true).paint_at(ui, rect);
+        }
+        let r = ui.interact(rect, ui.scope_id().with(("sticker", m.id)), Sense::click());
+        if r.clicked() {
+            actions.push(Action::StickerPack(m.id));
+        }
+        if r.secondary_clicked() {
+            actions.push(Action::Menu { message_id: m.id, at: r.interact_pointer_pos().unwrap_or(rect.center()) });
+        }
+        if (ui.rect_contains_pointer(rect) || ctx.menu_for == Some(m.id))
+            && let Some((what, at)) = crate::actions::hover_bar(ui, palette, m.id, rect, outgoing)
+        {
+            actions.push(match what {
+                0 => Action::ReactBar { message_id: m.id, at },
+                1 => Action::Reply(m.id),
+                _ => Action::Menu { message_id: m.id, at },
+            });
         }
         let at = Pos2::new(if outgoing { rect.right() - meta_w } else { rect.left() }, rect.bottom() + 2.);
         ui.painter().galley(at, meta, palette.text_secondary);

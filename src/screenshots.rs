@@ -369,3 +369,35 @@ fn screenshots_voice() {
     harness.state_mut().chat.as_mut().unwrap().recording = None;
     finish(harness);
 }
+
+/// The fun picker's tabs, the sticker manager and a pack.
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_fun() {
+    let mut harness = demo_harness();
+    open_chat(&mut harness, langis_store::ConversationKind::Direct);
+    harness.state_mut().chat.as_mut().unwrap().emoji_open = true;
+    harness.state_mut().fun.tab = crate::fun::Tab::Stickers;
+    wait(&mut harness, "stickers", |app| !app.fun.packs.is_empty());
+    save(&mut harness, "fun-stickers");
+    harness.state_mut().fun.tab = crate::fun::Tab::Gifs;
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        harness.step();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    save(&mut harness, "fun-gifs");
+    harness.state_mut().chat.as_mut().unwrap().emoji_open = false;
+
+    harness.state_mut().fun.manager_open = true;
+    harness.state().send(langis_core::Command::LoadStickerManager);
+    wait(&mut harness, "sticker manager", |app| app.fun.manager.is_some());
+    save(&mut harness, "sticker-manager");
+    let pack = harness.state().fun.manager.as_ref().unwrap().installed.first().cloned().expect("an installed pack");
+    harness.state_mut().fun.manager_open = false;
+    harness.state().send(langis_core::Command::PreviewStickerPack { id: pack.id.clone(), key: pack.key.clone() });
+    harness.state_mut().fun.preview = Some((pack.id, pack.key, None));
+    wait(&mut harness, "pack preview", |app| app.fun.preview.as_ref().is_some_and(|p| p.2.is_some()));
+    save(&mut harness, "sticker-pack");
+    finish(harness);
+}

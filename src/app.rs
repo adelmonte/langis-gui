@@ -129,6 +129,8 @@ pub struct App {
     pub lightbox: Option<crate::lightbox::Lightbox>,
     /// Link previews on (Settings, Chats).
     pub link_previews: bool,
+    /// Stickers, GIFs and the sticker manager.
+    pub fun: crate::fun::Fun,
 }
 
 impl App {
@@ -180,6 +182,7 @@ impl App {
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
             lightbox: None,
             link_previews: true,
+            fun: Default::default(),
         };
         let dir = &app.data_dir;
         if app.demo || dir.join("database.key").exists() {
@@ -306,6 +309,9 @@ impl App {
     }
 
     fn on_event(&mut self, event: Event) {
+        if self.fun.on_event(&event) {
+            return;
+        }
         match event {
             Event::NeedsLinking => {
                 self.phase = Phase::Linking { url: None, error: None, qr: None };
@@ -409,6 +415,10 @@ impl App {
                 self.load_link_previews();
             }
             Event::ViewOnceOpened(opened) => self.open_view_once(opened),
+            Event::MessageStickerPack { pack: Some((id, key)), .. } => {
+                self.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
+                self.fun.preview = Some((id, key, None));
+            }
             Event::LinkPreview { url, preview } => {
                 if let Some(chat) = self.chat.as_mut() {
                     chat.preview.arrived(&url, preview);

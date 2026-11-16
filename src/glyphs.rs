@@ -1,7 +1,7 @@
 //! A few symbols Desktop draws from its own symbol font, drawn here with
-//! shapes instead: a pin, a poll and the GIF tag.
+//! shapes instead: a pin and a poll.
 
-use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Shape, Stroke, Ui, Vec2};
+use egui::{Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 
 /// A push pin, tilted, filling `rect`.
 pub fn pin(ui: &Ui, rect: Rect, color: Color32) {
@@ -27,12 +27,4 @@ pub fn poll(ui: &Ui, rect: Rect, color: Color32) {
         let y = rect.top() + (4. + i as f32 * 5.) * s;
         ui.painter().line_segment([Pos2::new(left, y), Pos2::new(left + len * s, y)], stroke);
     }
-}
-
-/// "GIF" in a rounded box.
-pub fn gif(ui: &Ui, rect: Rect, color: Color32) {
-    let s = rect.width() / 18.;
-    let r = Rect::from_center_size(rect.center(), Vec2::new(16. * s, 11. * s));
-    ui.painter().rect_stroke(r, CornerRadius::same((2. * s) as u8), Stroke::new(1.4 * s, color), egui::StrokeKind::Inside);
-    ui.painter().text(r.center(), Align2::CENTER_CENTER, "GIF", crate::theme::semibold(6.5 * s), color);
 }
