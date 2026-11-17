@@ -143,6 +143,8 @@ pub struct App {
     pub panes: crate::panes::Panes,
     /// Desktop's chat colors: the default, each chat's and the custom ones.
     pub chat_colors: langis_store::ChatColors,
+    /// Desktop's custom color editor, open.
+    pub color_editor: Option<crate::chat_colors::Editor>,
     /// The reaction bar's emoji (Desktop's preferred reactions).
     pub reactions: Vec<String>,
     /// The photo and video viewer, when open.
@@ -207,6 +209,7 @@ impl App {
             me: (String::new(), None),
             panes: Default::default(),
             chat_colors: Default::default(),
+            color_editor: None,
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
             lightbox: None,
             link_previews: true,

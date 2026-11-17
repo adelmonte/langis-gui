@@ -195,6 +195,11 @@ fn screenshots_panes() {
         wait(&mut harness, name, |app| app.settings.snapshot.is_some());
         save(&mut harness, name);
     }
+    harness.state_mut().settings.page = Page::ChatColor;
+    harness.state_mut().color_editor = Some(crate::chat_colors::Editor::sample());
+    wait(&mut harness, "color editor", |_| true);
+    save(&mut harness, "custom-color-editor");
+    harness.state_mut().color_editor = None;
     crate::profile::open(harness.state_mut());
     wait(&mut harness, "profile", |app| app.panes.profile.as_ref().is_some_and(|p| p.loaded));
     save(&mut harness, "profile");
