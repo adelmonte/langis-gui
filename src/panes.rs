@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use egui::{CornerRadius, RichText, Ui};
+use egui::{Color32, CornerRadius, Pos2, Rect, RichText, Sense, Ui, Vec2};
 use langis_core::{CallReaction, Command, Event, GroupLinkPreview};
 use langis_store::{CallLink, ChatFolder, Conversation, ConversationId, ConversationKind, DirectoryEntry, Message, MessageRequestResponse};
 
@@ -76,6 +76,8 @@ pub struct Lobby {
 /// Desktop's "New chat" and "New group" flows.
 pub enum Compose {
     Chat { query: String, searching: bool, found: Option<Result<DirectoryEntry, String>> },
+    /// Desktop's Find by username or Find by phone number step.
+    Find { phone: bool, query: String, searching: bool, found: Option<Result<DirectoryEntry, String>> },
     Group { picking: bool, query: String, members: Vec<String>, title: String, timer: u32, avatar: Option<Vec<u8>> },
 }
 
@@ -154,7 +156,7 @@ pub fn on_event(app: &mut App, event: Event) {
             }
         }
         Event::RecipientFound { query, result } => {
-            if let Some(Compose::Chat { query: q, searching, found }) = app.panes.compose.as_mut()
+            if let Some(Compose::Chat { query: q, searching, found } | Compose::Find { query: q, searching, found, .. }) = app.panes.compose.as_mut()
                 && q.trim() == query.trim()
             {
                 *searching = false;
@@ -682,89 +684,259 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
     true
 }
 
+/// Desktop's `isProbablyAUsername`.
+fn probably_username(text: &str) -> bool {
+    let t = text.trim();
+    if t.starts_with('@') {
+        return true;
+    }
+    let like = t.len() >= 3 && t.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_') && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+    if !like || t.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    t.rsplit_once('.').is_some_and(|(name, digits)| !name.is_empty() && (2..=3).contains(&digits.len()) && digits.chars().all(|c| c.is_ascii_digit()))
+}
+
+fn probably_phone(text: &str) -> bool {
+    let t = text.trim();
+    let digits = t.chars().filter(|c| c.is_ascii_digit()).count();
+    digits >= 3 && t.chars().all(|c| c.is_ascii_digit() || " -()+.".contains(c)) && !t[1..].contains('+')
+}
+
+/// A `ListTile` in the compose pane: 52 high (48 for a step button),
+/// inset 10 by 2, rounded 12.
+fn tile(ui: &mut Ui, palette: &Palette, height: f32, id: egui::Id) -> (Rect, egui::Response) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let inner = rect.shrink2(Vec2::new(10., 2.));
+    let response = ui.interact(inner, id, Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(inner, CornerRadius::same(12), if response.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill });
+    }
+    (inner, response)
+}
+
+/// `ComposeStepButton`: a 32px circle with a 20px symbol, and a title.
+fn step_button(ui: &mut Ui, palette: &Palette, symbol: &str, label: &str) -> bool {
+    let (inner, response) = tile(ui, palette, 48., egui::Id::unique("compose-step").with(label));
+    let center = Pos2::new(inner.left() + 14. + 16., inner.center().y);
+    let circle = if palette.dark { Color32::from_white_alpha(31) } else { Color32::from_black_alpha(15) };
+    ui.painter().circle_filled(center, 16., circle);
+    theme::paint_symbol(ui.painter(), symbol, center, 20., palette.text);
+    ui.painter().text(Pos2::new(center.x + 16. + 12., center.y), egui::Align2::LEFT_CENTER, label, theme::regular(14.), palette.text);
+    response.clicked()
+}
+
+fn conversation_tile(ui: &mut Ui, palette: &Palette, c: &langis_store::Conversation) -> bool {
+    let (inner, response) = tile(ui, palette, 52., egui::Id::unique("compose-row").with(&c.id.0));
+    let avatar = Rect::from_min_size(Pos2::new(inner.left() + 14., inner.center().y - 18.), Vec2::splat(36.));
+    widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
+    let title = if c.kind == ConversationKind::NoteToSelf { "Note to Self".to_owned() } else { c.title.clone() };
+    let g = ui.painter().layout_no_wrap(title, theme::regular(14.), palette.text);
+    let clip = Rect::from_min_max(Pos2::new(avatar.right() + 12., inner.top()), Pos2::new(inner.right() - 14., inner.bottom()));
+    ui.painter().with_clip_rect(clip).galley(Pos2::new(clip.left(), inner.center().y - g.size().y / 2.), g, palette.text);
+    response.clicked()
+}
+
+fn list_header(ui: &mut Ui, palette: &Palette, text: &str) {
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::hover());
+    ui.painter().text(Pos2::new(r.left() + 24., r.center().y), egui::Align2::LEFT_CENTER, text, theme::semibold(14.), palette.text);
+}
+
+/// Desktop's `LeftPaneComposeHelper` and its find steps, in place of the
+/// chat list. False when there's no compose step open.
+pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
+    let Some(mut compose) = app.panes.compose.take() else { return false };
+    let palette = Palette::of(ui.ctx());
+    let mut keep = true;
+    let mut next: Option<Compose> = None;
+    let mut open: Option<ConversationId> = None;
+    match &mut compose {
+        Compose::Group { .. } => {
+            app.panes.compose = Some(compose);
+            return false;
+        }
+        Compose::Chat { query, searching, found } => {
+            ui.add_space(12.);
+            ui.horizontal(|ui| {
+                ui.add_space(12.);
+                if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back to inbox").clicked() {
+                    keep = false;
+                }
+                ui.label(RichText::new("New chat").font(theme::semibold(18.)));
+            });
+            ui.add_space(6.);
+            let field = ui.horizontal(|ui| {
+                ui.add_space(16.);
+                ui.add(egui::TextEdit::singleline(query).hint_text("Name, username, or number").desired_width(ui.available_width() - 16.))
+            });
+            if !ui.ctx().memory(|m| m.has_focus(field.inner.id)) && ui.ctx().memory(|m| m.focused().is_none()) {
+                field.inner.request_focus();
+            }
+            if field.inner.changed() {
+                *searching = false;
+                *found = None;
+            }
+            let enter = field.inner.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                keep = false;
+            }
+            ui.add_space(8.);
+            let q = query.trim().to_lowercase();
+            let username = probably_username(&q);
+            let phone = !username && probably_phone(&q);
+            let link = signal_link(query.trim());
+            let matches = |c: &&langis_store::Conversation| q.is_empty() || c.title.to_lowercase().contains(&q) || c.phone.as_deref().is_some_and(|p| p.contains(&q));
+            let mut contacts: Vec<_> = app.conversations.iter().filter(|c| c.kind != ConversationKind::Group && !c.blocked && matches(c)).cloned().collect();
+            contacts.sort_by_key(|c| c.title.to_lowercase());
+            let mut groups: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Group && !c.left && !c.ended && matches(c)).cloned().collect();
+            groups.sort_by_key(|c| c.title.to_lowercase());
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                if q.is_empty() {
+                    if step_button(ui, &palette, "group", "New group") {
+                        next = Some(Compose::Group { picking: true, query: String::new(), members: Vec::new(), title: String::new(), timer: 0, avatar: None });
+                    }
+                    if step_button(ui, &palette, "at", "Find by username") {
+                        next = Some(Compose::Find { phone: false, query: String::new(), searching: false, found: None });
+                    }
+                    if step_button(ui, &palette, "number", "Find by phone number") {
+                        next = Some(Compose::Find { phone: true, query: String::new(), searching: false, found: None });
+                    }
+                }
+                // A pasted group or call link opens it.
+                if let Some((label, command)) = &link
+                    && (step_button(ui, &palette, "link", label) || enter)
+                {
+                    app.send(command.clone());
+                    keep = false;
+                }
+                if !username {
+                    if !contacts.is_empty() {
+                        list_header(ui, &palette, "Contacts");
+                        for c in &contacts {
+                            if conversation_tile(ui, &palette, c) {
+                                open = Some(c.id.clone());
+                            }
+                        }
+                    }
+                    if !groups.is_empty() {
+                        list_header(ui, &palette, "Groups");
+                        for c in &groups {
+                            if conversation_tile(ui, &palette, c) {
+                                open = Some(c.id.clone());
+                            }
+                        }
+                    }
+                }
+                if (username || phone) && link.is_none() {
+                    list_header(ui, &palette, if username { "Find by username" } else { "Find by phone number" });
+                    let shown = if username { query.trim().trim_start_matches('@').to_owned() } else { query.trim().to_owned() };
+                    if step_button(ui, &palette, if username { "at" } else { "number" }, &shown) || (enter && !*searching) {
+                        *searching = true;
+                        *found = None;
+                        app.send(Command::FindRecipient { query: query.trim().to_owned() });
+                    }
+                    match found {
+                        Some(Ok(entry)) => open = Some(entry.id.clone()),
+                        Some(Err(_)) => {
+                            let why = if username {
+                                format!("@{shown} is not a Signal user. Make sure you've entered the complete username.")
+                            } else {
+                                format!("User not found. \"{shown}\" is not a Signal user.")
+                            };
+                            ui.add_space(8.);
+                            egui::Frame::new().inner_margin(egui::Margin { left: 24, right: 16, top: 0, bottom: 0 }).show(ui, |ui| {
+                                body(ui, &palette, &why);
+                            });
+                        }
+                        None if *searching => {
+                            ui.add_space(8.);
+                            ui.vertical_centered(|ui| ui.spinner());
+                        }
+                        None => {}
+                    }
+                }
+                if !q.is_empty() && contacts.is_empty() && groups.is_empty() && !username && !phone && link.is_none() {
+                    ui.add_space(28.);
+                    ui.vertical_centered(|ui| body(ui, &palette, "No chats found"));
+                }
+            });
+        }
+        Compose::Find { phone, query, searching, found } => {
+            let heading = if *phone { "Find by phone number" } else { "Find by username" };
+            ui.add_space(12.);
+            ui.horizontal(|ui| {
+                ui.add_space(12.);
+                if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    next = Some(Compose::Chat { query: String::new(), searching: false, found: None });
+                }
+                ui.label(RichText::new(heading).font(theme::semibold(18.)));
+            });
+            ui.add_space(6.);
+            let field = ui.horizontal(|ui| {
+                ui.add_space(16.);
+                ui.add(egui::TextEdit::singleline(query).hint_text(if *phone { "Phone number" } else { "Username" }).desired_width(ui.available_width() - 16.))
+            });
+            if ui.ctx().memory(|m| m.focused().is_none()) {
+                field.inner.request_focus();
+            }
+            if field.inner.changed() {
+                *found = None;
+            }
+            let enter = field.inner.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if !*phone {
+                ui.add_space(6.);
+                egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 16, top: 0, bottom: 0 }).show(ui, |ui| {
+                    body(ui, &palette, "Enter a username followed by a dot and its set of numbers.");
+                });
+            }
+            if let Some(Err(_)) = found {
+                let shown = query.trim().trim_start_matches('@');
+                let why = if *phone { format!("User not found. \"{shown}\" is not a Signal user.") } else { format!("@{shown} is not a Signal user. Make sure you've entered the complete username.") };
+                ui.add_space(8.);
+                egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 16, top: 0, bottom: 0 }).show(ui, |ui| {
+                    ui.label(RichText::new(why).font(theme::regular(13.)).color(palette.destructive));
+                });
+            }
+            if let Some(Ok(entry)) = found {
+                open = Some(entry.id.clone());
+            }
+            ui.add_space(16.);
+            ui.horizontal(|ui| {
+                ui.add_space(16.);
+                let ready = !query.trim().is_empty() && !*searching;
+                let label = if *searching { "…" } else { "Next" };
+                let clicked = ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, label, true).clicked()).inner;
+                if (clicked || enter) && ready {
+                    *searching = true;
+                    *found = None;
+                    let q = if *phone { query.trim().to_owned() } else { format!("@{}", query.trim().trim_start_matches('@')) };
+                    *query = q.clone();
+                    app.send(Command::FindRecipient { query: q });
+                }
+            });
+        }
+    }
+    if let Some(id) = open {
+        app.open(id);
+        app.tab = Tab::Chats;
+        keep = false;
+    }
+    if let Some(n) = next {
+        app.panes.compose = Some(n);
+    } else if keep {
+        app.panes.compose = Some(compose);
+    }
+    true
+}
+
 fn compose_dialog(app: &mut App, ui: &mut Ui) {
     let Some(mut compose) = app.panes.compose.take() else { return };
     let palette = Palette::of(ui.ctx());
     let mut keep = true;
     match &mut compose {
-        Compose::Chat { query, searching, found } => {
-            let mut open = None;
-            let mut opened_link = None;
-            let closed = modal(ui, "new-chat", 380., |ui| {
-                title(ui, "New chat");
-                let field = widgets::text_field(ui, query, "Name, username or number", false);
-                field.request_focus();
-                let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                ui.add_space(8.);
-                let q = query.trim().to_lowercase();
-                egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
-                    if menu_row(ui, Some(Icon::Group), "New group", false).clicked() {
-                        open = Some(None);
-                    }
-                    for c in app.conversations.iter().filter(|c| c.kind != ConversationKind::Group && !q.is_empty() && c.title.to_lowercase().contains(&q)).take(20) {
-                        if contact_row(ui, &palette, &c.title, c.phone.as_deref(), c.color, c.avatar_path.as_deref()).clicked() {
-                            open = Some(Some(c.id.clone()));
-                        }
-                    }
-                    match found {
-                        Some(Ok(entry)) => {
-                            if contact_row(ui, &palette, &entry.title, entry.phone.as_deref(), 0, None).clicked() {
-                                open = Some(Some(entry.id.clone()));
-                            }
-                        }
-                        Some(Err(why)) => body(ui, &palette, why),
-                        None if *searching => {
-                            ui.spinner();
-                        }
-                        None => {}
-                    }
-                });
-                // A pasted group or call link opens it (Desktop opens these
-                // from the system; here they're pasted).
-                let link = signal_link(query.trim());
-                let is_link = link.is_some();
-                if let Some((label, command)) = link {
-                    ui.add_space(6.);
-                    if menu_row(ui, Some(Icon::Link), label, false).clicked() || enter {
-                        opened_link = Some(command);
-                    }
-                }
-                let lookup = !is_link && !q.is_empty() && (q.starts_with('+') || q.contains('.') || q.chars().all(|ch| ch.is_ascii_digit() || " -()".contains(ch)));
-                if lookup && !*searching {
-                    ui.add_space(6.);
-                    let label = if q.starts_with('+') || q.chars().next().is_some_and(|ch| ch.is_ascii_digit()) { "Find by phone number" } else { "Find by username" };
-                    if menu_row(ui, Some(Icon::SearchCompactLight), label, false).clicked() || enter {
-                        *searching = true;
-                        *found = None;
-                        app.send(Command::FindRecipient { query: query.trim().to_owned() });
-                    }
-                }
-                ui.add_space(16.);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Cancel", false).clicked() {
-                        keep = false;
-                    }
-                });
-            });
-            if closed {
-                keep = false;
-            }
-            if let Some(command) = opened_link {
-                app.send(command);
-                keep = false;
-            }
-            match open {
-                Some(Some(id)) => {
-                    keep = false;
-                    app.open(id);
-                    app.tab = Tab::Chats;
-                }
-                Some(None) => {
-                    compose = Compose::Group { picking: true, query: String::new(), members: Vec::new(), title: String::new(), timer: 0, avatar: None };
-                }
-                None => {}
-            }
-        }
+        // Drawn in the chat list (`compose_pane`).
+        Compose::Chat { .. } | Compose::Find { .. } => {}
         Compose::Group { picking, query, members, title: name, timer, avatar } => {
             let closed = modal(ui, "new-group", 420., |ui| {
                 if *picking {
@@ -1056,3 +1228,18 @@ mod link_tests {
     }
 }
 
+
+#[cfg(test)]
+mod compose_tests {
+    #[test]
+    fn username_and_phone_guesses() {
+        assert!(super::probably_username("@maya"));
+        assert!(super::probably_username("maya.42"));
+        assert!(!super::probably_username("maya"));
+        assert!(!super::probably_username("12345"));
+        assert!(super::probably_phone("+1 555 0100"));
+        assert!(super::probably_phone("(555) 010-0100"));
+        assert!(!super::probably_phone("ma"));
+        assert!(!super::probably_phone("5+5"));
+    }
+}

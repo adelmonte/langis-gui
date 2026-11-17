@@ -136,6 +136,9 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
         .show(ui, |ui| {
             let full = ui.max_rect();
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
+            if crate::panes::compose_pane(app, ui) {
+                return;
+            }
             // Header: "Chats", and the compose button.
             ui.add_space(12.);
             ui.horizontal(|ui| {

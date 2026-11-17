@@ -145,9 +145,16 @@ fn screenshots_panes() {
     }
 
     // New chat, and a new group's second step.
-    harness.state_mut().panes.compose = Some(crate::panes::Compose::Chat { query: "ma".into(), searching: false, found: None });
+    harness.state_mut().tab = Tab::Chats;
+    harness.state_mut().panes.compose = Some(crate::panes::Compose::Chat { query: String::new(), searching: false, found: None });
     wait(&mut harness, "new chat", |_| true);
     save(&mut harness, "new-chat");
+    harness.state_mut().panes.compose = Some(crate::panes::Compose::Chat { query: "ma".into(), searching: false, found: None });
+    wait(&mut harness, "new chat search", |_| true);
+    save(&mut harness, "new-chat-search");
+    harness.state_mut().panes.compose = Some(crate::panes::Compose::Find { phone: false, query: String::new(), searching: false, found: None });
+    wait(&mut harness, "find by username", |_| true);
+    save(&mut harness, "new-chat-username");
     let members: Vec<String> = harness.state().conversations.iter().filter(|c| c.kind == ConversationKind::Direct).filter_map(|c| c.id.as_direct().map(str::to_owned)).take(2).collect();
     harness.state_mut().panes.compose = Some(crate::panes::Compose::Group { picking: true, query: String::new(), members: members.clone(), title: String::new(), timer: 0, avatar: None });
     wait(&mut harness, "new group", |_| true);
