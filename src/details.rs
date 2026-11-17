@@ -22,6 +22,7 @@ pub enum Page {
     GroupLink,
     Requests,
     Permissions,
+    ChatColor,
 }
 
 pub struct Details {
@@ -153,6 +154,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Page::GroupLink => "Group link",
                     Page::Requests => "Requests and invites",
                     Page::Permissions => "Permissions",
+                    Page::ChatColor => "Chat Color",
                 };
                 ui.label(RichText::new(heading).font(theme::semibold(14.)));
             });
@@ -170,6 +172,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Page::GroupLink => group_link(app, ui, &palette, &c),
                     Page::Requests => requests(app, ui, &palette, &c),
                     Page::Permissions => permissions(app, ui, &palette, &c),
+                    Page::ChatColor => crate::chat_colors::picker(app, ui, Some(c.id.clone())),
                 }
             });
         });
@@ -183,15 +186,6 @@ fn section(ui: &mut Ui, palette: &Palette, contents: impl FnOnce(&mut Ui)) {
         ui.vertical(contents);
     });
     ui.add_space(12.);
-}
-
-/// A row with an icon, a label and (on the right) a value.
-fn row(ui: &mut Ui, palette: &Palette, icon: Icon, label: &str, value: Option<&str>) -> egui::Response {
-    let response = menu_row(ui, Some(icon), label, false);
-    if let Some(value) = value {
-        ui.painter().text(response.rect.right_center() - egui::vec2(10., 0.), egui::Align2::RIGHT_CENTER, value, theme::regular(13.), palette.text_secondary);
-    }
-    response
 }
 
 fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
@@ -227,74 +221,46 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 body(ui, palette, phone);
             }
         }
-        ui.add_space(14.);
-        // Desktop's quick buttons: video, audio, mute.
-        ui.horizontal(|ui| {
-            let n = 3.;
-            ui.add_space(((ui.available_width() - n * 76.) / 2.).max(0.));
-            let quick = |ui: &mut Ui, icon: Icon, label: &str| {
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(72., 56.), egui::Sense::click());
-                let fill = if response.hovered() { palette.fill_pressed } else { palette.fill };
-                ui.painter().rect_filled(rect, CornerRadius::same(10), fill);
-                icon.paint(ui, egui::Rect::from_min_size(rect.min + egui::vec2(26., 8.), egui::vec2(20., 20.)), 20., palette.text);
-                ui.painter().text(egui::pos2(rect.center().x, rect.bottom() - 9.), egui::Align2::CENTER_BOTTOM, label, theme::regular(12.), palette.text);
-                ui.add_space(4.);
-                response.clicked()
-            };
-            let callable = c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked;
-            if quick(ui, Icon::Video, "Video") && callable {
-                start_call(app, c, true);
-            }
-            if quick(ui, Icon::Phone, "Audio") && callable {
-                start_call(app, c, false);
-            }
-            let muted = c.muted;
-            let mute = ui.scope(|ui| quick(ui, Icon::BellSlashFill, if muted { "Unmute" } else { "Mute" })).inner;
-            if mute {
-                if muted {
-                    app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(0) });
-                } else {
-                    egui::Popup::open_id(ui.ctx(), egui::Id::unique("details-mute"));
-                }
-            }
-        });
+        ui.add_space(16.);
     });
-    egui::Popup::new(egui::Id::unique("details-mute"), ui.ctx().clone(), egui::PopupAnchor::PointerFixed, egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("details-mute-layer")))
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
-        .show(|ui| {
-            for (label, until) in crate::panes::mute_choices(false) {
-                if menu_row(ui, None, label, false).clicked() {
-                    app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(until) });
-                }
-            }
-        });
+    header_buttons(app, ui, palette, c);
     ui.add_space(20.);
+    ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+    use crate::axo_list::{self, End, Item};
 
-    // Chat settings.
-    section(ui, palette, |ui| {
-        let mut timer = c.expire_timer;
-        ui.horizontal(|ui| {
-            Icon::TimerCompact.paint(ui, egui::Rect::from_min_size(ui.cursor().min + egui::vec2(10., 8.), egui::vec2(20., 20.)), 18., palette.text);
-            ui.add_space(40.);
-            ui.label(RichText::new("Disappearing messages").font(theme::regular(14.)));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(!group || c.can_edit_info, |ui| {
-                    if timer_picker(ui, "details-timer", &mut timer) {
-                        app.send(Command::SetExpireTimer { conversation: c.id.clone(), seconds: timer });
-                    }
-                });
-            });
-        });
-        ui.add_space(4.);
-        if c.kind == ConversationKind::Direct {
-            if row(ui, palette, Icon::EditCompact, "Nickname", None).clicked() {
-                let current = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()).and_then(|ct| ct.nickname.clone()).unwrap_or_default();
-                if let Some(d) = app.panes.details.as_mut() {
-                    d.nickname = Some(current);
-                }
+    // Disappearing messages, nickname, chat color, media, safety number.
+    axo_list::list(ui, None, None, |ui| {
+        let info = if group {
+            "When enabled, messages sent and received in this group will disappear after they've been seen."
+        } else {
+            "When enabled, messages sent and received in this 1:1 chat will disappear after they've been seen."
+        };
+        let mut values: Vec<u32> = TIMERS.iter().map(|(v, _)| *v).filter(|v| *v != u32::MAX).collect();
+        values.sort_by_key(|v| if *v == 0 { 0 } else { u32::MAX - v });
+        if !values.contains(&c.expire_timer) {
+            values.push(c.expire_timer);
+        }
+        let labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
+        let options: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let chosen = values.iter().position(|v| *v == c.expire_timer);
+        let item = Item::new("Disappearing messages").symbol("timer-slash").description(info).disabled(group && !c.can_edit_info);
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("details-timer").with(&c.id.0), item, &options, chosen) {
+            app.send(Command::SetExpireTimer { conversation: c.id.clone(), seconds: values[i] });
+        }
+        if c.kind == ConversationKind::Direct && axo_list::item(ui, Item::new("Nickname").symbol("pencil"), End::Click).clicked() {
+            let current = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()).and_then(|ct| ct.nickname.clone()).unwrap_or_default();
+            if let Some(d) = app.panes.details.as_mut() {
+                d.nickname = Some(current);
             }
+        }
+        let bubble = crate::chat_colors::for_chat(app, &c.id);
+        if axo_list::item(ui, Item::new("Chat color").symbol("palette"), End::Swatch(bubble)).clicked() {
+            set_page(app, Page::ChatColor);
+        }
+        if c.kind == ConversationKind::Direct {
             let verified = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()).is_some_and(|ct| ct.verified);
-            if row(ui, palette, Icon::SafetyNumber, "View safety number", verified.then_some("Verified")).clicked() {
+            let item = Item::new("View Safety Number").symbol("shield-check");
+            if axo_list::item(ui, item, End::Arrow(verified.then_some("Verified"))).clicked() {
                 app.send(Command::LoadSafetyNumber { conversation: c.id.clone() });
                 if let Some(d) = app.panes.details.as_mut() {
                     d.page = Page::Safety;
@@ -303,22 +269,21 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 }
             }
         }
-        if group && !c.left {
-            let mine = c.member_labels.get(&me).map(|l| l.text.clone()).unwrap_or_default();
-            if c.can_label && row(ui, palette, Icon::EditCompact, "Your member label", Some(&mine)).clicked()
-                && let Some(d) = app.panes.details.as_mut()
-            {
-                d.label = Some(mine);
-            }
-        }
     });
 
-    if group && !c.left {
-        // Members.
-        ui.label(RichText::new(format!("{} members", c.members.len() + 1)).font(theme::semibold(14.)));
-        ui.add_space(6.);
-        section(ui, palette, |ui| {
-            if c.can_add_members && menu_row(ui, Some(Icon::PersonPlus), "Add members", false).clicked()
+    if group {
+        // `ConversationDetailsMembershipList`.
+        axo_list::gap(ui);
+        let count = c.members.len() + 1;
+        let title = if c.ended {
+            if count == 1 { "1 former member".to_owned() } else { format!("{count} former members") }
+        } else if count == 1 {
+            "1 member".to_owned()
+        } else {
+            format!("{count} members")
+        };
+        axo_list::list(ui, Some(&title), None, |ui| {
+            if c.can_add_members && !c.left && axo_list::item(ui, Item::new("Add members").symbol("plus"), End::Click).clicked()
                 && let Some(d) = app.panes.details.as_mut()
             {
                 d.add_members = Some((String::new(), Vec::new()));
@@ -331,75 +296,167 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 let is_admin = c.admins.contains(&m);
                 let label = c.member_labels.get(&m).map(|l| format!("{} {}", l.emoji.clone().unwrap_or_default(), l.text).trim().to_owned());
                 let color = m.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
-                let response = crate::panes::contact_row(ui, palette, &name, label.as_deref(), color, None);
-                if is_admin {
-                    ui.painter().text(response.rect.right_center() - egui::vec2(10., 0.), egui::Align2::RIGHT_CENTER, "Admin", theme::regular(12.), palette.text_secondary);
-                }
+                let row = member_row(ui, palette, &name, label.as_deref(), color, is_admin.then_some("Admin"));
                 if !you {
-                    response.context_menu(|ui| {
-                        if menu_row(ui, None, "Message", false).clicked() {
+                    crate::menu::context(ui, &row, egui::Id::unique("details-member").with(&m), |menu| {
+                        if menu.item(Some("message"), "Message") {
                             app.panes.details = None;
                             app.open(ConversationId::direct(&m));
-                            ui.close();
                         }
                         if admin {
-                            if menu_row(ui, None, if is_admin { "Remove as admin" } else { "Make admin" }, false).clicked() {
+                            if menu.item(Some("key"), if is_admin { "Remove as admin" } else { "Make admin" }) {
                                 app.send(Command::SetGroupAdmin { conversation: c.id.clone(), member: m.clone(), admin: !is_admin });
-                                ui.close();
                             }
-                            if menu_row(ui, None, "Remove from group", true).clicked() {
+                            if menu.item(Some("minus-circle"), "Remove from group") {
                                 app.send(Command::RemoveFromGroup { conversation: c.id.clone(), service_id: m.clone() });
-                                ui.close();
                             }
                         }
                     });
                 }
             }
         });
-        // Administration.
-        section(ui, palette, |ui| {
+    }
+
+    if group && !c.ended {
+        axo_list::gap(ui);
+        axo_list::list(ui, None, None, |ui| {
             let state = &c.group_state;
-            let link_value = if state.link.is_some() { "On" } else { "Off" };
-            if (admin || state.link.is_some()) && row(ui, palette, Icon::Link, "Group link", Some(link_value)).clicked() {
+            if (admin || state.link.is_some()) && axo_list::item(ui, Item::new("Group link").symbol("link"), End::Arrow(Some(if state.link.is_some() { "On" } else { "Off" }))).clicked() {
                 set_page(app, Page::GroupLink);
             }
+            if !c.left && c.can_label {
+                let mine = c.member_labels.get(&me).map(|l| l.text.clone()).unwrap_or_default();
+                if axo_list::item(ui, Item::new("Member label").symbol("label"), End::Arrow(None)).clicked()
+                    && let Some(d) = app.panes.details.as_mut()
+                {
+                    d.label = Some(mine);
+                }
+            }
             let waiting = state.invites.len() + state.requests.len();
-            if row(ui, palette, Icon::PersonPlus, "Requests and invites", Some(&waiting.to_string())).clicked() {
+            let count = waiting.to_string();
+            if axo_list::item(ui, Item::new("Requests & Invites").symbol("group"), End::Arrow((waiting > 0).then_some(count.as_str()))).clicked() {
                 set_page(app, Page::Requests);
             }
-            if admin && row(ui, palette, Icon::Key, "Permissions", None).clicked() {
+            if admin && axo_list::item(ui, Item::new("Permissions").symbol("key"), End::Arrow(None)).clicked() {
                 set_page(app, Page::Permissions);
             }
         });
     }
 
-    // Leaving, blocking, deleting.
-    section(ui, palette, |ui| {
+    // `ConversationDetailsActions`.
+    if c.kind != ConversationKind::NoteToSelf {
         let mut confirm = None;
-        if group && !c.left && menu_row(ui, Some(Icon::Leave), "Leave group", true).clicked() {
-            confirm = Some(Confirm::Leave);
-        }
-        if group && admin && !c.left && !c.ended && menu_row(ui, Some(Icon::MinusCircle), "End group", true).clicked() {
-            confirm = Some(Confirm::End);
-        }
-        if c.kind != ConversationKind::NoteToSelf {
-            let (label, which) = if c.blocked { ("Unblock", Confirm::Unblock) } else if group { ("Block group", Confirm::Block) } else { ("Block", Confirm::Block) };
-            if menu_row(ui, Some(Icon::Block), label, !c.blocked).clicked() {
-                confirm = Some(which);
+        axo_list::gap(ui);
+        axo_list::list(ui, None, None, |ui| {
+            let red = |item: Item<'static>| Item { destructive: true, ..item };
+            if group && !c.left && !c.ended && axo_list::item(ui, red(Item::new("Leave group").symbol("leave")), End::Click).clicked() {
+                confirm = Some(Confirm::Leave);
             }
-            if !c.blocked && !group && menu_row(ui, Some(Icon::Spam), "Report spam", true).clicked() {
+            let label = match (group, c.blocked) {
+                (true, false) => "Block group",
+                (true, true) => "Unblock group",
+                (false, false) => "Block",
+                (false, true) => "Unblock",
+            };
+            if axo_list::item(ui, red(Item::new(label).symbol("block")), End::Click).clicked() {
+                confirm = Some(if c.blocked { Confirm::Unblock } else { Confirm::Block });
+            }
+            if axo_list::item(ui, Item::new(if c.archived { "Unarchive chat" } else { "Archive chat" }).symbol("archive"), End::Click).clicked() {
+                app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::Archived(!c.archived) });
+            }
+            if (c.ended || c.left) && axo_list::item(ui, red(Item::new("Delete chat").symbol("trash")), End::Click).clicked() {
+                confirm = Some(Confirm::Delete);
+            }
+            if !c.blocked && axo_list::item(ui, red(Item::new("Report spam").symbol("error-octagon")), End::Click).clicked() {
                 app.send(Command::AnswerMessageRequest { conversation: c.id.clone(), answer: langis_store::MessageRequestResponse::Spam });
             }
-        }
-        if menu_row(ui, Some(Icon::Trash), "Delete chat", true).clicked() {
-            confirm = Some(Confirm::Delete);
+        });
+        if group && admin && !c.left && !c.ended {
+            axo_list::gap(ui);
+            axo_list::list(ui, None, None, |ui| {
+                if axo_list::item(ui, Item { destructive: true, ..Item::new("End group").symbol("x-circle") }, End::Click).clicked() {
+                    confirm = Some(Confirm::End);
+                }
+            });
         }
         if let Some(confirm) = confirm
             && let Some(d) = app.panes.details.as_mut()
         {
             d.confirm = Some(confirm);
         }
-    });
+    }
+}
+
+/// A member: their avatar, name and label, and Admin at the end.
+fn member_row(ui: &mut Ui, palette: &Palette, name: &str, label: Option<&str>, color: u8, end: Option<&str>) -> egui::Response {
+    let width = ui.available_width();
+    let h = if label.is_some() { 52. } else { 48. };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(14), palette.fill);
+    }
+    let avatar = egui::Rect::from_min_size(egui::pos2(rect.left() + 12., rect.center().y - 18.), egui::vec2(36., 36.));
+    widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::person(name, color));
+    let x = avatar.right() + 12.;
+    match label {
+        Some(label) => {
+            ui.painter().text(egui::pos2(x, rect.center().y - 1.), egui::Align2::LEFT_BOTTOM, name, theme::regular(13.), palette.text);
+            ui.painter().text(egui::pos2(x, rect.center().y + 1.), egui::Align2::LEFT_TOP, label, theme::regular(12.), palette.text_secondary);
+        }
+        None => {
+            ui.painter().text(egui::pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, name, theme::regular(13.), palette.text);
+        }
+    }
+    if let Some(end) = end {
+        ui.painter().text(egui::pos2(rect.right() - 12., rect.center().y), egui::Align2::RIGHT_CENTER, end, theme::regular(13.), palette.text_secondary);
+    }
+    response
+}
+
+/// `AxoStackedButton.Row`: video, audio (1:1 chats), mute, search. Each an
+/// 18px symbol in a pill, its label under it.
+fn header_buttons(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
+    let group = c.kind == ConversationKind::Group;
+    let callable = c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked && !c.ended;
+    let mut buttons: Vec<(&str, &str)> = Vec::new();
+    if c.kind != ConversationKind::NoteToSelf && !c.ended {
+        buttons.push(("videocamera", "Video"));
+        if !group {
+            buttons.push(("phone", "Audio"));
+        }
+    }
+    buttons.push(if c.muted { ("bell-slash", "Unmute") } else { ("bell", "Mute") });
+    buttons.push(("search", "Search"));
+    let w = 56.;
+    let total = buttons.len() as f32 * w + (buttons.len() as f32 - 1.) * 4.;
+    let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 36. + 6. + 14.), egui::Sense::hover());
+    let left = row.center().x - total / 2.;
+    for (i, (symbol, label)) in buttons.iter().enumerate() {
+        let cell = egui::Rect::from_min_size(egui::pos2(left + i as f32 * (w + 4.), row.top()), egui::vec2(w, row.height()));
+        let pill = egui::Rect::from_center_size(egui::pos2(cell.center().x, cell.top() + 18.), egui::vec2(48., 36.));
+        let response = ui.interact(cell, egui::Id::unique("details-stacked").with(i), egui::Sense::click());
+        let fill = if response.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill };
+        ui.painter().rect_filled(pill, CornerRadius::same(18), fill);
+        let disabled = matches!(*label, "Video" | "Audio") && !callable;
+        let color = if disabled { palette.text_secondary } else { palette.text };
+        theme::paint_symbol(ui.painter(), symbol, pill.center(), 18., color);
+        ui.painter().text(egui::pos2(cell.center().x, pill.bottom() + 6.), egui::Align2::CENTER_TOP, *label, theme::medium(11.), color);
+        let clicked = response.clicked();
+        match *label {
+            "Video" if clicked && callable => start_call(app, c, true),
+            "Audio" if clicked && callable => start_call(app, c, false),
+            "Unmute" if clicked => app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(0) }),
+            "Mute" => {
+                let id = c.id.clone();
+                crate::menu::dropdown(ui, &response, egui::Id::unique("details-mute"), |m| crate::panes::mute_items(app, m, &id));
+            }
+            "Search" if clicked => {
+                app.panes.details = None;
+                app.find_requested = true;
+            }
+            _ => {}
+        }
+    }
 }
 
 fn start_call(app: &mut App, c: &Conversation, video: bool) {
