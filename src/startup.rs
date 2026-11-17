@@ -51,7 +51,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let mut start = None;
     match &mut app.phase {
         Phase::Setup { passphrase, first, second, error } => card(ui, 420., |ui| {
-            ui.label(RichText::new("Welcome to langis-gui").font(theme::semibold(24.)));
+            ui.label(RichText::new("Welcome to langis").font(theme::semibold(24.)));
             ui.add_space(8.);
             ui.label(
                 RichText::new("Your messages are kept in an encrypted database on this computer. Choose where its key is kept.")
@@ -90,7 +90,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
         }),
         Phase::Unlock { passphrase, error } => card(ui, 360., |ui| {
-            ui.label(RichText::new("Unlock langis-gui").font(theme::semibold(24.)));
+            ui.label(RichText::new("Unlock langis").font(theme::semibold(24.)));
             ui.add_space(16.);
             let field = widgets::text_field(ui, passphrase, "Passphrase", true);
             field.request_focus();

@@ -9,16 +9,16 @@ sizes="16 32 48 64 128 256 512"
 
 if [ "${1:-}" = "--uninstall" ]; then
     cargo uninstall langis-gui || true
-    rm -f "$share/applications/langis-gui.desktop" "$share/icons/hicolor/scalable/apps/langis-gui.svg"
-    for size in $sizes; do rm -f "$share/icons/hicolor/${size}x${size}/apps/langis-gui.png"; done
+    rm -f "$share/applications/langis.desktop" "$share/applications/langis-gui.desktop" "$share/icons/hicolor/scalable/apps/langis.svg"
+    for size in $sizes; do rm -f "$share/icons/hicolor/${size}x${size}/apps/langis.png"; done
     exit
 fi
 
 cargo install --locked --path .
-install -Dm644 data/langis-gui.desktop "$share/applications/langis-gui.desktop"
-install -Dm644 assets/app/langis-gui.svg "$share/icons/hicolor/scalable/apps/langis-gui.svg"
+install -Dm644 data/langis.desktop "$share/applications/langis.desktop"
+install -Dm644 assets/app/langis.svg "$share/icons/hicolor/scalable/apps/langis.svg"
 for size in $sizes; do
-    install -Dm644 "assets/app/langis-gui-$size.png" "$share/icons/hicolor/${size}x${size}/apps/langis-gui.png"
+    install -Dm644 "assets/app/langis-$size.png" "$share/icons/hicolor/${size}x${size}/apps/langis.png"
 done
 command -v update-desktop-database > /dev/null && update-desktop-database "$share/applications" || true
 command -v gtk-update-icon-cache > /dev/null && gtk-update-icon-cache -q "$share/icons/hicolor" || true

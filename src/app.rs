@@ -498,7 +498,7 @@ impl App {
             }
             Loaded::Notify { title, body } => {
                 std::thread::spawn(move || {
-                    let shown = notify_rust::Notification::new().appname("langis-gui").summary(&title).body(&body).show();
+                    let shown = notify_rust::Notification::new().appname("langis").summary(&title).body(&body).show();
                     if let Err(error) = shown {
                         tracing::warn!(%error, "couldn't show a notification");
                     }
@@ -583,7 +583,7 @@ impl App {
         }
         let (title, group) = (chat.title.clone(), chat.kind == langis_store::ConversationKind::Group);
         if content == "none" {
-            let loaded = Loaded::Notify { title: "langis-gui".into(), body: "New message".into() };
+            let loaded = Loaded::Notify { title: "langis".into(), body: "New message".into() };
             let _ = self.loaded_tx.send(loaded);
             return;
         }
@@ -761,8 +761,8 @@ fn default_data_dir() -> PathBuf {
 fn device_name() -> String {
     let host = std::fs::read_to_string("/etc/hostname").ok().map(|h| h.trim().to_owned()).filter(|h| !h.is_empty());
     match host {
-        Some(host) => format!("langis-gui on {host}"),
-        None => "langis-gui".into(),
+        Some(host) => format!("langis on {host}"),
+        None => "langis".into(),
     }
 }
 

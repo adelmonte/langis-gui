@@ -74,8 +74,8 @@ program in `~/.cargo/bin`, a launcher entry and the icon under
 the like on niri). `./install.sh --uninstall` removes them; your data in
 `~/.local/share/langis-gui` stays.
 
-The icon (`assets/app/`) is langis-gui's own: a bubble turned the wrong
-way, around a backwards L. It is not Signal's logo.
+The icon (`assets/app/`) is langis's own: a round bubble in Signal's blue
+with its tail to the right, a ring of dots and an l. It is not Signal's logo.
 
 ## Screenshots
 
