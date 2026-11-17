@@ -151,8 +151,8 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                 ui.label(RichText::new("Chats").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(14.);
-                    let more = widgets::icon_button(ui, Icon::More, 20., "More");
-                    egui::Popup::menu(&more).show(|ui| crate::panes::list_menu(app, ui));
+                    let more = widgets::icon_button(ui, Icon::More, 20., "More actions");
+                    crate::menu::dropdown(ui, &more, egui::Id::unique("chat-list-more"), |m| crate::panes::list_menu(app, m));
                     if widgets::icon_button(ui, Icon::Edit, 20., "New chat").clicked() {
                         app.panes.compose = Some(crate::panes::Compose::Chat { query: String::new(), searching: false, found: None });
                     }

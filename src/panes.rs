@@ -22,6 +22,10 @@ pub struct Panes {
     pub links: Vec<CallLink>,
     pub calls_loaded: bool,
     pub call_search: String,
+    /// Desktop's new call view in place of the calls list, and its query.
+    pub new_call: Option<String>,
+    /// Asking before clearing the call history.
+    pub clear_calls: bool,
     /// A call link's details, by room id.
     pub link_details: Option<String>,
     pub link_name: String,
@@ -537,21 +541,20 @@ pub fn mute_choices(muted: bool) -> Vec<(&'static str, i64)> {
     vec![("1 hour", now + hour), ("8 hours", now + 8 * hour), ("1 day", now + 24 * hour), ("1 week", now + 7 * 24 * hour), ("Always", i64::MAX)]
 }
 
-/// The chat list's "More" menu.
-pub fn list_menu(app: &mut App, ui: &mut Ui) {
-    if menu_row(ui, Some(Icon::Group), "New group", false).clicked() {
-        app.panes.compose = Some(Compose::Group { picking: true, query: String::new(), members: Vec::new(), title: String::new(), timer: 0, avatar: None });
-        ui.close();
+/// Desktop's "More actions" menu over the chat list.
+pub fn list_menu(app: &mut App, m: &mut crate::menu::Menu) {
+    if m.item(Some("archive"), "View Archive") {
+        app.panes.archived = true;
     }
-    if menu_row(ui, Some(Icon::Archive), if app.panes.archived { "Back to chats" } else { "Archived chats" }, false).clicked() {
-        app.panes.archived = !app.panes.archived;
-        ui.close();
+    let custom = app.panes.folders.iter().any(|f| f.folder_type == langis_store::ChatFolderType::Custom);
+    if !custom && m.item(Some("folder-plus"), "Add chat folder") {
+        app.tab = crate::app::Tab::Settings;
+        app.settings.page = crate::settings::Page::ChatFolders;
+        app.settings.folder = Some((crate::settings::new_id(), true, langis_store::ChatFolderParams::defaults()));
     }
-    if menu_row(ui, Some(Icon::CheckCircle), "Mark all as read", false).clicked() {
-        for c in app.conversations.iter().filter(|c| c.unread_count > 0) {
-            app.send(Command::MarkRead { conversation: c.id.clone() });
-        }
-        ui.close();
+    if custom && m.item(Some("folder-settings"), "Folder settings") {
+        app.tab = crate::app::Tab::Settings;
+        app.settings.page = crate::settings::Page::ChatFolders;
     }
 }
 
