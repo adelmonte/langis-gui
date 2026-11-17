@@ -1537,6 +1537,9 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
         if m.item(Some("settings"), if group { "Group settings" } else { "Chat settings" }) {
             crate::details::open(app, id.clone());
         }
+        if m.item(Some("album"), "All media") {
+            crate::details::open_media(app, id.clone());
+        }
         m.separator();
         if !c.marked_unread && m.item(Some("message-badge"), "Mark as unread") {
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(true) });

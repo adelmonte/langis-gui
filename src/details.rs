@@ -23,6 +23,7 @@ pub enum Page {
     Requests,
     Permissions,
     ChatColor,
+    AllMedia,
 }
 
 pub struct Details {
@@ -37,6 +38,9 @@ pub struct Details {
     pub nickname: Option<ContactNickname>,
     pub add_members: Option<(String, Vec<String>)>,
     pub label: Option<String>,
+    /// The chat's media, for All media and whether to offer it.
+    pub media: Option<Vec<langis_store::Message>>,
+    pub media_tab: crate::media_gallery::Tab,
 }
 
 impl Details {
@@ -51,6 +55,8 @@ impl Details {
             nickname: None,
             add_members: None,
             label: None,
+            media: None,
+            media_tab: Default::default(),
         }
     }
 }
@@ -63,7 +69,14 @@ pub fn open(app: &mut App, id: ConversationId) {
         app.send(Command::LoadProfile { service_id: sid.to_owned() });
         load_contact(app, sid.to_owned());
     }
+    crate::media_gallery::load(app, id.clone());
     app.panes.details = Some(Details::new(id));
+}
+
+/// Desktop's All media, from the header menu.
+pub fn open_media(app: &mut App, id: ConversationId) {
+    open(app, id);
+    set_page(app, Page::AllMedia);
 }
 
 fn load_contact(app: &App, sid: String) {
@@ -144,8 +157,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Page::Requests => "Requests and invites",
                     Page::Permissions => "Permissions",
                     Page::ChatColor => "Chat Color",
+                    Page::AllMedia => "",
                 };
                 ui.label(RichText::new(heading).font(theme::semibold(14.)));
+                if page == Page::AllMedia
+                    && let Some(d) = app.panes.details.as_mut()
+                {
+                    crate::media_gallery::tabs(ui, rect.shrink2(egui::vec2(60., 0.)), &mut d.media_tab);
+                }
             });
         });
     egui::CentralPanel::no_frame().show(ui, |ui| {
@@ -162,6 +181,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Page::Requests => requests(app, ui, &palette, &c),
                     Page::Permissions => permissions(app, ui, &palette, &c),
                     Page::ChatColor => crate::chat_colors::picker(app, ui, Some(c.id.clone())),
+                    Page::AllMedia => crate::media_gallery::show(app, ui, &palette, &c.id),
                 }
             });
         });
@@ -245,6 +265,10 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         let bubble = crate::chat_colors::for_chat(app, &c.id);
         if axo_list::item(ui, Item::new("Chat color").symbol("palette"), End::Swatch(bubble)).clicked() {
             set_page(app, Page::ChatColor);
+        }
+        let has_media = app.panes.details.as_ref().and_then(|d| d.media.as_ref()).is_some_and(|m| !m.is_empty());
+        if has_media && axo_list::item(ui, Item::new("Media, links, and files").symbol("album"), End::Arrow(None)).clicked() {
+            set_page(app, Page::AllMedia);
         }
         if c.kind == ConversationKind::Direct {
             let verified = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()).is_some_and(|ct| ct.verified);

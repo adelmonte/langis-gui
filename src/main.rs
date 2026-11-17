@@ -4,6 +4,7 @@
 mod actions;
 mod app;
 mod axo_list;
+mod media_gallery;
 mod call;
 mod calls_tab;
 mod chat;

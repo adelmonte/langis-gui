@@ -103,6 +103,15 @@ fn screenshots_panes() {
     }
     wait(&mut harness, "permissions", |_| true);
     save(&mut harness, "details-permissions");
+    use crate::media_gallery::Tab as MediaTab;
+    for (tab, name) in [(MediaTab::Media, "media-gallery"), (MediaTab::Audio, "media-audio"), (MediaTab::Links, "media-links"), (MediaTab::Files, "media-files")] {
+        if let Some(d) = harness.state_mut().panes.details.as_mut() {
+            d.page = crate::details::Page::AllMedia;
+            d.media_tab = tab;
+        }
+        wait(&mut harness, name, |app| app.panes.details.as_ref().is_some_and(|d| d.media.is_some()));
+        save(&mut harness, name);
+    }
     for (page, name) in [(crate::details::Page::GroupLink, "details-group-link"), (crate::details::Page::ChatColor, "details-chat-color")] {
         if let Some(d) = harness.state_mut().panes.details.as_mut() {
             d.page = page;
