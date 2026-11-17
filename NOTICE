@@ -15,6 +15,11 @@ Copyright Signal Messenger, LLC, AGPL-3.0-only):
 - assets/icons/*.svg are Signal Desktop's images/icons/v3 icons, recolored
   white so they can be tinted.
 - Colors, sizes and text come from its stylesheets and ts/axo design tokens.
+- assets/fonts/SignalSymbols-Regular.ttf is Signal Desktop's
+  fonts/signal-symbols/SignalSymbolsVariable.woff2, converted to TrueType
+  and fixed at weight 400; src/symbols.rs is generated from its
+  ts/axo/_internal/AxoSymbolDefs.generated.std.ts.
+- src/menu.rs follows its AxoDropdownMenu and AxoBaseMenu.
 
 assets/fonts/Inter-*.ttf: Inter 3.19 by Rasmus Andersson, SIL Open Font
 License 1.1 (https://github.com/rsms/inter), converted from the WOFF2 files
