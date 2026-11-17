@@ -293,6 +293,10 @@ fn layout(ui: &Ui, text: &str, spans: &Spans, palette: &Palette, wrap: f32) -> s
         }
         crate::chat::append_with_emoji(&mut job, &text[a..b], format);
     }
+    if job.sections.is_empty() {
+        // An empty job takes egui's default font height; keep the row 20 tall.
+        job.append("", 0., egui::TextFormat { font_id: theme::regular(14.), color: palette.text, line_height: Some(20.), ..Default::default() });
+    }
     job.wrap.max_width = wrap;
     ui.fonts_mut(|f| f.layout_job(job))
 }
@@ -556,6 +560,9 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             .show(ui, |ui| {
                 ui.set_width(width - 24.);
                 egui::ScrollArea::vertical().max_height(60.).min_scrolled_height(0.).stick_to_bottom(true).show(ui, |ui| {
+                    // The theme's 28px interact height would make one line
+                    // taller than the input, and scroll it.
+                    ui.spacing_mut().interact_size.y = 20.;
                     ui.add(
                         egui::TextEdit::multiline(&mut chat.composer)
                             .hint_text(if editing { "Edit message" } else { "Message" })
