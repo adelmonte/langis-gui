@@ -103,6 +103,13 @@ fn screenshots_panes() {
     }
     wait(&mut harness, "permissions", |_| true);
     save(&mut harness, "details-permissions");
+    for (page, name) in [(crate::details::Page::GroupLink, "details-group-link"), (crate::details::Page::ChatColor, "details-chat-color")] {
+        if let Some(d) = harness.state_mut().panes.details.as_mut() {
+            d.page = page;
+        }
+        wait(&mut harness, name, |_| true);
+        save(&mut harness, name);
+    }
     let direct = harness.state().conversations.iter().find(|c| c.kind == ConversationKind::Direct && c.accepted).map(|c| c.id.clone()).unwrap();
     harness.state_mut().open(direct.clone());
     wait(&mut harness, "direct", |app| app.chat.as_ref().is_some_and(|c| c.loaded));

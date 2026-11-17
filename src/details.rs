@@ -10,7 +10,7 @@ use langis_store::{ContactNickname, Conversation, ConversationId, ConversationKi
 
 use crate::app::{App, Loaded};
 use crate::icons::Icon;
-use crate::panes::{body, buttons, menu_row, modal, title};
+use crate::panes::{body, buttons, modal, title};
 use crate::theme::{self, Palette};
 use crate::widgets;
 
@@ -539,46 +539,55 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     });
 }
 
-fn group_link(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
+/// Desktop's `GroupLinkManagement`.
+fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) {
+    use crate::axo_list::{self, End, Item};
     let admin = c.admins.contains(&app.aci);
     let link = c.group_state.link.clone();
-    section(ui, palette, |ui| {
+    ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+    axo_list::list(ui, None, None, |ui| {
         let mut on = link.is_some();
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Group link").font(theme::regular(14.)));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(admin, |ui| {
-                    if widgets::switch(ui, &mut on).changed() {
-                        app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: if on { LinkChange::On } else { LinkChange::Off } });
-                    }
-                });
-            });
-        });
-        if let Some(link) = &link {
-            ui.add_space(8.);
-            ui.label(RichText::new(&link.url).font(theme::regular(13.)).color(palette.accent_text));
-            ui.add_space(8.);
-            if menu_row(ui, Some(Icon::Copy), "Copy link", false).clicked() {
-                ui.ctx().copy_text(link.url.clone());
-                app.toast("Link copied.");
-            }
-            if admin {
-                if menu_row(ui, Some(Icon::Recent), "Reset link", false).clicked() {
-                    app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: LinkChange::Reset });
-                }
-                let mut approval = link.approval;
-                ui.horizontal(|ui| {
-                    ui.label("Approve new members");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::switch(ui, &mut approval).changed() {
-                            app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: LinkChange::Approval(approval) });
-                        }
-                    });
-                });
-            }
+        let url = link.as_ref().map(|l| l.url.clone());
+        let mut item = Item::new("Group link").disabled(!admin);
+        if let Some(url) = &url {
+            item = item.description(url);
+        }
+        if axo_list::switch(ui, item, &mut on) {
+            app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: if on { LinkChange::On } else { LinkChange::Off } });
         }
     });
-    body(ui, palette, "Anyone with the link can view the group's name and photo and ask to join. Share it with people you trust.");
+    let Some(link) = link else { return };
+    let ask = egui::Id::unique("reset-group-link");
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        if axo_list::item(ui, Item::new("Copy link").symbol("copy"), End::Click).clicked() {
+            ui.ctx().copy_text(link.url.clone());
+            app.toast("Group link copied.");
+        }
+        if admin && axo_list::item(ui, Item::new("Reset link").symbol("arrow-clockwise"), End::Click).clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(ask, true));
+        }
+    });
+    if admin {
+        axo_list::gap(ui);
+        axo_list::list(ui, None, None, |ui| {
+            let mut approval = link.approval;
+            let item = Item::new("Require admin approval").description("Require an admin to approve new members joining via the group link");
+            if axo_list::switch(ui, item, &mut approval) {
+                app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: LinkChange::Approval(approval) });
+            }
+        });
+    }
+    if ui.ctx().data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
+        let body = "Are you sure you want to reset the group link? People will no longer be able to join the group using the current link.";
+        let answer = crate::dialog::confirm(ui.ctx(), ask.with("dialog"), body, "", "Reset link", crate::dialog::Variant::StrongDestructive);
+        if answer == Some(crate::dialog::Choice::Action) {
+            app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: LinkChange::Reset });
+        }
+        if answer.is_some() {
+            ui.ctx().data_mut(|d| d.remove::<bool>(ask));
+        }
+    }
 }
 
 fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
@@ -619,10 +628,9 @@ fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             let by = format!("Invited by {}", if invite.by == app.aci { "you".to_owned() } else { app.name(&invite.by) });
             let response = crate::panes::contact_row(ui, palette, &name, Some(&by), 5, None);
             if admin || invite.by == app.aci {
-                response.context_menu(|ui| {
-                    if menu_row(ui, None, "Revoke invite", true).clicked() {
+                crate::menu::context(ui, &response, egui::Id::unique("invite-menu").with(&invite.service_id), |m| {
+                    if m.item(Some("x-circle"), "Revoke invite") {
                         app.send(Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: vec![invite.service_id.clone()] });
-                        ui.close();
                     }
                 });
             }
