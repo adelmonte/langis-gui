@@ -235,7 +235,7 @@ impl Icon {
     }
 
     /// Width over height: Desktop's delivered and read icons are 18 by 12.
-    fn aspect(self) -> f32 {
+    pub fn aspect(self) -> f32 {
         match self {
             Icon::MessagestatusDelivered | Icon::MessagestatusRead => 1.5,
             _ => 1.,

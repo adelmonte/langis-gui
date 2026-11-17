@@ -832,7 +832,8 @@ fn message(
         // The icon steps down as it runs out.
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
     }
-    let status_w = if outgoing { 18. } else { 0. } + if timer.is_some() { 16. } else { 0. };
+    // Desktop's status icon: 12px tall (18 wide when delivered or read), 6px after the time.
+    let status_w = if outgoing { 6. + 12. * crate::sidebar::status_icon(m.status).aspect() } else { 0. } + if timer.is_some() { 16. } else { 0. };
     let meta_w = meta.size().x + status_w;
     let show_meta = !collapsed_below || m.status == DeliveryStatus::Failed || next.is_some_and(|n| n.status != m.status);
 
@@ -1039,9 +1040,9 @@ fn message(
         }
         if outgoing {
             let icon = crate::sidebar::status_icon(m.status);
-            let at = Rect::from_min_size(Pos2::new(right - 16., meta_y), Vec2::splat(16.));
+            let at = Rect::from_min_size(Pos2::new(right - 12., meta_y + 2.), Vec2::splat(12.));
             let tint = if m.status == DeliveryStatus::Failed { palette.destructive } else { color };
-            icon.paint(ui, at, 14., tint);
+            icon.paint(ui, at, 12., tint);
         }
     }
     let _ = y;
@@ -1109,7 +1110,8 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     let avatar_col = if show_avatar { 36. } else { 0. };
     let label_g = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(14.), text_color);
     let meta = ui.painter().layout_no_wrap(crate::format::message_time(m.sent_at), theme::regular(11.), meta_color);
-    let w = 12. + 22. + label_g.size().x + 12. + meta.size().x + if outgoing { 18. } else { 0. } + 12.;
+    let status_w = if outgoing { 6. + 12. * crate::sidebar::status_icon(m.status).aspect() } else { 0. };
+    let w = 12. + 22. + label_g.size().x + 12. + meta.size().x + status_w + 12.;
     let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, 40.), Sense::hover());
     let x = if outgoing { row.right() - 16. - w } else { row.left() + 16. + avatar_col };
     let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(w, 40.));
@@ -1118,11 +1120,11 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     let icon_rect = Rect::from_min_size(Pos2::new(bubble.left() + 12., bubble.center().y - 10.), Vec2::splat(20.));
     icon.paint(ui, icon_rect, 18., text_color);
     ui.painter().galley(Pos2::new(icon_rect.right() + 4., bubble.center().y - label_g.size().y / 2.), label_g, text_color);
-    let meta_x = bubble.right() - 12. - meta.size().x - if outgoing { 18. } else { 0. };
+    let meta_x = bubble.right() - 12. - meta.size().x - status_w;
     ui.painter().galley(Pos2::new(meta_x, bubble.center().y - 6.), meta, meta_color);
     if outgoing {
-        let at = Rect::from_min_size(Pos2::new(bubble.right() - 28., bubble.center().y - 8.), Vec2::splat(16.));
-        crate::sidebar::status_icon(m.status).paint(ui, at, 14., meta_color);
+        let at = Rect::from_min_size(Pos2::new(bubble.right() - 24., bubble.center().y - 6.), Vec2::splat(12.));
+        crate::sidebar::status_icon(m.status).paint(ui, at, 12., meta_color);
     }
     if show_avatar {
         avatar_for(ui, ctx, m, Pos2::new(row.left() + 16., bubble.bottom() - 28.));

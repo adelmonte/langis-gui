@@ -259,7 +259,7 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
         let color = if status == DeliveryStatus::Failed { palette.destructive } else { palette.text_secondary };
         let at = Rect::from_min_size(Pos2::new(right - 16., inner.top() + 22.), Vec2::splat(16.));
         icon.paint(ui, at, 14., color);
-        preview_right = at.left() - 6.;
+        preview_right = at.right() - 1. - 14. * icon.aspect() - 6.;
     }
     let mut job = egui::text::LayoutJob::default();
     let body = |color| egui::TextFormat { font_id: theme::regular(13.), color, line_height: Some(18.), ..Default::default() };
