@@ -145,6 +145,7 @@ pub struct App {
     pub chat_colors: langis_store::ChatColors,
     /// Desktop's custom color editor, open.
     pub color_editor: Option<crate::chat_colors::Editor>,
+    diag: crate::diag::Diag,
     /// The reaction bar's emoji (Desktop's preferred reactions).
     pub reactions: Vec<String>,
     /// The photo and video viewer, when open.
@@ -210,6 +211,7 @@ impl App {
             panes: Default::default(),
             chat_colors: Default::default(),
             color_editor: None,
+            diag: Default::default(),
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
             lightbox: None,
             link_previews: true,
@@ -315,9 +317,11 @@ impl App {
             }
         }
         while let Some(event) = self.events.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.diag.event(&event);
             self.on_event(event);
         }
         while let Ok(loaded) = self.loaded.try_recv() {
+            self.diag.loaded();
             self.on_loaded(loaded);
         }
         let now = Instant::now();
@@ -751,6 +755,7 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         self.poll();
+        self.diag.frame(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

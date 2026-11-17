@@ -11,6 +11,7 @@ mod chat;
 mod chat_colors;
 mod composer;
 mod details;
+mod diag;
 mod dialog;
 mod emoji_picker;
 mod format;
