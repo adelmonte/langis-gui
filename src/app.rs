@@ -137,6 +137,8 @@ pub struct App {
     pub me: (String, Option<String>),
     /// The calls and stories tabs, chat details, dialogs and menus.
     pub panes: crate::panes::Panes,
+    /// Desktop's chat colors: the default, each chat's and the custom ones.
+    pub chat_colors: langis_store::ChatColors,
     /// The reaction bar's emoji (Desktop's preferred reactions).
     pub reactions: Vec<String>,
     /// The photo and video viewer, when open.
@@ -198,6 +200,7 @@ impl App {
             momentum: Default::default(),
             me: (String::new(), None),
             panes: Default::default(),
+            chat_colors: Default::default(),
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
             lightbox: None,
             link_previews: true,

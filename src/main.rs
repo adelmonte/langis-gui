@@ -6,6 +6,7 @@ mod app;
 mod call;
 mod calls_tab;
 mod chat;
+mod chat_colors;
 mod composer;
 mod details;
 mod dialog;

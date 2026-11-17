@@ -709,7 +709,6 @@ struct Ctx<'a> {
     palette: &'a Palette,
     group: bool,
     width: f32,
-    #[allow(dead_code)]
     chat_id: &'a ConversationId,
     /// The message whose menu or reaction bar is open: its hover bar stays.
     menu_for: Option<i64>,
@@ -919,8 +918,12 @@ fn message(
     } else {
         CornerRadius { ne: r, se: r, nw: if collapsed_above { small } else { r }, sw: if collapsed_below { small } else { r } }
     };
-    let fill = if jumbo { Color32::TRANSPARENT } else if outgoing { palette.bubble_out } else { palette.bubble_in };
-    ui.painter().rect_filled(bubble, radius, fill);
+    if jumbo {
+    } else if outgoing {
+        crate::chat_colors::paint(ui.painter(), bubble, radius, crate::chat_colors::for_chat(ctx.app, ctx.chat_id), ui.ctx().content_rect());
+    } else {
+        ui.painter().rect_filled(bubble, radius, palette.bubble_in);
+    }
     let mut y = bubble.top() + top_pad;
     let left = bubble.left() + pad.x;
 
@@ -1108,8 +1111,11 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, 40.), Sense::hover());
     let x = if outgoing { row.right() - 16. - w } else { row.left() + 16. + avatar_col };
     let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(w, 40.));
-    let fill = if outgoing { palette.bubble_out } else { palette.bubble_in };
-    ui.painter().rect_filled(bubble, CornerRadius::same(18), fill);
+    if outgoing {
+        crate::chat_colors::paint(ui.painter(), bubble, CornerRadius::same(18), crate::chat_colors::for_chat(ctx.app, ctx.chat_id), ui.ctx().content_rect());
+    } else {
+        ui.painter().rect_filled(bubble, CornerRadius::same(18), palette.bubble_in);
+    }
     let icon_rect = Rect::from_min_size(Pos2::new(bubble.left() + 12., bubble.center().y - 10.), Vec2::splat(20.));
     icon.paint(ui, icon_rect, 18., text_color);
     ui.painter().galley(Pos2::new(icon_rect.right() + 4., bubble.center().y - label_g.size().y / 2.), label_g, text_color);

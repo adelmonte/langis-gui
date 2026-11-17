@@ -77,6 +77,7 @@ pub enum Compose {
 pub fn on_ready(app: &mut App) {
     load_folders(app);
     crate::stories::load(app);
+    crate::chat_colors::load(app);
 }
 
 pub fn load_folders(app: &App) {
@@ -106,6 +107,7 @@ pub fn on_event(app: &mut App, event: Event) {
         Event::Megaphones(list) => app.panes.megaphones = list,
         Event::StoriesChanged | Event::StorySettingsChanged => crate::stories::load(app),
         Event::ChatFoldersChanged => load_folders(app),
+        Event::ChatColorsChanged => crate::chat_colors::load(app),
         Event::CallLinksChanged => load_calls(app),
         Event::CallLinkCreated(room) => {
             load_calls(app);
