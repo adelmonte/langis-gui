@@ -234,8 +234,23 @@ impl Icon {
             .tint(tint)
     }
 
-    /// Draws the icon centered in `rect`.
+    /// Width over height: Desktop's delivered and read icons are 18 by 12.
+    fn aspect(self) -> f32 {
+        match self {
+            Icon::MessagestatusDelivered | Icon::MessagestatusRead => 1.5,
+            _ => 1.,
+        }
+    }
+
+    /// Draws the icon centered in `rect`, `size` tall. A wide icon keeps its
+    /// right edge where a square one's would be.
     pub fn paint(self, ui: &egui::Ui, rect: egui::Rect, size: f32, tint: Color32) {
-        self.image(size, tint).paint_at(ui, egui::Rect::from_center_size(rect.center(), Vec2::splat(size)));
+        let square = egui::Rect::from_center_size(rect.center(), Vec2::splat(size));
+        let wide = Vec2::new(size * self.aspect(), size);
+        let (uri, bytes) = self.source();
+        Image::new(ImageSource::Bytes { uri: uri.into(), bytes: bytes.into() })
+            .fit_to_exact_size(wide)
+            .tint(tint)
+            .paint_at(ui, egui::Rect::from_min_size(egui::Pos2::new(square.right() - wide.x, square.top()), wide));
     }
 }
