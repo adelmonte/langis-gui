@@ -578,6 +578,7 @@ fn compose_dialog(app: &mut App, ui: &mut Ui) {
     match &mut compose {
         Compose::Chat { query, searching, found } => {
             let mut open = None;
+            let mut opened_link = None;
             let closed = modal(ui, "new-chat", 380., |ui| {
                 title(ui, "New chat");
                 let field = widgets::text_field(ui, query, "Name, username or number", false);
@@ -607,7 +608,17 @@ fn compose_dialog(app: &mut App, ui: &mut Ui) {
                         None => {}
                     }
                 });
-                let lookup = !q.is_empty() && (q.starts_with('+') || q.contains('.') || q.chars().all(|ch| ch.is_ascii_digit() || " -()".contains(ch)));
+                // A pasted group or call link opens it (Desktop opens these
+                // from the system; here they're pasted).
+                let link = signal_link(query.trim());
+                let is_link = link.is_some();
+                if let Some((label, command)) = link {
+                    ui.add_space(6.);
+                    if menu_row(ui, Some(Icon::Link), label, false).clicked() || enter {
+                        opened_link = Some(command);
+                    }
+                }
+                let lookup = !is_link && !q.is_empty() && (q.starts_with('+') || q.contains('.') || q.chars().all(|ch| ch.is_ascii_digit() || " -()".contains(ch)));
                 if lookup && !*searching {
                     ui.add_space(6.);
                     let label = if q.starts_with('+') || q.chars().next().is_some_and(|ch| ch.is_ascii_digit()) { "Find by phone number" } else { "Find by username" };
@@ -625,6 +636,10 @@ fn compose_dialog(app: &mut App, ui: &mut Ui) {
                 });
             });
             if closed {
+                keep = false;
+            }
+            if let Some(command) = opened_link {
+                app.send(command);
                 keep = false;
             }
             match open {
@@ -902,3 +917,31 @@ pub fn people(app: &App) -> Vec<(String, String)> {
     list.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
     list
 }
+
+/// A group link (`https://signal.group/#…`, or `sgnl://signal.group/…`) or
+/// a call link (`https://signal.link/call/#key=…`), with what opening it
+/// shows and the command that opens it.
+fn signal_link(text: &str) -> Option<(&'static str, Command)> {
+    let rest = text.strip_prefix("https://").or_else(|| text.strip_prefix("sgnl://"))?;
+    let url = text.to_owned();
+    if rest.starts_with("signal.group/") {
+        Some(("Open group link", Command::OpenGroupLink { url }))
+    } else if rest.starts_with("signal.link/call") {
+        Some(("Open call link", Command::OpenCallLink { url }))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    #[test]
+    fn group_and_call_links_are_told_apart() {
+        assert_eq!(super::signal_link("https://signal.group/#CjQKIA").map(|l| l.0), Some("Open group link"));
+        assert_eq!(super::signal_link("sgnl://signal.group/#CjQKIA").map(|l| l.0), Some("Open group link"));
+        assert_eq!(super::signal_link("https://signal.link/call/#key=bcdf").map(|l| l.0), Some("Open call link"));
+        assert!(super::signal_link("https://example.com/signal.group/").is_none());
+        assert!(super::signal_link("+15555550123").is_none());
+    }
+}
+
