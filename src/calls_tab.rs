@@ -77,8 +77,105 @@ fn link_title(name: &str) -> String {
     if name.is_empty() { "Signal call".into() } else { name.to_owned() }
 }
 
+/// Desktop's `CallsNewCall`: a search, then contacts and groups, each with
+/// its call buttons.
+fn new_call(app: &mut App, ui: &mut Ui, palette: &Palette) {
+    ui.add_space(12.);
+    ui.horizontal(|ui| {
+        ui.add_space(12.);
+        if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.panes.new_call = None;
+        }
+        ui.label(RichText::new("New Call").font(theme::semibold(18.)));
+    });
+    let Some(mut query) = app.panes.new_call.clone() else { return };
+    ui.add_space(6.);
+    ui.horizontal(|ui| {
+        ui.add_space(16.);
+        ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search").desired_width(ui.available_width() - 16.)).request_focus();
+    });
+    ui.add_space(8.);
+    let q = query.trim().to_lowercase();
+    let matches = |c: &&langis_store::Conversation| {
+        c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked && !c.ended && (q.is_empty() || c.title.to_lowercase().contains(&q))
+    };
+    let direct: Vec<_> = app.conversations.iter().filter(matches).filter(|c| c.kind == ConversationKind::Direct).cloned().collect();
+    let groups: Vec<_> = app.conversations.iter().filter(matches).filter(|c| c.kind == ConversationKind::Group).cloned().collect();
+    let in_call = app.call.is_some();
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        if direct.is_empty() && groups.is_empty() {
+            ui.add_space(28.);
+            let text = if q.is_empty() { "No recent conversations.".to_owned() } else { format!("No results for \u{201c}{}\u{201d}", query.trim()) };
+            ui.vertical_centered(|ui| body(ui, palette, &text));
+        }
+        for (header, list) in [("Contacts", &direct), ("Groups", &groups)] {
+            if list.is_empty() {
+                continue;
+            }
+            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::hover());
+            ui.painter().text(Pos2::new(r.left() + 24., r.center().y), egui::Align2::LEFT_CENTER, header, theme::semibold(14.), palette.text);
+            for c in list.iter() {
+                // `ListTile` compact: 52 high, a 32px avatar.
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.), Sense::hover());
+                let avatar = Rect::from_min_size(Pos2::new(rect.left() + 24., rect.center().y - 16.), Vec2::splat(32.));
+                widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
+                let mut right = rect.right() - 16.;
+                let mut button = |ui: &mut Ui, icon: Icon, label: &str| {
+                    let b = Rect::from_min_size(Pos2::new(right - 28., rect.center().y - 14.), Vec2::splat(28.));
+                    right -= 28. + 12.;
+                    let r = ui.interact(b, egui::Id::unique("new-call").with((&c.id.0, label)), Sense::click());
+                    if r.hovered() && !in_call {
+                        ui.painter().rect_filled(b, CornerRadius::same(4), palette.fill_secondary);
+                    }
+                    icon.paint(ui, b.shrink(4.), 20., if in_call { palette.text_secondary } else { palette.text });
+                    r.on_hover_text(label).clicked() && !in_call
+                };
+                if button(ui, Icon::Video, "Start a video call") {
+                    call(app, &c.id, true);
+                    app.panes.new_call = None;
+                }
+                if c.kind == ConversationKind::Direct && button(ui, Icon::Phone, "Start a call") {
+                    call(app, &c.id, false);
+                    app.panes.new_call = None;
+                }
+                let title = ui.painter().layout_no_wrap(c.title.clone(), theme::regular(14.), palette.text);
+                let clip = Rect::from_min_max(Pos2::new(avatar.right() + 12., rect.top()), Pos2::new(right, rect.bottom()));
+                ui.painter().with_clip_rect(clip).galley(Pos2::new(clip.left(), rect.center().y - title.size().y / 2.), title, palette.text);
+            }
+        }
+    });
+    if let Some(q) = app.panes.new_call.as_mut() {
+        *q = query;
+    }
+}
+
+/// Desktop's "Clear call history?" confirmation.
+fn clear_dialog(app: &mut App, ctx: &egui::Context) {
+    if !app.panes.clear_calls {
+        return;
+    }
+    let ours = app.panes.links.iter().any(|l| l.admin_key.is_some());
+    let body = if ours {
+        "This will permanently delete all call history. Call links you\u{2019}ve created will no longer work for people who have them."
+    } else {
+        "This will permanently delete all call history."
+    };
+    match crate::dialog::confirm(ctx, egui::Id::unique("clear-calls"), "Clear call history?", body, "Clear", crate::dialog::Variant::StrongDestructive) {
+        Some(crate::dialog::Choice::Action) => {
+            app.send(Command::ClearCallHistory);
+            app.panes.calls.clear();
+            app.panes.adhoc.clear();
+            app.panes.clear_calls = false;
+        }
+        Some(crate::dialog::Choice::Cancel) => app.panes.clear_calls = false,
+        None => {}
+    }
+}
+
 pub fn show(app: &mut App, ui: &mut Ui) {
     let palette = Palette::of(ui.ctx());
+    clear_dialog(app, ui.ctx());
     if !app.panes.calls_loaded {
         app.panes.calls_loaded = true;
         crate::panes::load_calls(app);
@@ -95,34 +192,25 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         .show(ui, |ui| {
             let full = ui.max_rect();
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
+            if app.panes.new_call.is_some() {
+                new_call(app, ui, &palette);
+                return;
+            }
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 crate::sidebar::header_start(app, ui);
                 ui.label(RichText::new("Calls").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(14.);
-                    let more = widgets::icon_button(ui, Icon::More, 20., "More");
-                    egui::Popup::menu(&more).show(|ui| {
-                        if menu_row(ui, Some(Icon::Trash), "Clear call history", true).clicked() {
-                            app.send(Command::ClearCallHistory);
-                            app.panes.calls.clear();
-                            app.panes.adhoc.clear();
-                            ui.close();
+                    let more = widgets::icon_button(ui, Icon::More, 20., "More actions");
+                    crate::menu::dropdown(ui, &more, egui::Id::unique("calls-more"), |m| {
+                        if m.item(Some("trash"), "Clear call history") {
+                            app.panes.clear_calls = true;
                         }
                     });
-                    let new_call = widgets::icon_button(ui, Icon::PhonePlus, 20., "New call");
-                    egui::Popup::menu(&new_call).show(|ui| {
-                        ui.set_min_width(240.);
-                        let people: Vec<_> = app.conversations.iter().filter(|c| c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked).take(30).cloned().collect();
-                        egui::ScrollArea::vertical().max_height(360.).show(ui, |ui| {
-                            for c in people {
-                                if crate::panes::contact_row(ui, &palette, &c.title, None, c.color, c.avatar_path.as_deref()).clicked() {
-                                    call(app, &c.id, false);
-                                    ui.close();
-                                }
-                            }
-                        });
-                    });
+                    if widgets::icon_button(ui, Icon::PhonePlus, 20., "New Call").clicked() {
+                        app.panes.new_call = Some(String::new());
+                    }
                 });
             });
             ui.add_space(6.);

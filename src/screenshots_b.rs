@@ -57,6 +57,14 @@ fn screenshots_panes() {
     harness.state().send(Command::CreateCallLink);
     wait(&mut harness, "a call link", |app| app.panes.link_details.as_ref().is_some_and(|r| app.panes.links.iter().any(|l| &l.room_id == r)));
     save(&mut harness, "call-link");
+    harness.state_mut().panes.new_call = Some(String::new());
+    wait(&mut harness, "new call", |_| true);
+    save(&mut harness, "calls-new-call");
+    harness.state_mut().panes.new_call = None;
+    harness.state_mut().panes.clear_calls = true;
+    wait(&mut harness, "clear calls", |_| true);
+    save(&mut harness, "calls-clear-dialog");
+    harness.state_mut().panes.clear_calls = false;
 
     // Stories: the list, a story open, the composer, privacy.
     harness.state_mut().tab = Tab::Stories;
