@@ -32,6 +32,7 @@ pub enum Phase {
 
 /// A store read or check that finished on the backend's runtime.
 pub enum Loaded {
+    Found(crate::search::Found),
     Conversations(Vec<Conversation>),
     Messages { conversation: ConversationId, older: bool, messages: Vec<Message> },
     Message(Message),
@@ -48,6 +49,13 @@ pub enum Loaded {
     Notify { title: String, body: String },
     /// Anything else: applied to the app as it comes.
     Apply(Box<dyn FnOnce(&mut App) + Send>),
+    /// For the open chat.
+    Chat(crate::chat::ChatLoaded),
+    /// The reaction bar's emoji.
+    Reactions(Vec<String>),
+    LinkPreviews(bool),
+    /// A chat's photos and videos, oldest first, for the viewer.
+    Lightbox { conversation: ConversationId, message_id: i64, index: usize, items: Vec<crate::lightbox::Item> },
 }
 
 /// A send held until the user answers the safety number prompt.
@@ -97,6 +105,10 @@ pub struct App {
     pub tab: Tab,
     pub conversations: Vec<Conversation>,
     pub search: String,
+    /// The chat list's message results for `search`.
+    pub message_search: crate::search::Global,
+    /// The chat header's search button was pressed.
+    pub find_requested: bool,
     pub selected: Option<ConversationId>,
     pub chat: Option<ChatView>,
     pub names: HashMap<String, String>,
@@ -122,6 +134,14 @@ pub struct App {
     pub me: (String, Option<String>),
     /// The calls and stories tabs, chat details, dialogs and menus.
     pub panes: crate::panes::Panes,
+    /// The reaction bar's emoji (Desktop's preferred reactions).
+    pub reactions: Vec<String>,
+    /// The photo and video viewer, when open.
+    pub lightbox: Option<crate::lightbox::Lightbox>,
+    /// Link previews on (Settings, Chats).
+    pub link_previews: bool,
+    /// Stickers, GIFs and the sticker manager.
+    pub fun: crate::fun::Fun,
 }
 
 impl App {
@@ -153,6 +173,8 @@ impl App {
             tab: Tab::Chats,
             conversations: Vec::new(),
             search: String::new(),
+            message_search: Default::default(),
+            find_requested: false,
             selected: None,
             chat: None,
             names: HashMap::new(),
@@ -171,6 +193,10 @@ impl App {
             notify: (true, "all".into()),
             me: (String::new(), None),
             panes: Default::default(),
+            reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
+            lightbox: None,
+            link_previews: true,
+            fun: Default::default(),
         };
         let dir = &app.data_dir;
         if app.demo || dir.join("database.key").exists() {
@@ -297,6 +323,9 @@ impl App {
     }
 
     fn on_event(&mut self, event: Event) {
+        if self.fun.on_event(&event) {
+            return;
+        }
         match event {
             Event::NeedsLinking => {
                 self.phase = Phase::Linking { url: None, error: None, qr: None };
@@ -317,6 +346,8 @@ impl App {
                 self.reload_conversations();
                 self.load_notify_prefs();
                 self.load_me();
+                self.load_reactions();
+                self.load_link_previews();
                 self.send(Command::LoadCallDevices);
                 crate::panes::on_ready(self);
             }
@@ -395,6 +426,23 @@ impl App {
             Event::AccountSettingsChanged => {
                 self.settings.stale = true;
                 self.load_notify_prefs();
+                self.load_reactions();
+                self.load_link_previews();
+            }
+            Event::ViewOnceOpened(opened) => self.open_view_once(opened),
+            Event::MessageStickerPack { pack: Some((id, key)), .. } => {
+                self.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
+                self.fun.preview = Some((id, key, None));
+            }
+            Event::LinkPreview { url, preview } => {
+                if let Some(chat) = self.chat.as_mut() {
+                    chat.preview.arrived(&url, preview);
+                }
+            }
+            Event::PinsChanged(conversation) => {
+                if self.selected.as_ref() == Some(&conversation) {
+                    self.load_pinned(conversation);
+                }
             }
             Event::Error(text) => self.toast(text),
             other => crate::panes::on_event(self, other),
@@ -403,6 +451,7 @@ impl App {
 
     fn on_loaded(&mut self, loaded: Loaded) {
         match loaded {
+            Loaded::Found(found) => self.on_found(found),
             Loaded::Conversations(list) => {
                 // Names for group authors and mentions come with the list.
                 for c in &list {
@@ -421,6 +470,7 @@ impl App {
                 }
             }
             Loaded::Message(message) => {
+                self.lightbox_update(&message);
                 if let Some(chat) = self.chat.as_mut().filter(|c| c.id == message.conversation_id) {
                     chat.upsert(message);
                 }
@@ -451,6 +501,15 @@ impl App {
                 });
             }
             Loaded::Apply(apply) => apply(self),
+            Loaded::Chat(crate::chat::ChatLoaded::Jump { conversation, message_id }) => self.open_at(conversation, message_id),
+            Loaded::Chat(loaded) => {
+                if let Some(chat) = self.chat.as_mut() {
+                    chat.on_loaded(loaded);
+                }
+            }
+            Loaded::Reactions(list) => self.reactions = list,
+            Loaded::LinkPreviews(on) => self.link_previews = on,
+            Loaded::Lightbox { conversation, message_id, index, items } => self.lightbox_loaded(conversation, message_id, index, items),
             Loaded::Theme(theme) => {
                 self.theme = theme.unwrap_or_else(|| "system".into());
                 self.apply_theme();
@@ -463,6 +522,40 @@ impl App {
         self.load(move |db| async move {
             let profile = langis_core::own_profile(&db, &aci).await;
             Some(Loaded::Me { name: profile.name(), photo: profile.photo.map(|p| p.to_string_lossy().into_owned()) })
+        });
+    }
+
+    /// The reaction bar's emoji: the account's, with Desktop's defaults
+    /// for any missing.
+    pub fn load_reactions(&self) {
+        self.load(|db| async move {
+            let saved: Vec<String> = db
+                .setting(langis_core::SETTING_PREFERRED_REACTIONS)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
+            let list = crate::actions::DEFAULT_REACTIONS
+                .iter()
+                .enumerate()
+                .map(|(i, d)| saved.get(i).filter(|e| !e.is_empty()).cloned().unwrap_or_else(|| d.to_string()))
+                .collect();
+            Some(Loaded::Reactions(list))
+        });
+    }
+
+    pub fn load_link_previews(&self) {
+        self.load(|db| async move {
+            let on = db.setting(langis_core::SETTING_LINK_PREVIEWS).await.ok().flatten().as_deref() != Some("false");
+            Some(Loaded::LinkPreviews(on))
+        });
+    }
+
+    pub fn load_pinned(&self, conversation: ConversationId) {
+        self.load(move |db| async move {
+            let messages = db.pinned_messages(&conversation).await.unwrap_or_default();
+            Some(Loaded::Chat(crate::chat::ChatLoaded::Pinned { conversation, messages }))
         });
     }
 
@@ -529,7 +622,10 @@ impl App {
             }
         }
         let draft = self.conversation(&id).and_then(|c| c.draft.clone()).unwrap_or_default();
-        self.chat = Some(ChatView::new(id.clone(), draft));
+        let styles = self.conversation(&id).map(|c| c.draft_styles.clone()).unwrap_or_default();
+        let mut chat = ChatView::new(id.clone(), draft.clone());
+        chat.spans = crate::composer::Spans::new(&draft, styles, Vec::new());
+        self.chat = Some(chat);
         self.selected = Some(id.clone());
         self.tab = Tab::Chats;
         let members: Vec<String> = self.conversation(&id).map(|c| c.members.clone()).unwrap_or_default();
@@ -540,7 +636,28 @@ impl App {
         if !members.is_empty() {
             self.load(move |db| async move { db.display_names(&members).await.ok().map(Loaded::Names) });
         }
+        self.load_pinned(id.clone());
         self.send(Command::MarkRead { conversation: id });
+    }
+
+    /// Opens a chat at one of its messages (a search result, a pin, a
+    /// quote): the messages around it, scrolled to and flashed.
+    pub fn open_at(&mut self, conversation: ConversationId, message_id: i64) {
+        let loaded_here = self.chat.as_ref().is_some_and(|c| c.id == conversation && c.messages.iter().any(|m| m.id == message_id));
+        if loaded_here {
+            if let Some(chat) = self.chat.as_mut() {
+                chat.scroll_target = Some(message_id);
+            }
+            return;
+        }
+        if self.selected.as_ref() != Some(&conversation) {
+            self.open(conversation.clone());
+        }
+        let around = crate::chat::AROUND;
+        self.load(move |db| async move {
+            let messages = db.messages_around(&conversation, message_id, around, around).await.ok()?;
+            Some(Loaded::Chat(crate::chat::ChatLoaded::Around { conversation, target: message_id, messages }))
+        });
     }
 
     pub fn load_older(&mut self) {

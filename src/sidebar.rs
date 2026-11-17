@@ -131,6 +131,8 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                 .cloned()
                 .collect();
             let mut open = None;
+            let mut open_at = None;
+            crate::search::follow_global(app, ui.ctx());
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 ui.add_space(4.);
                 for c in &rows {
@@ -153,7 +155,10 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                         }
                     });
                 }
-                if rows.is_empty() && !query.is_empty() {
+                if !query.is_empty() {
+                    open_at = crate::search::message_results(app, ui, &palette);
+                }
+                if rows.is_empty() && app.message_search.hits.is_empty() && !query.is_empty() {
                     ui.add_space(24.);
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new(format!("No results for \u{201c}{}\u{201d}", app.search.trim())).color(palette.text_secondary));
@@ -163,6 +168,9 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             if let Some(id) = open {
                 app.panes.details = None;
                 app.open(id);
+            }
+            if let Some((conversation, message_id)) = open_at {
+                app.open_at(conversation, message_id);
             }
         });
 }

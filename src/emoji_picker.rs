@@ -16,6 +16,57 @@ const CELL: f32 = 36.;
 const COLUMNS: usize = 9;
 
 impl Picker {
+    /// The picker's content: search, the grid and the group tabs. Returns
+    /// the emoji picked.
+    pub fn body(&mut self, ui: &mut egui::Ui) -> Option<&'static str> {
+        let palette = Palette::of(ui.ctx());
+        let mut picked = None;
+        crate::widgets::text_field(ui, &mut self.query, "Search emoji", false).request_focus();
+        ui.add_space(6.);
+        let emoji: Vec<&'static langis_emoji::Emoji> = if self.query.trim().is_empty() {
+            let group = self.group.unwrap_or(Group::SmileysEmotion);
+            ui.label(RichText::new(group.label()).font(theme::semibold(13.)).color(palette.text_secondary));
+            langis_emoji::in_group(group).collect()
+        } else {
+            let options = langis_emoji::SearchOptions { limit: 90, ..Default::default() };
+            langis_emoji::search(self.query.trim(), &options).into_iter().map(|m| m.emoji).collect()
+        };
+        egui::ScrollArea::vertical().max_height(270.).auto_shrink([false, false]).show(ui, |ui| {
+            for row in emoji.chunks(COLUMNS) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.;
+                    for e in row {
+                        let (rect, r) = ui.allocate_exact_size(Vec2::splat(CELL), Sense::click());
+                        if r.hovered() {
+                            ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                        }
+                        ui.painter().text(rect.center(), Align2::CENTER_CENTER, e.glyph, theme::emoji(24.), palette.text);
+                        if r.on_hover_text(e.shortcode().map(|s| format!(":{s}:")).unwrap_or_default()).clicked() {
+                            picked = Some(e.glyph);
+                        }
+                    }
+                });
+            }
+        });
+        ui.add_space(4.);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.;
+            for group in Group::PICKER {
+                let (rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
+                let selected = self.query.is_empty() && self.group.unwrap_or(Group::SmileysEmotion) == group;
+                if selected || r.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(8), if selected { palette.fill_pressed } else { palette.fill });
+                }
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, group.icon(), theme::emoji(18.), palette.text);
+                if r.on_hover_text(group.label()).clicked() {
+                    self.group = Some(group);
+                    self.query.clear();
+                }
+            }
+        });
+        picked
+    }
+
     /// Shows the picker above `anchor`; returns the emoji picked.
     pub fn show(&mut self, ctx: &egui::Context, anchor: Pos2, open: &mut bool) -> Option<&'static str> {
         let palette = Palette::of(ctx);
@@ -33,49 +84,7 @@ impl Picker {
                     .inner_margin(12)
                     .show(ui, |ui| {
                         ui.set_width(size.x - 24.);
-                        crate::widgets::text_field(ui, &mut self.query, "Search emoji", false).request_focus();
-                        ui.add_space(6.);
-                        let emoji: Vec<&'static langis_emoji::Emoji> = if self.query.trim().is_empty() {
-                            let group = self.group.unwrap_or(Group::SmileysEmotion);
-                            ui.label(RichText::new(group.label()).font(theme::semibold(13.)).color(palette.text_secondary));
-                            langis_emoji::in_group(group).collect()
-                        } else {
-                            let options = langis_emoji::SearchOptions { limit: 90, ..Default::default() };
-                            langis_emoji::search(self.query.trim(), &options).into_iter().map(|m| m.emoji).collect()
-                        };
-                        egui::ScrollArea::vertical().max_height(270.).auto_shrink([false, false]).show(ui, |ui| {
-                            for row in emoji.chunks(COLUMNS) {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 0.;
-                                    for e in row {
-                                        let (rect, r) = ui.allocate_exact_size(Vec2::splat(CELL), Sense::click());
-                                        if r.hovered() {
-                                            ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
-                                        }
-                                        ui.painter().text(rect.center(), Align2::CENTER_CENTER, e.glyph, theme::emoji(24.), palette.text);
-                                        if r.on_hover_text(e.shortcode().map(|s| format!(":{s}:")).unwrap_or_default()).clicked() {
-                                            picked = Some(e.glyph);
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                        ui.add_space(4.);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 2.;
-                            for group in Group::PICKER {
-                                let (rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
-                                let selected = self.query.is_empty() && self.group.unwrap_or(Group::SmileysEmotion) == group;
-                                if selected || r.hovered() {
-                                    ui.painter().rect_filled(rect, CornerRadius::same(8), if selected { palette.fill_pressed } else { palette.fill });
-                                }
-                                ui.painter().text(rect.center(), Align2::CENTER_CENTER, group.icon(), theme::emoji(18.), palette.text);
-                                if r.on_hover_text(group.label()).clicked() {
-                                    self.group = Some(group);
-                                    self.query.clear();
-                                }
-                            }
-                        });
+                        picked = self.body(ui);
                     });
             });
         let outside = ctx.input(|i| i.pointer.any_pressed())
