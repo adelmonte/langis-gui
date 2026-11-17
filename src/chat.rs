@@ -82,6 +82,8 @@ pub struct ChatView {
     pub attach_menu: bool,
     /// A voice message being recorded.
     pub recording: Option<crate::voice::Recording>,
+    /// Search in this chat, while open.
+    pub find: Option<crate::search::Find>,
 }
 
 /// Store reads for the open chat.
@@ -160,7 +162,13 @@ impl ChatView {
             mention_index: 0,
             attach_menu: false,
             recording: None,
+            find: None,
         }
+    }
+
+    /// Loads around `message_id` and shows it, after this frame.
+    pub fn jump_later(&mut self, message_id: i64) {
+        self.pending_jump = Some(message_id);
     }
 
     pub fn on_loaded(&mut self, loaded: ChatLoaded) {
@@ -279,6 +287,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     };
     header(app, ui, &palette, &conversation);
+    let ctrl_f = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F));
+    if std::mem::take(&mut app.find_requested) || ctrl_f {
+        chat.find = Some(crate::search::Find::open());
+    }
+    crate::search::find_bar(app, ui, &palette, &mut chat);
     pinned_bar(app, ui, &palette, &mut chat);
     crate::composer::show(app, ui, &palette, &mut chat, &conversation);
     let mut actions = Vec::new();
@@ -489,6 +502,9 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(12.);
                     widgets::icon_button(ui, Icon::More, 20., "More");
+                    if widgets::icon_button(ui, Icon::Search, 20., "Search in chat").clicked() {
+                        app.find_requested = true;
+                    }
                     if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
                         if widgets::icon_button(ui, Icon::Phone, 20., "Start a voice call").clicked() {
                             app.send(Command::StartCall { conversation: c.id.clone(), video: false });
@@ -789,7 +805,12 @@ fn message(
     let time = crate::format::message_time(m.sent_at);
     let meta_text = if m.edited { format!("Edited  {time}") } else { time };
     let meta = ui.painter().layout_no_wrap(meta_text, theme::regular(11.), Color32::PLACEHOLDER);
-    let status_w = if outgoing { 18. } else { 0. };
+    let timer = expiry_left(m);
+    if timer.is_some() {
+        // The icon steps down as it runs out.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+    }
+    let status_w = if outgoing { 18. } else { 0. } + if timer.is_some() { 16. } else { 0. };
     let meta_w = meta.size().x + status_w;
     let show_meta = !collapsed_below || m.status == DeliveryStatus::Failed || next.is_some_and(|n| n.status != m.status);
 
@@ -988,7 +1009,12 @@ fn message(
             let shade = Rect::from_min_max(Pos2::new(meta_x - 6., meta_y - 2.), Pos2::new(right + 6., meta_y + 16.));
             ui.painter().rect_filled(shade, CornerRadius::same(9), Color32::from_black_alpha(100));
         }
+        let meta_end = meta_x + meta.size().x;
         ui.painter().galley(Pos2::new(meta_x, meta_y + 1.), meta, color);
+        if let Some(left) = timer {
+            let at = Rect::from_min_size(Pos2::new(meta_end + 2., meta_y + 1.), Vec2::splat(14.));
+            Icon::timer(left).paint(ui, at, 12., color);
+        }
         if outgoing {
             let icon = crate::sidebar::status_icon(m.status);
             let at = Rect::from_min_size(Pos2::new(right - 16., meta_y), Vec2::splat(16.));
@@ -1434,6 +1460,19 @@ pub fn find_links(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
         start += word.len();
     }
     out
+}
+
+
+/// How much of a disappearing message's time is left (1 to 0), or `None`
+/// for one that doesn't disappear. Its countdown starts once sent or read.
+pub fn expiry_left(m: &Message) -> Option<f32> {
+    if m.expires_in == 0 {
+        return None;
+    }
+    let Some(start) = m.expire_start else { return Some(1.) };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(start);
+    let total = i64::from(m.expires_in) * 1000;
+    Some((1. - (now - start) as f32 / total as f32).clamp(0., 1.))
 }
 
 #[cfg(test)]

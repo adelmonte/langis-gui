@@ -32,6 +32,7 @@ pub enum Phase {
 
 /// A store read or check that finished on the backend's runtime.
 pub enum Loaded {
+    Found(crate::search::Found),
     Conversations(Vec<Conversation>),
     Messages { conversation: ConversationId, older: bool, messages: Vec<Message> },
     Message(Message),
@@ -100,6 +101,10 @@ pub struct App {
     pub tab: Tab,
     pub conversations: Vec<Conversation>,
     pub search: String,
+    /// The chat list's message results for `search`.
+    pub message_search: crate::search::Global,
+    /// The chat header's search button was pressed.
+    pub find_requested: bool,
     pub selected: Option<ConversationId>,
     pub chat: Option<ChatView>,
     pub names: HashMap<String, String>,
@@ -162,6 +167,8 @@ impl App {
             tab: Tab::Chats,
             conversations: Vec::new(),
             search: String::new(),
+            message_search: Default::default(),
+            find_requested: false,
             selected: None,
             chat: None,
             names: HashMap::new(),
@@ -436,6 +443,7 @@ impl App {
 
     fn on_loaded(&mut self, loaded: Loaded) {
         match loaded {
+            Loaded::Found(found) => self.on_found(found),
             Loaded::Conversations(list) => {
                 // Names for group authors and mentions come with the list.
                 for c in &list {

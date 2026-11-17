@@ -16,6 +16,7 @@ mod notices;
 mod polls;
 #[cfg(test)]
 mod screenshots;
+mod search;
 mod settings;
 mod sidebar;
 mod startup;
