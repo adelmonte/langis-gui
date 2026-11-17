@@ -219,11 +219,16 @@ pub struct Preview {
     pub draft: Option<LinkPreviewDraft>,
     /// Links whose preview was closed: not offered again in this draft.
     dismissed: HashSet<String>,
+    /// Links that had no preview to fetch.
+    failed: HashSet<String>,
 }
 
 impl Preview {
     pub fn arrived(&mut self, url: &str, draft: Option<LinkPreviewDraft>) {
         if self.requested.as_deref() == Some(url) {
+            if draft.is_none() {
+                self.failed.insert(url.to_owned());
+            }
             self.draft = draft;
         }
     }
@@ -232,12 +237,18 @@ impl Preview {
         *self = Self::default();
     }
 
+    /// Desktop's `module-staged-link-preview--is-loading`: a link is staged
+    /// and its preview hasn't come yet.
+    fn loading(&self) -> Option<&str> {
+        self.url.as_deref().filter(|_| self.draft.is_none())
+    }
+
     /// Follows the text's first link; true when it's time to fetch it.
     fn follow(&mut self, text: &str, enabled: bool) -> Option<String> {
         let link = enabled
             .then(|| crate::chat::find_links(text).into_iter().map(|(_, url)| url).find(|u| langis_core::link_preview::should_preview(u)))
             .flatten()
-            .filter(|u| !self.dismissed.contains(u));
+            .filter(|u| !self.dismissed.contains(u) && !self.failed.contains(u));
         if link != self.url {
             self.url = link;
             self.since = Some(Instant::now());
@@ -412,6 +423,22 @@ fn reply_bar(app: &App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
 
 /// Desktop's `StagedLinkPreview` above the input.
 fn preview_card(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
+    if let Some(url) = chat.preview.loading().map(str::to_owned) {
+        let mut close = false;
+        egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.), Sense::hover());
+            let color = if palette.dark { theme::rgb(0xbebebe) } else { theme::rgb(0x5e5e5e) };
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Loading Preview...", theme::regular(14.), color);
+            let x = Rect::from_center_size(Pos2::new(rect.right() - 12., rect.center().y), Vec2::splat(24.));
+            close = ui.put(x, |ui: &mut Ui| widgets::icon_button(ui, Icon::XCompact, 16., "Close")).clicked();
+        });
+        if close {
+            chat.preview.dismissed.insert(url);
+            chat.preview.url = None;
+        }
+        ui.add_space(6.);
+        return;
+    }
     let Some(p) = chat.preview.draft.clone() else { return };
     let mut close = false;
     egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
