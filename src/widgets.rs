@@ -116,6 +116,8 @@ pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, password: bool) ->
                     .hint_text(hint)
                     .password(password)
                     .frame(egui::Frame::NONE)
+                    .align(egui::Align2::LEFT_CENTER)
+                    .min_size(Vec2::new(0., ui.spacing().interact_size.y))
                     .desired_width(ui.available_width()),
             )
         })
