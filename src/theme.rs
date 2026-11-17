@@ -254,7 +254,8 @@ pub fn install(ctx: &egui::Context) {
             v.menu_corner_radius = CornerRadius::same(10);
             v.hyperlink_color = palette.accent_text;
             v.selection.bg_fill = palette.accent.gamma_multiply(0.35);
-            v.selection.stroke = Stroke::new(1., palette.accent);
+            // Selected text keeps its color, as in Chromium.
+            v.selection.stroke = Stroke::new(1., palette.text);
             v.text_cursor.stroke = Stroke::new(1.5, palette.accent);
             for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
                 w.corner_radius = CornerRadius::same(8);
