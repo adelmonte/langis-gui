@@ -735,6 +735,19 @@ impl eframe::App for App {
         crate::view::show(self, ui);
     }
 
+    /// Touchpads report scrolling in points, which egui moves one to one;
+    /// that crawls next to Chromium. `LANGIS_SCROLL_SPEED` overrides 2.5.
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        static SPEED: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| {
+            std::env::var("LANGIS_SCROLL_SPEED").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| *v > 0.).unwrap_or(2.5)
+        });
+        for event in &mut raw_input.events {
+            if let egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, .. } = event {
+                *delta *= *SPEED;
+            }
+        }
+    }
+
     fn on_exit(&mut self) {
         self.shutdown();
     }
