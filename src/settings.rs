@@ -1,11 +1,16 @@
-//! Desktop's Preferences: sections on the left, their settings on the
-//! right.
+//! Desktop's Preferences (`ts/components/Preferences.dom.tsx`): the
+//! profile card and the pages on the left, each page an `AxoPanel` of
+//! `PreferencesList`s on the right. Rows for what langis doesn't do (spell
+//! check, sounds, badges, donations, backups, the language) are left out.
 
-use egui::{CornerRadius, RichText, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use langis_core::auto_download::{AutoDownload, SETTING_AUTO_DOWNLOAD};
-use langis_core::{AccountSetting, Command, DeviceKind, ShareQuality};
+use langis_core::{AccountSetting, ChatChange, Command, DeviceKind, ShareQuality};
+use langis_store::{ChatColor, ChatColorEdit, ConversationKind};
 
 use crate::app::{App, Loaded};
+use crate::axo_list::{self, End, Item};
+use crate::dialog::{self, Answer, Choice, Variant};
 use crate::theme::{self, Palette};
 use crate::widgets;
 
@@ -15,47 +20,67 @@ pub const SETTING_NOTIFICATIONS: &str = "ui.notifications";
 pub const SETTING_NOTIFICATION_CONTENT: &str = "ui.notification_content";
 /// Desktop's `navTabsCollapsed`: the nav tabs hidden, "true" or unset.
 pub const SETTING_NAV_TABS_COLLAPSED: &str = "ui.nav_tabs_collapsed";
+/// Desktop's `zoomFactor`: the window's zoom, "1" when unset.
+pub const SETTING_ZOOM: &str = "ui.zoom";
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub enum Section {
+/// Desktop's `DEFAULT_ZOOM_FACTORS`.
+const ZOOMS: [(f32, &str); 7] = [(0.75, "75%"), (0.9, "90%"), (1., "100%"), (1.1, "110%"), (1.25, "125%"), (1.5, "150%"), (2., "200%")];
+
+/// Desktop's `SettingsPage`s that langis has.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum Page {
+    Account,
     #[default]
+    General,
     Appearance,
+    ChatColor,
     Chats,
+    ChatFolders,
     Calls,
     Notifications,
+    WhileMuted,
     Privacy,
+    PhoneNumber,
+    Blocked,
     DataUsage,
-    ChatFolders,
-    LinkedDevice,
 }
 
-impl Section {
-    const ALL: [Section; 8] = [
-        Self::Appearance,
-        Self::Chats,
-        Self::Calls,
-        Self::Notifications,
-        Self::Privacy,
-        Self::DataUsage,
-        Self::ChatFolders,
-        Self::LinkedDevice,
+impl Page {
+    /// The nav button a page lights up, and its symbol and label.
+    const NAV: [(Page, &'static str, &'static str); 8] = [
+        (Page::Account, "person-circle", "Account"),
+        (Page::General, "settings", "General"),
+        (Page::Appearance, "appearance", "Appearance"),
+        (Page::Chats, "message", "Chats"),
+        (Page::Calls, "phone", "Calls"),
+        (Page::Notifications, "bell", "Notifications"),
+        (Page::Privacy, "lock", "Privacy"),
+        (Page::DataUsage, "piechart", "Data usage"),
     ];
 
-    fn label(self) -> &'static str {
+    fn top(self) -> Page {
         match self {
-            Self::Appearance => "Appearance",
-            Self::Chats => "Chats",
-            Self::Calls => "Calls",
-            Self::Notifications => "Notifications",
-            Self::Privacy => "Privacy",
-            Self::DataUsage => "Data usage",
-            Self::ChatFolders => "Chat folders",
-            Self::LinkedDevice => "This device",
+            Page::ChatColor => Page::Appearance,
+            Page::ChatFolders => Page::Chats,
+            Page::WhileMuted => Page::Notifications,
+            Page::PhoneNumber | Page::Blocked => Page::Privacy,
+            other => other,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Page::ChatColor => "Chat Color",
+            Page::ChatFolders => "Chat folders",
+            Page::WhileMuted => "While muted",
+            Page::PhoneNumber => "Phone Number",
+            Page::Blocked => "Blocked",
+            other => Page::NAV.iter().find(|(p, _, _)| *p == other).map(|(_, _, l)| *l).unwrap_or(""),
         }
     }
 }
 
-/// The stored values the page shows.
+/// The stored values the pages show.
 #[derive(Clone, Debug)]
 pub struct Snapshot {
     pub account: Vec<(AccountSetting, bool)>,
@@ -69,11 +94,25 @@ pub struct Snapshot {
     pub key_transparency_disabled: bool,
     pub universal_timer: u32,
     pub contacts_synced_at: Option<i64>,
+    pub stories_disabled: bool,
+    pub username: Option<String>,
+}
+
+/// A question the page is asking.
+#[derive(Clone, PartialEq, Debug)]
+enum Ask {
+    DeleteData,
+    LinkedDevice,
+    StoriesOff,
+    NobodyCanFind,
+    ResetColors,
+    Unblock(langis_store::ConversationId, String, bool),
+    DeleteFolder(String, String),
 }
 
 #[derive(Default)]
 pub struct SettingsView {
-    pub section: Section,
+    pub page: Page,
     pub snapshot: Option<Snapshot>,
     /// Something changed elsewhere: read the values again.
     pub stale: bool,
@@ -81,7 +120,7 @@ pub struct SettingsView {
     /// A chat folder being made or changed: its id (new or existing) and
     /// what it holds.
     pub folder: Option<(String, bool, langis_store::ChatFolderParams)>,
-    confirm_unlink: bool,
+    ask: Option<Ask>,
 }
 
 fn load(app: &App) {
@@ -108,8 +147,19 @@ fn load(app: &App) {
             key_transparency_disabled: langis_core::setting_on(get(langis_core::SETTING_KEY_TRANSPARENCY_DISABLED).await.as_deref()),
             universal_timer: get(langis_core::SETTING_UNIVERSAL_EXPIRE_TIMER).await.and_then(|v| v.parse().ok()).unwrap_or(0),
             contacts_synced_at: get(langis_core::SETTING_CONTACTS_SYNCED_AT).await.and_then(|v| v.parse().ok()),
+            stories_disabled: langis_core::setting_on(get(langis_core::SETTING_STORIES_DISABLED).await.as_deref()),
+            username: None,
         };
         Some(Loaded::Settings(Box::new(snapshot)))
+    });
+    let aci = app.aci.clone();
+    app.load(move |db| async move {
+        let username = langis_core::own_profile(&db, &aci).await.username;
+        Some(Loaded::Apply(Box::new(move |app: &mut App| {
+            if let Some(s) = app.settings.snapshot.as_mut() {
+                s.username = username;
+            }
+        })))
     });
 }
 
@@ -122,350 +172,370 @@ pub fn write(app: &App, key: &'static str, value: String) {
     });
 }
 
+/// The saved zoom, applied once the account is open.
+pub fn load_zoom(app: &App) {
+    app.load(|db| async move {
+        let zoom: f32 = db.setting(SETTING_ZOOM).await.ok().flatten().and_then(|z| z.parse().ok()).unwrap_or(1.);
+        Some(Loaded::Apply(Box::new(move |app: &mut App| {
+            if zoom > 0.2 {
+                app.ctx.set_zoom_factor(zoom);
+            }
+        })))
+    });
+}
+
 pub fn show(app: &mut App, ui: &mut Ui) {
     let palette = Palette::of(ui.ctx());
     if app.settings.stale || app.settings.snapshot.is_none() {
         app.settings.stale = false;
         load(app);
     }
-    egui::Panel::left("settings-sections")
-        .exact_size(300.)
-        .resizable(false)
+    egui::Panel::left("settings-pages")
+        .resizable(true)
+        .default_size(300.)
+        .min_size(240.)
+        .max_size(420.)
         .show_separator_line(false)
         .frame(egui::Frame::new().fill(palette.sidebar))
         .show(ui, |ui| {
             let full = ui.max_rect();
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
-            ui.add_space(14.);
+            ui.add_space(12.);
             ui.horizontal(|ui| {
                 crate::sidebar::header_start(app, ui);
-                ui.label(RichText::new("Settings").font(theme::semibold(18.)));
+                ui.label(egui::RichText::new("Settings").font(theme::semibold(18.)));
             });
             ui.add_space(14.);
-            for section in Section::ALL {
-                let (outer, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.), Sense::click());
-                let rect = outer.shrink2(Vec2::new(10., 2.));
-                let selected = app.settings.section == section;
-                if selected || response.hovered() {
-                    ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { palette.fill_pressed } else { palette.fill });
-                }
-                ui.painter().text(rect.left_center() + Vec2::new(14., 0.), egui::Align2::LEFT_CENTER, section.label(), theme::regular(14.), palette.text);
-                if response.clicked() {
-                    app.settings.section = section;
-                }
-            }
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::Frame::new().inner_margin(egui::Margin { left: 11, right: 11, top: 2, bottom: 12 }).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                    nav(app, ui, &palette);
+                });
+            });
         });
     egui::CentralPanel::no_frame().show(ui, |ui| {
         ui.painter().rect_filled(ui.max_rect(), 0, palette.background);
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin { left: 32, right: 32, top: 20, bottom: 32 }).show(ui, |ui| {
-                ui.set_max_width(640.);
-                ui.label(RichText::new(app.settings.section.label()).font(theme::semibold(20.)));
-                ui.add_space(16.);
-                let Some(snapshot) = app.settings.snapshot.clone() else {
-                    ui.spinner();
-                    return;
-                };
-                match app.settings.section {
-                    Section::Appearance => appearance(app, ui, &palette),
-                    Section::Chats => chats(app, ui, &palette, &snapshot),
-                    Section::Calls => calls(app, ui, &palette, &snapshot),
-                    Section::Notifications => notifications(app, ui, &palette, &snapshot),
-                    Section::Privacy => privacy(app, ui, &palette, &snapshot),
-                    Section::DataUsage => data_usage(app, ui, &palette, &snapshot),
-                    Section::ChatFolders => chat_folders(app, ui, &palette),
-                    Section::LinkedDevice => linked_device(app, ui, &palette),
-                }
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        ui.add_space(4.);
+        let page = app.settings.page;
+        if axo_list::panel_header(ui, page.title(), page != page.top()) {
+            app.settings.page = page.top();
+        }
+        let Some(snapshot) = app.settings.snapshot.clone() else {
+            ui.centered_and_justified(|ui| ui.spinner());
+            return;
+        };
+        egui::ScrollArea::vertical().id_salt(("settings-page", page as u8)).auto_shrink(false).show(ui, |ui| {
+            axo_list::container(ui, |ui| match page {
+                Page::Account => account(app, ui),
+                Page::General => general(app, ui),
+                Page::Appearance => appearance(app, ui),
+                Page::ChatColor => chat_color(app, ui, &palette),
+                Page::Chats => chats(app, ui, &snapshot),
+                Page::ChatFolders => chat_folders(app, ui),
+                Page::Calls => calls(app, ui, &snapshot),
+                Page::Notifications => notifications(app, ui, &snapshot),
+                Page::WhileMuted => while_muted(app, ui, &snapshot),
+                Page::Privacy => privacy(app, ui, &snapshot),
+                Page::PhoneNumber => phone_number(app, ui, &palette, &snapshot),
+                Page::Blocked => blocked(app, ui, &palette),
+                Page::DataUsage => data_usage(app, ui, &snapshot),
             });
         });
     });
+    ask(app, ui.ctx());
+    folder_editor(app, ui);
 }
 
-/// A setting's row: its name (and a line on what it does), then the
-/// control on the right.
-fn row(ui: &mut Ui, palette: &Palette, title: &str, detail: Option<&str>, control: impl FnOnce(&mut Ui)) {
-    ui.horizontal(|ui| {
-        ui.set_min_height(44.);
-        let text_width = (ui.available_width() - 300.).max(160.);
-        ui.vertical(|ui| {
-            ui.set_width(text_width);
-            ui.label(RichText::new(title).font(theme::regular(14.)));
-            if let Some(detail) = detail {
-                ui.label(RichText::new(detail).font(theme::regular(12.)).color(palette.text_secondary));
-            }
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
-    });
+/// The profile card, then a button per page (`PreferencesButton`).
+fn nav(app: &mut App, ui: &mut Ui, palette: &Palette) {
+    let width = ui.available_width();
+    let username = app.settings.snapshot.as_ref().and_then(|s| s.username.clone());
+    let painter = ui.painter().clone();
+    let name = painter.layout(app.me.0.clone(), theme::semibold(14.), palette.text, width - 20. - 58. - 46.);
+    let mut lines = vec![];
+    if let Some(phone) = &app.phone {
+        lines.push(painter.layout_no_wrap(langis_core::share_contact::format_phone(phone, Some(phone)), theme::regular(12.), palette.text_secondary));
+    }
+    if let Some(u) = &username {
+        lines.push(painter.layout_no_wrap(u.clone(), theme::regular(12.), palette.text_secondary));
+    }
+    let text_h = name.size().y + lines.iter().map(|l| 2. + l.size().y).sum::<f32>();
+    let h = 14. + text_h.max(48.) + 14.;
+    let (rect, chip) = ui.allocate_exact_size(Vec2::new(width, h), Sense::click());
+    if chip.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(8), if chip.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill });
+    }
+    let avatar = Rect::from_min_size(Pos2::new(rect.left() + 10., rect.center().y - 24.), Vec2::splat(48.));
+    let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
+    widgets::paint_avatar(ui, avatar, &spec);
+    let mut y = rect.center().y - text_h / 2.;
+    let x = avatar.right() + 10.;
+    let name_h = name.size().y;
+    painter.galley(Pos2::new(x, y), name, palette.text);
+    y += name_h;
+    for line in lines {
+        y += 2.;
+        let lh = line.size().y;
+        painter.galley(Pos2::new(x, y), line, palette.text_secondary);
+        y += lh;
+    }
+    let mut qr_clicked = false;
+    if username.is_some() {
+        let qr = Rect::from_center_size(Pos2::new(rect.right() - 10. - 18., rect.center().y), Vec2::splat(36.));
+        let r = ui.interact(qr, egui::Id::unique("settings").with("profile-qr"), Sense::click());
+        painter.circle_filled(qr.center(), 18., if r.hovered() { palette.fill_secondary } else { palette.fill });
+        theme::paint_symbol(&painter, "qrcode", qr.center(), 20., palette.text);
+        qr_clicked = r.on_hover_text("Open username link screen").clicked();
+    }
+    if chip.on_hover_text("Edit profile").clicked() || qr_clicked {
+        crate::profile::open(app);
+    }
     ui.add_space(4.);
+    for (i, (page, symbol, label)) in Page::NAV.iter().enumerate() {
+        if i == 1 {
+            // Desktop's divider after the account buttons.
+            let (r, _) = ui.allocate_exact_size(Vec2::new(width, 17.), Sense::hover());
+            painter.hline(r.left() + 14.0..=r.right() - 14., r.top() + 8.5, Stroke::new(1., palette.border));
+        }
+        ui.add_space(2.);
+        let (r, response) = ui.allocate_exact_size(Vec2::new(width, 40.), Sense::click());
+        ui.add_space(2.);
+        let current = app.settings.page.top() == *page;
+        if current || response.hovered() {
+            let fill = if current || response.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill };
+            painter.rect_filled(r, CornerRadius::same(14), fill);
+        }
+        theme::paint_symbol(&painter, symbol, Pos2::new(r.left() + 18. + 9., r.center().y), 18., palette.text);
+        painter.text(Pos2::new(r.left() + 18. + 18. + 12., r.center().y), Align2::LEFT_CENTER, *label, theme::regular(14.), palette.text);
+        if response.clicked() {
+            app.settings.page = *page;
+            app.settings.stale = true;
+        }
+    }
 }
 
-fn heading(ui: &mut Ui, palette: &Palette, text: &str) {
-    ui.add_space(12.);
-    ui.label(RichText::new(text).font(theme::semibold(14.)).color(palette.text_secondary));
-    ui.add_space(4.);
+fn account_on(s: &Snapshot, setting: AccountSetting) -> bool {
+    s.account.iter().find(|(x, _)| *x == setting).map(|(_, on)| *on).unwrap_or(setting.default_on())
 }
 
-fn account_switch(app: &App, ui: &mut Ui, palette: &Palette, snapshot: &Snapshot, setting: AccountSetting, title: &str, detail: Option<&str>) {
-    let mut on = snapshot.account.iter().find(|(s, _)| *s == setting).map(|(_, on)| *on).unwrap_or(setting.default_on());
-    row(ui, palette, title, detail, |ui| {
-        if widgets::switch(ui, &mut on).changed() {
-            app.send(Command::SetAccountSetting { setting, on });
+fn account_switch(app: &mut App, ui: &mut Ui, s: &Snapshot, setting: AccountSetting, item: Item<'_>) {
+    let mut on = account_on(s, setting);
+    if axo_list::switch(ui, item, &mut on) {
+        app.send(Command::SetAccountSetting { setting, on });
+        if let Some(snapshot) = app.settings.snapshot.as_mut()
+            && let Some(entry) = snapshot.account.iter_mut().find(|(x, _)| *x == setting)
+        {
+            entry.1 = on;
+        }
+    }
+}
+
+fn account(app: &mut App, ui: &mut Ui) {
+    axo_list::list(ui, None, None, |ui| {
+        let item = Item::new("This is a linked device").symbol("device-laptop").description("To manage your account settings, open Signal on your primary device.");
+        if axo_list::item(ui, item, End::Arrow(None)).clicked() {
+            app.settings.ask = Some(Ask::LinkedDevice);
         }
     });
 }
 
-fn appearance(app: &mut App, ui: &mut Ui, palette: &Palette) {
-    let mut theme = app.theme.clone();
-    row(ui, palette, "Theme", None, |ui| {
-        egui::ComboBox::from_id_salt("theme")
-            .selected_text(match theme.as_str() {
-                "light" => "Light",
-                "dark" => "Dark",
-                _ => "System",
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut theme, "system".to_owned(), "System");
-                ui.selectable_value(&mut theme, "light".to_owned(), "Light");
-                ui.selectable_value(&mut theme, "dark".to_owned(), "Dark");
-            });
+fn general(app: &mut App, ui: &mut Ui) {
+    let footer = "To change the name of this device, open Signal on your phone and navigate to Settings > Linked devices";
+    axo_list::list(ui, None, Some(footer), |ui| {
+        if let Some(phone) = &app.phone {
+            axo_list::item(ui, Item::new("Phone Number"), End::Value(&langis_core::share_contact::format_phone(phone, Some(phone))));
+        }
+        axo_list::item(ui, Item::new("Device Name"), End::Value(&crate::app::device_name()));
     });
-    if theme != app.theme {
-        app.theme = theme.clone();
-        app.apply_theme();
-        app.send(Command::SetLocalSetting(langis_core::LocalSetting::Theme(langis_core::Theme::from_setting(Some(&theme)))));
-    }
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        let item = Item::new("Delete application data").description("This will delete all data in the application, removing all messages and saved account information.");
+        if axo_list::item(ui, item, End::Action("Delete data", true)).clicked() {
+            app.settings.ask = Some(Ask::DeleteData);
+        }
+    });
 }
 
-fn chats(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
-    account_switch(app, ui, palette, s, AccountSetting::LinkPreviews, "Generate link previews", Some("Retrieve link previews directly from websites for messages you send."));
-    account_switch(app, ui, palette, s, AccountSetting::PreferContactAvatars, "Use address book photos", Some("Display photos from your address book if available."));
-    account_switch(app, ui, palette, s, AccountSetting::KeepMutedChatsArchived, "Keep muted chats archived", None);
-    account_switch(app, ui, palette, s, AccountSetting::ShowUnreadReminders, "Show unread reminders", None);
-    let synced = s.contacts_synced_at.map(|at| format!("Last import at {}", crate::format::short_timestamp(at)));
-    row(ui, palette, "Contacts", synced.as_deref().or(Some("Import your phone's contacts again.")), |ui| {
-        if widgets::pill_button(ui, "Import now", false).clicked() {
+fn appearance(app: &mut App, ui: &mut Ui) {
+    let colors = app.chat_colors.clone();
+    let zoom = ui.ctx().zoom_factor();
+    axo_list::list(ui, None, None, |ui| {
+        let themes = ["system", "light", "dark"];
+        let chosen = themes.iter().position(|t| *t == app.theme).or(Some(0));
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("theme"), Item::new("Theme").symbol("contrast"), &["System", "Light", "Dark"], chosen) {
+            let theme = themes[i].to_owned();
+            app.theme = theme.clone();
+            app.apply_theme();
+            app.send(Command::SetLocalSetting(langis_core::LocalSetting::Theme(langis_core::Theme::from_setting(Some(&theme)))));
+        }
+        let bubble = crate::chat_colors::of(&colors.default, &colors);
+        if axo_list::item(ui, Item::new("Chat color").symbol("palette"), End::Swatch(bubble)).clicked() {
+            app.settings.page = Page::ChatColor;
+        }
+        let mut labels: Vec<String> = ZOOMS.iter().map(|(_, l)| (*l).to_owned()).collect();
+        let mut values: Vec<f32> = ZOOMS.iter().map(|(z, _)| *z).collect();
+        if !values.iter().any(|z| (z - zoom).abs() < 0.001) {
+            let at = values.iter().position(|z| *z > zoom).unwrap_or(values.len());
+            values.insert(at, zoom);
+            labels.insert(at, format!("{}%", (zoom * 100.).round()));
+        }
+        let chosen = values.iter().position(|z| (z - zoom).abs() < 0.001);
+        let options: Vec<&str> = labels.iter().map(String::as_str).collect();
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("zoom"), Item::new("Zoom level").symbol("zoom-in"), &options, chosen) {
+            ui.ctx().set_zoom_factor(values[i]);
+            write(app, SETTING_ZOOM, values[i].to_string());
+        }
+    });
+}
+
+/// Desktop's `ChatColorPicker` for the default color: a preview, the
+/// presets and custom colors, and resetting.
+fn chat_color(app: &mut App, ui: &mut Ui, palette: &Palette) {
+    let colors = app.chat_colors.clone();
+    let selected = crate::chat_colors::of(&colors.default, &colors);
+    // `SampleMessageBubbles`, on the page's color in a bordered card.
+    egui::Frame::new()
+        .fill(palette.background)
+        .stroke(Stroke::new(0.5, palette.border))
+        .corner_radius(CornerRadius::same(18))
+        .inner_margin(egui::Margin::symmetric(0, 16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let width = ui.available_width();
+            let samples = [
+                (true, "Here's a preview of the chat color.", "4h"),
+                (false, "Another bubble.", "2h"),
+                (true, "The color is visible to only you.", "Now"),
+            ];
+            let fixed = ui.max_rect();
+            for (i, (outgoing, text, time)) in samples.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(12.);
+                }
+                let color = if *outgoing { palette.bubble_out_text() } else { palette.text };
+                let meta = if *outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
+                let g = ui.painter().layout((*text).to_owned(), theme::regular(14.), color, width * 0.6);
+                let t = ui.painter().layout_no_wrap((*time).to_owned(), theme::regular(11.), meta);
+                let w = g.size().x + 8. + t.size().x + 24.;
+                let h = g.size().y + 16.;
+                let (row, _) = ui.allocate_exact_size(Vec2::new(width, h), Sense::hover());
+                let x = if *outgoing { row.right() - 16. - w } else { row.left() + 16. };
+                let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(w, h));
+                if *outgoing {
+                    crate::chat_colors::paint(ui.painter(), bubble, CornerRadius::same(18), selected, fixed);
+                } else {
+                    ui.painter().rect_filled(bubble, CornerRadius::same(18), palette.bubble_in);
+                }
+                let gh = g.size().y;
+                ui.painter().galley(Pos2::new(bubble.left() + 12., bubble.top() + 8.), g, color);
+                ui.painter().galley(Pos2::new(bubble.right() - 12. - t.size().x, bubble.top() + 8. + gh - t.size().y), t, meta);
+            }
+        });
+    ui.add_space(16.);
+    axo_list::list(ui, None, None, |ui| {
+        // `ChatColorPicker__bubbles`: 52px swatches 24px apart, centered.
+        let mut swatches: Vec<(ChatColor, crate::chat_colors::Bubble)> = langis_store::CHAT_COLOR_PRESETS
+            .iter()
+            .map(|name| (ChatColor::preset(name), crate::chat_colors::preset(name).unwrap_or(crate::chat_colors::DEFAULT)))
+            .collect();
+        for (id, value) in &colors.custom.colors {
+            swatches.push((ChatColor::Custom { id: id.clone(), value: *value }, crate::chat_colors::custom(value)));
+        }
+        let width = ui.available_width();
+        let per_row = (((width + 24.) / (52. + 24.)).floor() as usize).max(1);
+        let rows = swatches.len().div_ceil(per_row);
+        ui.add_space(20.);
+        let (area, _) = ui.allocate_exact_size(Vec2::new(width, rows as f32 * 52. + (rows - 1) as f32 * 24.), Sense::hover());
+        ui.add_space(20.);
+        let row_w = per_row as f32 * 52. + (per_row - 1) as f32 * 24.;
+        let left = area.left() + (width - row_w) / 2.;
+        let ring = if palette.dark { egui::Color32::WHITE } else { theme::rgb(0x3b3b3b) };
+        for (i, (color, bubble)) in swatches.iter().enumerate() {
+            let (r, c) = (i / per_row, i % per_row);
+            let rect = Rect::from_min_size(Pos2::new(left + c as f32 * 76., area.top() + r as f32 * 76.), Vec2::splat(52.));
+            let response = ui.interact(rect, egui::Id::unique("settings").with(("swatch", i)), Sense::click());
+            let chosen = match (color, &colors.default) {
+                (ChatColor::Preset { name: a }, ChatColor::Preset { name: b }) => a == b,
+                (ChatColor::Custom { id: a, .. }, ChatColor::Custom { id: b, .. }) => a == b,
+                _ => false,
+            };
+            if chosen {
+                ui.painter().circle_stroke(rect.center(), 24., Stroke::new(4., ring));
+            }
+            crate::chat_colors::paint_swatch(ui.painter(), rect.center(), 20., *bubble);
+            if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                app.send(Command::EditChatColors(ChatColorEdit::Default(color.clone())));
+            }
+        }
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        if axo_list::item(ui, Item::new("Reset all chat colors"), End::Click).clicked() {
+            app.settings.ask = Some(Ask::ResetColors);
+        }
+    });
+}
+
+fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
+    axo_list::list(ui, None, None, |ui| {
+        account_switch(app, ui, s, AccountSetting::PreferContactAvatars, Item::new("Use address book photos").description("Display contact photos from your address book if available."));
+        account_switch(app, ui, s, AccountSetting::KeepMutedChatsArchived, Item::new("Keep muted chats archived").description("Muted chats that are archived will remain archived when a new message arrives."));
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Text input"), None, |ui| {
+        account_switch(app, ui, s, AccountSetting::LinkPreviews, Item::new("Generate link previews").description("Retrieve link previews directly from websites for messages you send."));
+    });
+    axo_list::gap(ui);
+    let count = app.panes.folders.iter().filter(|f| f.folder_type == langis_store::ChatFolderType::Custom).count();
+    axo_list::list(ui, Some("Chat folders"), None, |ui| {
+        let (label, value) = if count > 0 {
+            ("Add or edit folders", Some(if count == 1 { "1 folder".to_owned() } else { format!("{count} folders") }))
+        } else {
+            ("Add a chat folder", None)
+        };
+        let item = Item::new(label).description("Organize your chats into folders and quickly switch between them on your chat list.");
+        if axo_list::item(ui, item, End::Arrow(value.as_deref())).clicked() {
+            app.settings.page = Page::ChatFolders;
+        }
+    });
+    axo_list::gap(ui);
+    let synced = s.contacts_synced_at.map(|at| format!("Import all Signal groups and contacts from your mobile device. Last import at {}", crate::format::short_timestamp(at)));
+    axo_list::list(ui, None, None, |ui| {
+        let item = Item::new("Import contacts").description(synced.as_deref().unwrap_or("Import all Signal groups and contacts from your mobile device."));
+        if axo_list::item(ui, item, End::Action("Import now", false)).clicked() {
             app.send(Command::SyncContacts);
             app.toast("Asking your phone for its contacts…");
         }
     });
 }
 
-fn calls(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
-    let mut incoming = s.incoming_calls;
-    row(ui, palette, "Enable incoming calls", None, |ui| {
-        if widgets::switch(ui, &mut incoming).changed() {
-            app.send(Command::SetLocalSetting(langis_core::LocalSetting::IncomingCalls(incoming)));
-            // Shown at once; a reload could race the command.
-            if let Some(snapshot) = app.settings.snapshot.as_mut() {
-                snapshot.incoming_calls = incoming;
-            }
-        }
-    });
-    let mut relay = s.always_relay;
-    row(ui, palette, "Always relay calls", Some("Relay all calls through the Signal server to avoid revealing your IP address to your contact."), |ui| {
-        if widgets::switch(ui, &mut relay).changed() {
-            app.send(Command::SetLocalSetting(langis_core::LocalSetting::AlwaysRelayCalls(relay)));
-            if let Some(snapshot) = app.settings.snapshot.as_mut() {
-                snapshot.always_relay = relay;
-            }
-        }
-    });
-
-    heading(ui, palette, "Devices");
-    let devices = app.call_devices.clone();
-    let lists = [
-        (DeviceKind::Camera, "Camera", &devices.devices.cameras, &devices.camera),
-        (DeviceKind::Microphone, "Microphone", &devices.devices.microphones, &devices.microphone),
-        (DeviceKind::Speaker, "Speakers", &devices.devices.speakers, &devices.speaker),
-    ];
-    for (kind, title, list, chosen) in lists {
-        let mut pick: Option<String> = None;
-        row(ui, palette, title, None, |ui| {
-            let current = chosen.as_ref().and_then(|id| list.iter().find(|d| &d.id == id)).map(|d| d.name.clone()).unwrap_or_else(|| "Default".into());
-            egui::ComboBox::from_id_salt(title).width(220.).selected_text(current).show_ui(ui, |ui| {
-                for d in list.iter() {
-                    if ui.selectable_label(chosen.as_ref() == Some(&d.id), &d.name).clicked() {
-                        pick = Some(d.id.clone());
-                    }
-                }
-                if list.is_empty() {
-                    ui.label("None found");
-                }
-            });
-        });
-        if let Some(id) = pick {
-            app.send(Command::SetCallDevice { kind, id });
-            app.send(Command::LoadCallDevices);
-        }
-    }
-
-    heading(ui, palette, "Screen sharing");
-    let current = devices.share_quality;
-    let preset = ShareQuality::PRESETS.iter().find(|(_, q)| *q == current).map(|(n, _)| *n);
-    let custom = app.settings.custom_quality.is_some() || preset.is_none();
-    let mut choice: Option<ShareQuality> = None;
-    row(ui, palette, "Quality", Some("Higher looks sharper and smoother, and uses more bandwidth and processor."), |ui| {
-        let label = if custom { "Custom".to_owned() } else { preset.unwrap_or("Custom").to_owned() };
-        egui::ComboBox::from_id_salt("share-quality").width(260.).selected_text(label).show_ui(ui, |ui| {
-            for (name, q) in ShareQuality::PRESETS {
-                if ui.selectable_label(!custom && q == current, name).clicked() {
-                    choice = Some(q);
-                }
-            }
-            if ui.selectable_label(custom, "Custom").clicked() {
-                app.settings.custom_quality = Some(current);
-            }
-        });
-    });
-    if let Some(q) = choice {
-        app.settings.custom_quality = None;
-        set_quality(app, q);
-    }
-    if let Some(mut q) = app.settings.custom_quality.or(custom.then_some(current)) {
-        let before = q;
-        let mut native = q.max_height == 0;
-        row(ui, palette, "Resolution", Some("The tallest the shared picture is sent; full keeps the screen's own size."), |ui| {
-            ui.checkbox(&mut native, "Full");
-            if !native {
-                if q.max_height == 0 {
-                    q.max_height = 1080;
-                }
-                ui.add(egui::Slider::new(&mut q.max_height, 144..=2160).suffix("p").step_by(2.));
-            }
-        });
-        if native {
-            q.max_height = 0;
-        }
-        row(ui, palette, "Frame rate", None, |ui| {
-            ui.add(egui::Slider::new(&mut q.fps, 1..=60).suffix(" fps"));
-        });
-        app.settings.custom_quality = Some(q);
-        let released = !ui.input(|i| i.pointer.any_down());
-        if q != before || (q != current && released) {
-            if released {
-                set_quality(app, q);
-            }
-        }
-    }
-}
-
-fn set_quality(app: &mut App, q: ShareQuality) {
-    app.send(Command::SetShareQuality(q));
-    app.call_devices.share_quality = q;
-}
-
-fn notifications(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
-    let mut on = s.notifications;
-    row(ui, palette, "Notifications", Some("Show a desktop notification when a message arrives."), |ui| {
-        if widgets::switch(ui, &mut on).changed() {
-            write(app, SETTING_NOTIFICATIONS, on.to_string());
-            app.settings.stale = true;
-            app.notify.0 = on;
-        }
-    });
-    let mut content = s.notification_content.clone();
-    row(ui, palette, "Notification content", None, |ui| {
-        let label = match content.as_str() {
-            "name" => "Name only",
-            "none" => "No name or content",
-            _ => "Name, content, and actions",
-        };
-        egui::ComboBox::from_id_salt("notification-content").width(220.).selected_text(label).show_ui(ui, |ui| {
-            ui.selectable_value(&mut content, "all".to_owned(), "Name, content, and actions");
-            ui.selectable_value(&mut content, "name".to_owned(), "Name only");
-            ui.selectable_value(&mut content, "none".to_owned(), "No name or content");
-        });
-    });
-    if content != s.notification_content {
-        app.notify.1 = content.clone();
-        write(app, SETTING_NOTIFICATION_CONTENT, content);
-        app.settings.stale = true;
-    }
-    account_switch(app, ui, palette, s, AccountSetting::ReactionNotifications, "Notify for reactions", None);
-    account_switch(app, ui, palette, s, AccountSetting::NotifyMentionsIfMuted, "Notify for mentions in muted chats", None);
-    account_switch(app, ui, palette, s, AccountSetting::NotifyCallsIfMuted, "Notify for calls in muted chats", None);
-}
-
-fn privacy(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
-    account_switch(app, ui, palette, s, AccountSetting::ReadReceipts, "Read receipts", Some("If read receipts are disabled, you won't be able to see read receipts from others."));
-    account_switch(app, ui, palette, s, AccountSetting::TypingIndicators, "Typing indicators", Some("If typing indicators are disabled, you won't be able to see typing indicators from others."));
-    account_switch(app, ui, palette, s, AccountSetting::SealedSenderIndicators, "Show sealed sender indicators", None);
-
-    heading(ui, palette, "Phone number");
-    let mut sharing = s.phone_sharing;
-    row(ui, palette, "Who can see my number", Some(if sharing { "Everybody" } else { "Nobody" }), |ui| {
-        if widgets::switch(ui, &mut sharing).changed() {
-            app.send(Command::SetPhoneNumberSharing(sharing));
-            app.settings.stale = true;
-        }
-    });
-    let mut found = s.phone_discoverable;
-    row(ui, palette, "Who can find me by number", Some(if found { "Everybody" } else { "Nobody" }), |ui| {
-        if widgets::switch(ui, &mut found).changed() {
-            app.send(Command::SetPhoneNumberDiscoverable(found));
-            app.settings.stale = true;
-        }
-    });
-
-    heading(ui, palette, "Disappearing messages");
-    let mut timer = s.universal_timer;
-    row(ui, palette, "Default timer for new chats", None, |ui| {
-        if crate::details::timer_picker(ui, "universal-timer", &mut timer) {
-            app.send(Command::SetUniversalExpireTimer(timer));
-            app.settings.stale = true;
-        }
-    });
-
-    heading(ui, palette, "Advanced");
-    let mut auto = !s.key_transparency_disabled;
-    row(ui, palette, "Automatic key verification", Some("Check safety numbers automatically when you can, using Signal's key transparency log."), |ui| {
-        if widgets::switch(ui, &mut auto).changed() {
-            app.send(Command::SetKeyTransparencyDisabled(!auto));
-            app.settings.stale = true;
-        }
-    });
-    row(ui, palette, "Stories", Some("Who sees your stories, view receipts, and turning stories off."), |ui| {
-        if widgets::pill_button(ui, "Story privacy", false).clicked() {
-            app.panes.stories.privacy = true;
-        }
-    });
-    heading(ui, palette, "Database");
-    ui.label(
-        RichText::new(format!("Your messages are kept encrypted in {}.", app.data_dir.display()))
-            .font(theme::regular(13.))
-            .color(palette.text_secondary),
+/// Desktop's chat folders page: the folders, and the suggested ones.
+fn chat_folders(app: &mut App, ui: &mut Ui) {
+    use langis_store::{ChatFolderParams, ChatFolderType};
+    let palette = Palette::of(ui.ctx());
+    let intro = ui.painter().layout(
+        "Organize your chats into folders and quickly switch between them on your chat list".to_owned(),
+        theme::regular(12.),
+        palette.text_secondary,
+        ui.available_width() - 32.,
     );
-}
-
-fn data_usage(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
-    let mut auto = s.auto_download.clone();
-    heading(ui, palette, "Media auto-download");
-    let mut changed = false;
-    for (title, on) in [("Photos", &mut auto.photos), ("Videos", &mut auto.videos), ("Audio", &mut auto.audio), ("Documents", &mut auto.documents)] {
-        row(ui, palette, title, None, |ui| {
-            changed |= widgets::switch(ui, on).changed();
-        });
-    }
-    if changed {
-        app.send(Command::SetAutoDownload(auto.clone()));
-        if let Some(snapshot) = app.settings.snapshot.as_mut() {
-            snapshot.auto_download = auto;
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), intro.size().y + 8.), Sense::hover());
+    ui.painter().galley(r.min + Vec2::new(16., 0.), intro, palette.text_secondary);
+    axo_list::gap(ui);
+    let folders: Vec<_> = app.panes.folders.clone();
+    axo_list::list(ui, Some("Folders"), None, |ui| {
+        if axo_list::item(ui, Item::new("Create a folder").symbol("plus"), End::Arrow(None)).clicked() {
+            app.settings.folder = Some((new_id(), true, ChatFolderParams::defaults()));
         }
-    }
-}
-
-/// Desktop's chat folder settings: the folders, and the editor.
-fn chat_folders(app: &mut App, ui: &mut Ui, palette: &Palette) {
-    use langis_store::{ChatFolderEdit, ChatFolderParams, ChatFolderType};
-    let folders: Vec<_> = app.panes.folders.iter().filter(|f| f.folder_type == ChatFolderType::Custom).cloned().collect();
-    ui.label(RichText::new("Organize your chats into folders and quickly switch between them in your chat list.").font(theme::regular(13.)).color(palette.text_secondary));
-    ui.add_space(12.);
-    for f in &folders {
-        row(ui, palette, &f.name, Some(&folder_summary(f)), |ui| {
-            if widgets::pill_button(ui, "Delete", false).clicked() {
-                app.send(Command::EditChatFolders(ChatFolderEdit::Delete { id: f.id.clone(), at: chrono::Utc::now().timestamp_millis() as u64 }));
+        for f in &folders {
+            if f.folder_type == ChatFolderType::All {
+                axo_list::item(ui, Item::new("All chats").symbol("folder"), End::None);
+                continue;
             }
-            if widgets::pill_button(ui, "Edit", false).clicked() {
+            let summary = folder_summary(f);
+            let r = axo_list::item(ui, Item::new(&f.name).symbol("folder").description(&summary), End::Arrow(None));
+            let edit = || {
                 let params = ChatFolderParams {
                     name: f.name.clone(),
                     show_only_unread: f.show_only_unread,
@@ -475,30 +545,46 @@ fn chat_folders(app: &mut App, ui: &mut Ui, palette: &Palette) {
                     included: f.included.clone(),
                     excluded: f.excluded.clone(),
                 };
-                app.settings.folder = Some((f.id.clone(), false, params));
+                (f.id.clone(), false, params)
+            };
+            if r.clicked() {
+                app.settings.folder = Some(edit());
+            }
+            crate::menu::context(ui, &r.row, egui::Id::unique("settings").with(("folder-menu", &f.id)), |m| {
+                if m.item(Some("pencil"), "Edit folder") {
+                    app.settings.folder = Some(edit());
+                }
+                if m.item(Some("trash"), "Delete") {
+                    app.settings.ask = Some(Ask::DeleteFolder(f.id.clone(), f.name.clone()));
+                }
+            });
+        }
+    });
+    axo_list::gap(ui);
+    let suggested = [
+        ("Unread", "Unread messages from all chats", ChatFolderParams { name: "Unread".into(), show_only_unread: true, include_all_individual_chats: true, include_all_group_chats: true, ..ChatFolderParams::defaults() }),
+        ("1:1 chats", "Only messages from direct chats", ChatFolderParams { name: "1:1 chats".into(), include_all_individual_chats: true, ..ChatFolderParams::defaults() }),
+        ("Groups", "Only messages from group chats", ChatFolderParams { name: "Groups".into(), include_all_group_chats: true, ..ChatFolderParams::defaults() }),
+    ];
+    let has = |p: &ChatFolderParams| {
+        folders.iter().any(|f| {
+            f.folder_type == ChatFolderType::Custom
+                && f.show_only_unread == p.show_only_unread
+                && f.include_all_individual_chats == p.include_all_individual_chats
+                && f.include_all_group_chats == p.include_all_group_chats
+                && f.included.is_empty()
+        })
+    };
+    let missing: Vec<_> = suggested.into_iter().filter(|(_, _, p)| !has(p)).collect();
+    if !missing.is_empty() {
+        axo_list::list(ui, Some("Suggested folders"), None, |ui| {
+            for (name, description, params) in missing {
+                if axo_list::item(ui, Item::new(name).symbol("folder").description(description), End::Action("Add", false)).clicked() {
+                    app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::Create { id: new_id(), params }));
+                }
             }
         });
     }
-    if folders.is_empty() {
-        ui.label(RichText::new("No folders yet.").color(palette.text_secondary));
-    }
-    ui.add_space(8.);
-    ui.horizontal(|ui| {
-        if widgets::pill_button(ui, "Create a folder", true).clicked() {
-            app.settings.folder = Some((new_id(), true, ChatFolderParams::defaults()));
-        }
-        ui.label(RichText::new("Suggested:").color(palette.text_secondary));
-        if ui.link("Unread").clicked() {
-            app.settings.folder = Some((new_id(), true, ChatFolderParams { name: "Unread".into(), show_only_unread: true, include_all_individual_chats: true, include_all_group_chats: true, ..ChatFolderParams::defaults() }));
-        }
-        if ui.link("1:1 chats").clicked() {
-            app.settings.folder = Some((new_id(), true, ChatFolderParams { name: "1:1 chats".into(), include_all_individual_chats: true, ..ChatFolderParams::defaults() }));
-        }
-        if ui.link("Groups").clicked() {
-            app.settings.folder = Some((new_id(), true, ChatFolderParams { name: "Groups".into(), include_all_group_chats: true, ..ChatFolderParams::defaults() }));
-        }
-    });
-    folder_editor(app, ui, palette);
 }
 
 fn folder_summary(f: &langis_store::ChatFolder) -> String {
@@ -518,7 +604,7 @@ fn folder_summary(f: &langis_store::ChatFolder) -> String {
     if parts.is_empty() { "No chats".into() } else { parts.join(", ") }
 }
 
-fn folder_editor(app: &mut App, ui: &mut Ui, palette: &Palette) {
+fn folder_editor(app: &mut App, ui: &mut Ui) {
     use langis_store::ChatFolderEdit;
     let Some((id, new, mut params)) = app.settings.folder.take() else { return };
     let mut answer = None;
@@ -531,7 +617,7 @@ fn folder_editor(app: &mut App, ui: &mut Ui, palette: &Palette) {
         ui.checkbox(&mut params.show_only_unread, "Only show unread chats");
         ui.checkbox(&mut params.show_muted_chats, "Show muted chats");
         ui.add_space(8.);
-        ui.label(RichText::new("Included chats").font(theme::semibold(13.)));
+        ui.label(egui::RichText::new("Included chats").font(theme::semibold(13.)));
         egui::ScrollArea::vertical().max_height(220.).show(ui, |ui| {
             for c in app.conversations.iter() {
                 let mut on = params.included.contains(&c.id);
@@ -545,7 +631,6 @@ fn folder_editor(app: &mut App, ui: &mut Ui, palette: &Palette) {
                 }
             }
         });
-        let _ = palette;
         answer = crate::panes::buttons(ui, &["Save", "Cancel"]);
     });
     match answer {
@@ -577,30 +662,403 @@ pub fn new_id() -> String {
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
-/// This linked device: its name and data, and unlinking it.
-fn linked_device(app: &mut App, ui: &mut Ui, palette: &Palette) {
-    row(ui, palette, "Account", Some(&app.aci), |_| {});
-    row(ui, palette, "Data folder", Some(&app.data_dir.display().to_string()), |_| {});
-    row(ui, palette, "Unlink this device", Some("Removes this device from your account and deletes its messages. Your phone and other devices keep theirs."), |ui| {
-        if widgets::pill_button(ui, "Unlink", false).clicked() {
-            app.settings.confirm_unlink = true;
+fn calls(app: &mut App, ui: &mut Ui, s: &Snapshot) {
+    axo_list::list(ui, None, None, |ui| {
+        let mut incoming = s.incoming_calls;
+        if axo_list::switch(ui, Item::new("Enable incoming calls"), &mut incoming) {
+            app.send(Command::SetLocalSetting(langis_core::LocalSetting::IncomingCalls(incoming)));
+            // Shown at once; a reload could race the command.
+            if let Some(snapshot) = app.settings.snapshot.as_mut() {
+                snapshot.incoming_calls = incoming;
+            }
         }
     });
-    if app.settings.confirm_unlink {
-        let mut answer = None;
-        let closed = crate::panes::modal(ui, "unlink", 380., |ui| {
-            crate::panes::title(ui, "Unlink this device?");
-            crate::panes::body(ui, palette, "All messages on this device will be deleted. You can link it again later.");
-            answer = crate::panes::buttons(ui, &["Unlink", "Cancel"]);
-        });
-        match answer {
-            Some(0) => {
-                app.settings.confirm_unlink = false;
-                app.send(Command::Unlink);
+    axo_list::gap(ui);
+    let devices = app.call_devices.clone();
+    axo_list::list(ui, Some("Devices"), None, |ui| {
+        let lists = [
+            (DeviceKind::Camera, "Video", "videocamera", &devices.devices.cameras, &devices.camera),
+            (DeviceKind::Microphone, "Microphone", "mic", &devices.devices.microphones, &devices.microphone),
+            (DeviceKind::Speaker, "Speakers", "speaker", &devices.devices.speakers, &devices.speaker),
+        ];
+        for (kind, label, symbol, list, chosen) in lists {
+            let names: Vec<&str> = if list.is_empty() { vec!["No devices available"] } else { list.iter().map(|d| d.name.as_str()).collect() };
+            let index = chosen.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).or(Some(0));
+            let item = Item::new(label).symbol(symbol).disabled(list.is_empty());
+            if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with(("device", label)), item, &names, index)
+                && let Some(d) = list.get(i)
+            {
+                app.send(Command::SetCallDevice { kind, id: d.id.clone() });
+                app.send(Command::LoadCallDevices);
             }
-            Some(_) => app.settings.confirm_unlink = false,
-            None if closed => app.settings.confirm_unlink = false,
-            None => {}
         }
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Advanced"), None, |ui| {
+        let mut relay = s.always_relay;
+        let item = Item::new("Always relay calls").description("Relay all calls through the Signal server to avoid revealing your IP address to your contact. Enabling will reduce call quality.");
+        if axo_list::switch(ui, item, &mut relay) {
+            app.send(Command::SetLocalSetting(langis_core::LocalSetting::AlwaysRelayCalls(relay)));
+            if let Some(snapshot) = app.settings.snapshot.as_mut() {
+                snapshot.always_relay = relay;
+            }
+        }
+    });
+    axo_list::gap(ui);
+    screen_sharing(app, ui);
+}
+
+/// Ours: the quality screen sharing sends at.
+fn screen_sharing(app: &mut App, ui: &mut Ui) {
+    let current = app.call_devices.share_quality;
+    let preset = ShareQuality::PRESETS.iter().position(|(_, q)| *q == current);
+    let custom = app.settings.custom_quality.is_some() || preset.is_none();
+    let mut names: Vec<&str> = ShareQuality::PRESETS.iter().map(|(n, _)| *n).collect();
+    names.push("Custom");
+    let chosen = if custom { Some(names.len() - 1) } else { preset };
+    let mut pick = None;
+    axo_list::list(ui, Some("Screen sharing"), None, |ui| {
+        let item = Item::new("Quality").description("Higher looks sharper and smoother, and uses more bandwidth and processor.");
+        pick = axo_list::select(ui, egui::Id::unique("settings").with("share-quality"), item, &names, chosen);
+        if let Some(mut q) = app.settings.custom_quality.or(custom.then_some(current)) {
+            let before = q;
+            let mut native = q.max_height == 0;
+            control_row(ui, "Resolution", |ui| {
+                if !native {
+                    if q.max_height == 0 {
+                        q.max_height = 1080;
+                    }
+                    ui.add(egui::Slider::new(&mut q.max_height, 144..=2160).suffix("p").step_by(2.));
+                }
+                ui.checkbox(&mut native, "Full");
+            });
+            if native {
+                q.max_height = 0;
+            }
+            control_row(ui, "Frame rate", |ui| {
+                ui.add(egui::Slider::new(&mut q.fps, 1..=60).suffix(" fps"));
+            });
+            app.settings.custom_quality = Some(q);
+            let released = !ui.input(|i| i.pointer.any_down());
+            if (q != before || q != current) && released {
+                set_quality(app, q);
+            }
+        }
+    });
+    match pick {
+        Some(i) if i < ShareQuality::PRESETS.len() => {
+            app.settings.custom_quality = None;
+            set_quality(app, ShareQuality::PRESETS[i].1);
+        }
+        Some(_) => app.settings.custom_quality = Some(current),
+        None => {}
+    }
+}
+
+/// An item whose end is an egui control.
+fn control_row(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
+    let palette = Palette::of(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.set_min_height(42.);
+        ui.add_space(12.);
+        ui.label(egui::RichText::new(label).font(theme::regular(13.)).color(palette.text));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(8., 0.);
+            ui.add_space(12.);
+            add(ui);
+        });
+    });
+}
+
+fn set_quality(app: &mut App, q: ShareQuality) {
+    app.send(Command::SetShareQuality(q));
+    app.call_devices.share_quality = q;
+}
+
+fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
+    axo_list::list(ui, None, None, |ui| {
+        let mut on = s.notifications;
+        if axo_list::switch(ui, Item::new("Enable notifications"), &mut on) {
+            write(app, SETTING_NOTIFICATIONS, on.to_string());
+            app.settings.stale = true;
+            app.notify.0 = on;
+        }
+        let kinds = ["all", "name", "none"];
+        let chosen = kinds.iter().position(|k| *k == s.notification_content).or(Some(0));
+        let item = Item::new("Show").disabled(!s.notifications);
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("notification-content"), item, &["Name, content, and actions", "Name only", "No name or content"], chosen) {
+            let content = kinds[i].to_owned();
+            app.notify.1 = content.clone();
+            write(app, SETTING_NOTIFICATION_CONTENT, content);
+            app.settings.stale = true;
+        }
+        let item = Item::new("While muted").description("Choose notifications to show for muted chats.");
+        if axo_list::item(ui, item, End::Arrow(None)).clicked() {
+            app.settings.page = Page::WhileMuted;
+        }
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        account_switch(app, ui, s, AccountSetting::ReactionNotifications, Item::new("Reaction notifications").description("Notify when someone reacts to your message"));
+        account_switch(app, ui, s, AccountSetting::ShowUnreadReminders, Item::new("Unread reminders").description("Occasionally notify when there are unread messages in muted chats."));
+    });
+}
+
+fn while_muted(app: &mut App, ui: &mut Ui, s: &Snapshot) {
+    axo_list::list(ui, None, None, |ui| {
+        account_switch(app, ui, s, AccountSetting::NotifyCallsIfMuted, Item::new("Calls").symbol("phone").description("Ring or notify when a call is started in muted chats."));
+        account_switch(app, ui, s, AccountSetting::NotifyMentionsIfMuted, Item::new("Mentions").symbol("at").description("Notify when you are mentioned in muted chats."));
+        account_switch(app, ui, s, AccountSetting::NotifyRepliesIfMuted, Item::new("Replies").symbol("reply").description("Notify when someone replies to your message in muted chats."));
+    });
+}
+
+fn privacy(app: &mut App, ui: &mut Ui, s: &Snapshot) {
+    axo_list::list(ui, None, None, |ui| {
+        let item = Item::new("Phone Number").description("Choose who can see your phone number and who can contact you on Signal with it.");
+        if axo_list::item(ui, item, End::Arrow(None)).clicked() {
+            app.settings.page = Page::PhoneNumber;
+        }
+    });
+    axo_list::gap(ui);
+    let users = app.conversations.iter().filter(|c| c.blocked && c.kind != ConversationKind::Group).count();
+    let groups = app.conversations.iter().filter(|c| c.blocked && c.kind == ConversationKind::Group).count();
+    let count = match (users, groups) {
+        (0, 0) => "No users or groups".to_owned(),
+        (u, 0) => if u == 1 { "1 user".into() } else { format!("{u} users") },
+        (0, g) => if g == 1 { "1 group".into() } else { format!("{g} groups") },
+        (u, g) => if u + g == 1 { "1 user or group".into() } else { format!("{} users or groups", u + g) },
+    };
+    axo_list::list(ui, None, None, |ui| {
+        if axo_list::item(ui, Item::new("Blocked"), End::Arrow(Some(&count))).clicked() {
+            app.settings.page = Page::Blocked;
+        }
+    });
+    axo_list::gap(ui);
+    let help = "See and share when message are being read and typed. If disabled, you won\u{2019}t see read receipts or typing indicators from others.";
+    axo_list::list(ui, Some("Messaging"), Some(help), |ui| {
+        account_switch(app, ui, s, AccountSetting::ReadReceipts, Item::new("Read receipts"));
+        account_switch(app, ui, s, AccountSetting::TypingIndicators, Item::new("Typing indicators"));
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Disappearing messages"), None, |ui| {
+        let mut values: Vec<u32> = crate::details::TIMERS.iter().map(|(v, _)| *v).filter(|v| *v != u32::MAX).collect();
+        values.sort_by_key(|v| if *v == 0 { 0 } else { u32::MAX - v });
+        if !values.contains(&s.universal_timer) {
+            values.push(s.universal_timer);
+        }
+        let labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
+        let options: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let chosen = values.iter().position(|v| *v == s.universal_timer);
+        let item = Item::new("Default timer for new chats").description("Set a default disappearing message timer for all new chats started by you.");
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("universal-timer"), item, &options, chosen) {
+            app.send(Command::SetUniversalExpireTimer(values[i]));
+            app.settings.stale = true;
+        }
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Stories"), None, |ui| {
+        let item = Item::new("Share & View Stories").description("If you opt out of stories you will no longer be able to share or view stories.");
+        if s.stories_disabled {
+            if axo_list::item(ui, item, End::Action("Turn on stories", false)).clicked() {
+                app.send(Command::SetStoriesDisabled(false));
+                app.settings.stale = true;
+            }
+        } else if axo_list::item(ui, item, End::Action("Turn off stories", true)).clicked() {
+            app.settings.ask = Some(Ask::StoriesOff);
+        }
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Sealed Sender"), None, |ui| {
+        account_switch(app, ui, s, AccountSetting::SealedSenderIndicators, Item::new("Show status icon").description("Show an icon in message details when they were delivered using sealed sender."));
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Advanced"), None, |ui| {
+        let mut auto = !s.key_transparency_disabled;
+        let item = Item::new("Automatic key verification").description("When enabled, Signal will attempt to automatically verify the encryption of 1:1 chats.");
+        if axo_list::switch(ui, item, &mut auto) {
+            app.send(Command::SetKeyTransparencyDisabled(!auto));
+            app.settings.stale = true;
+        }
+    });
+}
+
+/// Desktop's phone number page (`SettingsRow` and `SettingsRadio`).
+fn phone_number(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
+    let sharing = if s.phone_sharing {
+        "Your phone number will be visible to people and groups you message."
+    } else if s.phone_discoverable {
+        "Your phone number will not be visible to anyone unless they have it saved in their phone\u{2019}s contacts."
+    } else {
+        "Your phone number will not be visible to anyone."
+    };
+    if let Some(everyone) = radio_row(ui, palette, "Who can see my number", s.phone_sharing, sharing, !s.phone_discoverable) {
+        app.send(Command::SetPhoneNumberSharing(everyone));
+        app.settings.stale = true;
+    }
+    ui.add_space(24.);
+    let finding = if s.phone_discoverable {
+        "Anyone who has your phone number will see you're on Signal and can start chats with you."
+    } else {
+        "Nobody will be able to see you're on Signal unless you message them or have an existing chat with them."
+    };
+    match radio_row(ui, palette, "Who can find me by number", s.phone_discoverable, finding, s.phone_sharing) {
+        Some(true) => {
+            app.send(Command::SetPhoneNumberDiscoverable(true));
+            app.settings.stale = true;
+        }
+        Some(false) => app.settings.ask = Some(Ask::NobodyCanFind),
+        None => {}
+    }
+}
+
+/// A titled pair of Everyone and Nobody radios, then the description.
+/// `everyone_only` keeps Nobody from being picked (Desktop's `readOnly`).
+fn radio_row(ui: &mut Ui, palette: &Palette, title: &str, everyone: bool, description: &str, everyone_only: bool) -> Option<bool> {
+    let width = ui.available_width();
+    let (r, _) = ui.allocate_exact_size(Vec2::new(width, 28.), Sense::hover());
+    ui.painter().text(Pos2::new(r.left() + 24., r.top() + 10.), Align2::LEFT_CENTER, title, theme::semibold(14.), palette.text);
+    let mut picked = None;
+    for (label, value, readonly) in [("Everyone", true, false), ("Nobody", false, everyone_only)] {
+        let (row, response) = ui.allocate_exact_size(Vec2::new(width, 40.), if readonly { Sense::hover() } else { Sense::click() });
+        let center = Pos2::new(row.left() + 24. + 10., row.center().y);
+        let on = everyone == value;
+        let color = if readonly { palette.text_secondary } else { palette.text };
+        if on {
+            ui.painter().circle_filled(center, 10., palette.badge);
+            theme::paint_symbol(ui.painter(), "check", center, 14., egui::Color32::WHITE);
+        } else {
+            ui.painter().circle_stroke(center, 9., Stroke::new(1.5, palette.text_secondary));
+        }
+        ui.painter().text(Pos2::new(center.x + 10. + 16., center.y), Align2::LEFT_CENTER, label, theme::regular(14.), color);
+        if response.clicked() && !on {
+            picked = Some(value);
+        }
+    }
+    let g = ui.painter().layout(description.to_owned(), theme::regular(12.), palette.text_secondary, width - 48.);
+    let (r, _) = ui.allocate_exact_size(Vec2::new(width, g.size().y + 8.), Sense::hover());
+    ui.painter().galley(Pos2::new(r.left() + 24., r.top() + 4.), g, palette.text_secondary);
+    picked
+}
+
+/// Desktop's blocked page: the people, then the groups.
+fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
+    let people: Vec<_> = app.conversations.iter().filter(|c| c.blocked && c.kind != ConversationKind::Group).cloned().collect();
+    let groups: Vec<_> = app.conversations.iter().filter(|c| c.blocked && c.kind == ConversationKind::Group).cloned().collect();
+    let intro = ui.painter().layout("Blocked users will not be able to call you or send you messages".to_owned(), theme::regular(12.), palette.text_secondary, ui.available_width() - 32.);
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), intro.size().y + 8.), Sense::hover());
+    ui.painter().galley(r.min + Vec2::new(16., 0.), intro, palette.text_secondary);
+    for (title, list) in [("Blocked Users", people), ("Blocked Groups", groups)] {
+        if list.is_empty() {
+            continue;
+        }
+        axo_list::gap(ui);
+        axo_list::list(ui, Some(title), None, |ui| {
+            for c in &list {
+                let width = ui.available_width();
+                let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 52.), Sense::click());
+                if response.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(14), palette.fill);
+                }
+                let avatar = Rect::from_min_size(Pos2::new(rect.left() + 12., rect.center().y - 18.), Vec2::splat(36.));
+                widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
+                ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y), Align2::LEFT_CENTER, &c.title, theme::regular(13.), palette.text);
+                if response.clicked() {
+                    app.settings.ask = Some(Ask::Unblock(c.id.clone(), c.title.clone(), c.kind == ConversationKind::Group));
+                }
+            }
+        });
+    }
+}
+
+fn data_usage(app: &mut App, ui: &mut Ui, s: &Snapshot) {
+    let mut auto = s.auto_download.clone();
+    let mut changed = false;
+    axo_list::list(ui, Some("Media auto-download"), None, |ui| {
+        for (label, on) in [("Photos", &mut auto.photos), ("Videos", &mut auto.videos), ("Audio", &mut auto.audio), ("Documents", &mut auto.documents)] {
+            changed |= axo_list::switch(ui, Item::new(label), on);
+        }
+    });
+    if changed {
+        app.send(Command::SetAutoDownload(auto.clone()));
+        if let Some(snapshot) = app.settings.snapshot.as_mut() {
+            snapshot.auto_download = auto;
+        }
+    }
+}
+
+/// The open question's dialog, and what its answer does.
+fn ask(app: &mut App, ctx: &egui::Context) {
+    let Some(question) = app.settings.ask.clone() else { return };
+    let id = egui::Id::unique("settings-ask");
+    let done = match &question {
+        Ask::LinkedDevice => dialog::alert(
+            ctx,
+            id,
+            "Linked Devices let you access your Signal account and messages securely on any of your additional devices.",
+            "You can link a desktop, tablet or additional phone. Your primary device manages what\u{2019}s linked, you can link up to 5 devices. Account settings and Signal Secure Backups can only be managed on your primary device.",
+            "OK",
+        ),
+        Ask::DeleteData => match dialog::confirm(ctx, id, "Delete all data?", "Delete all data and messages from this version of Signal Desktop? Your Signal account and data on your phone or other devices will not be deleted.", "Delete data", Variant::StrongDestructive) {
+            Some(Choice::Action) => {
+                app.send(Command::Unlink);
+                true
+            }
+            Some(Choice::Cancel) => true,
+            None => false,
+        },
+        Ask::StoriesOff => match dialog::confirm(ctx, id, "Turn off stories", "You will no longer be able to share or view stories. Story updates you have recently shared will also be deleted.", "Turn off", Variant::StrongDestructive) {
+            Some(Choice::Action) => {
+                app.send(Command::SetStoriesDisabled(true));
+                app.settings.stale = true;
+                true
+            }
+            Some(Choice::Cancel) => true,
+            None => false,
+        },
+        Ask::NobodyCanFind => match dialog::confirm(ctx, id, "Are you sure?", "If you change \u{201c}Who can find me by number\u{201d} to \u{201c}Nobody\u{201d} it will make it harder for people to find you on Signal.", "OK", Variant::StrongPrimary) {
+            Some(Choice::Action) => {
+                app.send(Command::SetPhoneNumberDiscoverable(false));
+                app.settings.stale = true;
+                true
+            }
+            Some(Choice::Cancel) => true,
+            None => false,
+        },
+        Ask::ResetColors => match dialog::show(ctx, id, "Reset Chat Colors", "Would you like to override all chat colors?", Some("Cancel"), &[("Reset default colors", Variant::StrongPrimary), ("Reset all chat colors", Variant::StrongPrimary)]) {
+            Some(Answer::Action(0)) => {
+                app.send(Command::EditChatColors(ChatColorEdit::ResetDefault));
+                true
+            }
+            Some(Answer::Action(_)) => {
+                app.send(Command::EditChatColors(ChatColorEdit::ResetDefault));
+                app.send(Command::EditChatColors(ChatColorEdit::ResetChats));
+                true
+            }
+            Some(Answer::Cancel) => true,
+            None => false,
+        },
+        Ask::Unblock(conversation, name, group) => {
+            let body = if *group { "Group members will be able to add you to this group again." } else { "You will be able to message and call each other." };
+            match dialog::confirm(ctx, id, &format!("Unblock {name}?"), body, "Unblock", Variant::StrongPrimary) {
+                Some(Choice::Action) => {
+                    app.send(Command::SetChat { conversation: conversation.clone(), change: ChatChange::Blocked(false) });
+                    true
+                }
+                Some(Choice::Cancel) => true,
+                None => false,
+            }
+        }
+        Ask::DeleteFolder(folder, name) => match dialog::confirm(ctx, id, "Delete folder?", &format!("Do you want to delete the folder \u{201c}{name}\u{201d}?"), "Delete", Variant::StrongDestructive) {
+            Some(Choice::Action) => {
+                let at = chrono::Utc::now().timestamp_millis() as u64;
+                app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::Delete { id: folder.clone(), at }));
+                true
+            }
+            Some(Choice::Cancel) => true,
+            None => false,
+        },
+    };
+    if done {
+        app.settings.ask = None;
     }
 }

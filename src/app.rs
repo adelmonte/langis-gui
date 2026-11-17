@@ -100,6 +100,8 @@ pub struct App {
     loaded: Receiver<Loaded>,
 
     pub aci: String,
+    /// Our number, from `Event::Ready`.
+    pub phone: Option<String>,
     pub connection: ConnectionState,
     pub history: Option<HistoryProgress>,
     pub tab: Tab,
@@ -173,6 +175,7 @@ impl App {
             loaded_tx,
             loaded,
             aci: String::new(),
+            phone: None,
             connection: ConnectionState::Offline,
             history: None,
             tab: Tab::Chats,
@@ -352,8 +355,9 @@ impl App {
                     *error = Some(why);
                 }
             }
-            Event::Ready { aci, .. } => {
+            Event::Ready { aci, phone } => {
                 self.aci = aci;
+                self.phone = phone;
                 self.phase = Phase::Ready;
                 self.reload_conversations();
                 self.load_notify_prefs();
@@ -769,7 +773,7 @@ fn default_data_dir() -> PathBuf {
 }
 
 /// What the phone's Linked devices list shows.
-fn device_name() -> String {
+pub fn device_name() -> String {
     let host = std::fs::read_to_string("/etc/hostname").ok().map(|h| h.trim().to_owned()).filter(|h| !h.is_empty());
     match host {
         Some(host) => format!("langis on {host}"),

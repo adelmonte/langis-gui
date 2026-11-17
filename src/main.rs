@@ -3,6 +3,7 @@
 
 mod actions;
 mod app;
+mod axo_list;
 mod call;
 mod calls_tab;
 mod chat;

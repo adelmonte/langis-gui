@@ -22,6 +22,29 @@ pub enum Choice {
 }
 
 pub fn confirm(ctx: &egui::Context, id: Id, title: &str, description: &str, action: &str, variant: Variant) -> Option<Choice> {
+    match show(ctx, id, title, description, Some("Cancel"), &[(action, variant)]) {
+        Some(Answer::Cancel) => Some(Choice::Cancel),
+        Some(Answer::Action(_)) => Some(Choice::Action),
+        None => None,
+    }
+}
+
+/// An `AxoAlertDialog` with one button: closing it, by the button or
+/// Escape, is the answer.
+pub fn alert(ctx: &egui::Context, id: Id, title: &str, description: &str, action: &str) -> bool {
+    show(ctx, id, title, description, None, &[(action, Variant::StrongPrimary)]).is_some()
+}
+
+/// What a dialog with several actions answered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Answer {
+    Cancel,
+    Action(usize),
+}
+
+/// The dialog with a footer of `cancel` (when given) and `actions`: two
+/// buttons share a row; more stack, full width.
+pub fn show(ctx: &egui::Context, id: Id, title: &str, description: &str, cancel: Option<&str>, actions: &[(&str, Variant)]) -> Option<Answer> {
     let palette = Palette::of(ctx);
     let screen = ctx.content_rect();
     let overlay = if palette.dark { Color32::from_black_alpha(122) } else { Color32::from_black_alpha(61) };
@@ -30,14 +53,19 @@ pub fn confirm(ctx: &egui::Context, id: Id, title: &str, description: &str, acti
         ui.painter().rect_filled(rect, 0, overlay);
     });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        return Some(Choice::Cancel);
+        return Some(Answer::Cancel);
     }
     let width = 288.;
     let last_h = ctx.data(|d| d.get_temp::<f32>(id.with("height"))).unwrap_or(160.);
     let pos = Pos2::new(screen.center().x - width / 2., screen.center().y - last_h / 2.);
     let fill = if palette.dark { Color32::from_rgb(0x32, 0x32, 0x32) } else { Color32::from_rgb(0xfa, 0xfa, 0xfa) };
     let shadow = Shadow { offset: [0, 6], blur: 16, spread: 0, color: Color32::from_black_alpha(if palette.dark { 61 } else { 31 }) };
-    let mut choice = None;
+    let mut answer = None;
+    let mut buttons: Vec<(&str, Option<Variant>)> = Vec::new();
+    if let Some(cancel) = cancel {
+        buttons.push((cancel, None));
+    }
+    buttons.extend(actions.iter().map(|(label, v)| (*label, Some(*v))));
     let shown = egui::Area::new(id.with("dialog")).order(Order::Tooltip).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(34)).shadow(shadow).show(ui, |ui| {
             ui.set_width(width);
@@ -46,28 +74,40 @@ pub fn confirm(ctx: &egui::Context, id: Id, title: &str, description: &str, acti
             ui.add_space(20.);
             let painter = ui.painter().clone();
             let title_g = painter.layout(title.to_owned(), theme::semibold(14.), palette.text, inner);
-            let desc_g = painter.layout(description.to_owned(), theme::regular(13.), palette.text_secondary, inner);
             let (r, _) = ui.allocate_exact_size(Vec2::new(width, title_g.size().y.max(20.)), Sense::hover());
             painter.galley(Pos2::new(r.left() + 24., r.top()), title_g, palette.text);
-            ui.add_space(4.);
-            let (r, _) = ui.allocate_exact_size(Vec2::new(width, desc_g.size().y), Sense::hover());
-            painter.galley(Pos2::new(r.left() + 24., r.top()), desc_g, palette.text_secondary);
-            ui.add_space(16.);
-            let (row, _) = ui.allocate_exact_size(Vec2::new(width, 30.), Sense::hover());
-            ui.add_space(16.);
-            let w = (width - 32. - 8.) / 2.;
-            let cancel = Rect::from_min_size(Pos2::new(row.left() + 16., row.top()), Vec2::new(w, 30.));
-            let act = Rect::from_min_size(Pos2::new(cancel.right() + 8., row.top()), Vec2::new(w, 30.));
-            if button(ui, id.with("cancel"), cancel, "Cancel", palette.fill, palette.fill_pressed, palette.text) {
-                choice = Some(Choice::Cancel);
+            if !description.is_empty() {
+                let desc_g = painter.layout(description.to_owned(), theme::regular(13.), palette.text_secondary, inner);
+                ui.add_space(4.);
+                let (r, _) = ui.allocate_exact_size(Vec2::new(width, desc_g.size().y), Sense::hover());
+                painter.galley(Pos2::new(r.left() + 24., r.top()), desc_g, palette.text_secondary);
             }
-            let (bg, pressed) = match variant {
-                Variant::StrongDestructive if palette.dark => (theme::rgb(0xee382c), theme::rgb(0xef493e)),
-                Variant::StrongDestructive => (theme::rgb(0xf21c0d), theme::rgb(0xe41a0c)),
-                Variant::StrongPrimary => (palette.accent, palette.accent.gamma_multiply(0.9)),
-            };
-            if button(ui, id.with("action"), act, action, bg, pressed, Color32::WHITE) {
-                choice = Some(Choice::Action);
+            ui.add_space(16.);
+            let side_by_side = buttons.len() <= 2;
+            let rows = if side_by_side { 1 } else { buttons.len() };
+            let (area, _) = ui.allocate_exact_size(Vec2::new(width, rows as f32 * 30. + (rows - 1) as f32 * 8.), Sense::hover());
+            ui.add_space(16.);
+            let n = buttons.len() as f32;
+            for (i, (label, variant)) in buttons.iter().enumerate() {
+                let rect = if side_by_side {
+                    let w = (width - 32. - 8. * (n - 1.)) / n;
+                    Rect::from_min_size(Pos2::new(area.left() + 16. + i as f32 * (w + 8.), area.top()), Vec2::new(w, 30.))
+                } else {
+                    Rect::from_min_size(Pos2::new(area.left() + 16., area.top() + i as f32 * 38.), Vec2::new(width - 32., 30.))
+                };
+                let (bg, pressed, text) = match variant {
+                    None => (palette.fill, palette.fill_pressed, palette.text),
+                    Some(Variant::StrongDestructive) if palette.dark => (theme::rgb(0xee382c), theme::rgb(0xef493e), Color32::WHITE),
+                    Some(Variant::StrongDestructive) => (theme::rgb(0xf21c0d), theme::rgb(0xe41a0c), Color32::WHITE),
+                    Some(Variant::StrongPrimary) => (palette.accent, palette.accent.gamma_multiply(0.9), Color32::WHITE),
+                };
+                if button(ui, id.with(("button", i)), rect, label, bg, pressed, text) {
+                    answer = Some(match (cancel.is_some(), i) {
+                        (true, 0) => Answer::Cancel,
+                        (true, i) => Answer::Action(i - 1),
+                        (false, i) => Answer::Action(i),
+                    });
+                }
             }
         });
     });
@@ -76,7 +116,7 @@ pub fn confirm(ctx: &egui::Context, id: Id, title: &str, description: &str, acti
         ctx.data_mut(|d| d.insert_temp(id.with("height"), h));
         ctx.request_repaint();
     }
-    choice
+    answer
 }
 
 /// `AxoButton` size `md`: 6px by 12px padding, 13px medium, pill shaped.

@@ -86,7 +86,7 @@ fn screenshots() {
 
     // Settings.
     harness.state_mut().tab = Tab::Settings;
-    harness.state_mut().settings.section = crate::settings::Section::Calls;
+    harness.state_mut().settings.page = crate::settings::Page::Calls;
     wait(&mut harness, "settings", |app| app.settings.snapshot.is_some());
     save(&mut harness, "settings-calls");
     harness.state_mut().tab = Tab::Chats;

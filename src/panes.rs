@@ -78,6 +78,7 @@ pub fn on_ready(app: &mut App) {
     load_folders(app);
     crate::stories::load(app);
     crate::chat_colors::load(app);
+    crate::settings::load_zoom(app);
 }
 
 pub fn load_folders(app: &App) {
@@ -474,7 +475,7 @@ pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
             if m.item(Some("plus"), "Create folder") {
                 let params = langis_store::ChatFolderParams { included: vec![id.clone()], ..langis_store::ChatFolderParams::defaults() };
                 app.settings.folder = Some((crate::settings::new_id(), true, params));
-                app.settings.section = crate::settings::Section::ChatFolders;
+                app.settings.page = crate::settings::Page::ChatFolders;
                 app.tab = crate::app::Tab::Settings;
             }
         });

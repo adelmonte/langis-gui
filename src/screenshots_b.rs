@@ -131,12 +131,23 @@ fn screenshots_panes() {
 
     // Settings pages, and the profile editor.
     harness.state_mut().tab = Tab::Settings;
-    for (section, name) in [
-        (crate::settings::Section::Privacy, "settings-privacy"),
-        (crate::settings::Section::ChatFolders, "settings-folders"),
-        (crate::settings::Section::LinkedDevice, "settings-device"),
+    use crate::settings::Page;
+    for (page, name) in [
+        (Page::Account, "settings-account"),
+        (Page::General, "settings-general"),
+        (Page::Appearance, "settings-appearance"),
+        (Page::ChatColor, "settings-chat-color"),
+        (Page::Chats, "settings-chats"),
+        (Page::ChatFolders, "settings-folders"),
+        (Page::Calls, "settings-calls"),
+        (Page::Notifications, "settings-notifications"),
+        (Page::WhileMuted, "settings-while-muted"),
+        (Page::Privacy, "settings-privacy"),
+        (Page::PhoneNumber, "settings-phone-number"),
+        (Page::Blocked, "settings-blocked"),
+        (Page::DataUsage, "settings-data-usage"),
     ] {
-        harness.state_mut().settings.section = section;
+        harness.state_mut().settings.page = page;
         harness.state_mut().settings.stale = true;
         wait(&mut harness, name, |app| app.settings.snapshot.is_some());
         save(&mut harness, name);
