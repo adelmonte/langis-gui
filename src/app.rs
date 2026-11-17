@@ -145,6 +145,10 @@ pub struct App {
     pub chat_colors: langis_store::ChatColors,
     /// Desktop's custom color editor, open.
     pub color_editor: Option<crate::chat_colors::Editor>,
+    /// Desktop's "Close Signal and end the call?", open.
+    pub confirm_close: bool,
+    /// Closing for good: confirmed, or asked by a signal.
+    closing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     diag: crate::diag::Diag,
     /// The reaction bar's emoji (Desktop's preferred reactions).
     pub reactions: Vec<String>,
@@ -211,6 +215,8 @@ impl App {
             panes: Default::default(),
             chat_colors: Default::default(),
             color_editor: None,
+            confirm_close: false,
+            closing: quit_on_signals(&cc.egui_ctx),
             diag: Default::default(),
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
             lightbox: None,
@@ -754,6 +760,13 @@ impl App {
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        // Desktop's `requestCloseConfirmation`: closing during a call asks
+        // first.
+        let closing = self.closing.load(std::sync::atomic::Ordering::Relaxed);
+        if ctx.input(|i| i.viewport().close_requested()) && !closing && self.in_call() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.confirm_close = true;
+        }
         self.poll();
         self.diag.frame(ctx);
     }
@@ -777,6 +790,57 @@ impl eframe::App for App {
     fn on_exit(&mut self) {
         self.shutdown();
     }
+}
+
+impl App {
+    /// In a call, or calling out (not just rung).
+    pub fn in_call(&self) -> bool {
+        self.call.as_ref().is_some_and(|c| c.status != langis_core::CallStatus::Ringing)
+    }
+
+    /// Desktop's in-call close confirmation; Close ends the call and quits.
+    pub fn close_dialog(&mut self, ctx: &egui::Context) {
+        use crate::dialog::{self, Answer, Variant};
+        if !self.confirm_close {
+            return;
+        }
+        let answer = dialog::show(ctx, egui::Id::unique("close-during-call"), "Close langis and end the call?", "", Some("Not now"), &[("Close", Variant::StrongDestructive)]);
+        match answer {
+            Some(Answer::Action(_)) => {
+                self.confirm_close = false;
+                self.closing.store(true, std::sync::atomic::Ordering::Relaxed);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Some(Answer::Cancel) => self.confirm_close = false,
+            None => {}
+        }
+    }
+}
+
+/// SIGTERM, SIGINT and SIGHUP close the window, so the app stops as on
+/// a click of close: the backend hangs up a call and closes its databases.
+/// A second signal exits at once.
+fn quit_on_signals(ctx: &egui::Context) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::atomic::Ordering;
+    let closing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT, signal_hook::consts::SIGHUP]);
+    match signals {
+        Ok(mut signals) => {
+            let (ctx, flag) = (ctx.clone(), closing.clone());
+            let _ = std::thread::Builder::new().name("langis-signals".into()).spawn(move || {
+                for signal in signals.forever() {
+                    if flag.swap(true, Ordering::Relaxed) {
+                        std::process::exit(128 + signal);
+                    }
+                    tracing::info!(signal, "closing on a signal");
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    ctx.request_repaint();
+                }
+            });
+        }
+        Err(error) => tracing::warn!(%error, "can't listen for signals"),
+    }
+    closing
 }
 
 fn default_data_dir() -> PathBuf {
