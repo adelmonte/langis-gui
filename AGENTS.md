@@ -63,7 +63,7 @@ never use Signal's logo or name as the app's identity.
   Rust static library with its own core, and LTO makes the symbols clash.
 - Inter lacks some symbols (✕, ✓). A missing glyph crashed the
   screenshot test, so use words or "×".
-- Commits: atomic, as `adelmonte <138840776+adelmonte@users.noreply.github.com>`,
+- Commits: atomic, as your own git identity (adelmonte),
   with no Co-Authored-By or Claude attribution lines. Don't run
   `cargo fmt`. No em dashes in docs.
 - Nothing has been pushed anywhere; the user said not to push.
