@@ -1547,9 +1547,20 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
         if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { "Unarchive" } else { "Archive" }) {
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(!c.archived) });
         }
+        if !c.ended {
+            if !c.blocked && m.item(Some("block"), "Block") {
+                app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Block));
+            }
+            if c.blocked && m.item(Some("message-thread"), "Unblock") {
+                app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Unblock));
+            }
+        }
         if m.item(Some("trash"), "Delete") {
             let member = group && !c.left && !c.ended;
             app.panes.delete_chat = Some((id.clone(), member));
+        }
+        if group && !c.ended && !c.left && m.item(Some("leave"), "Leave group") {
+            app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Leave));
         }
     });
 }
