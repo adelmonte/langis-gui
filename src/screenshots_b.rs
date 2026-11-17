@@ -129,6 +129,14 @@ fn screenshots_panes() {
     wait(&mut harness, "block confirm", |_| true);
     save(&mut harness, "confirm-block");
     harness.state_mut().panes.chat_confirm = None;
+    harness.state_mut().panes.custom_timer = Some((direct.clone(), 2, 3));
+    wait(&mut harness, "custom timer", |_| true);
+    save(&mut harness, "custom-timer");
+    harness.state_mut().panes.custom_timer = None;
+    harness.state_mut().panes.mute_until = Some((direct.clone(), "2030-01-01".into(), "09:00".into()));
+    wait(&mut harness, "mute until", |_| true);
+    save(&mut harness, "mute-until");
+    harness.state_mut().panes.mute_until = None;
     harness.state().send(Command::LoadSafetyNumber { conversation: direct });
     if let Some(d) = harness.state_mut().panes.details.as_mut() {
         d.page = crate::details::Page::Safety;

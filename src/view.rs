@@ -44,6 +44,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     share_picker(app, ui);
     crate::panes::delete_chat_dialog(app, ui.ctx());
     crate::panes::chat_confirm_dialog(app, ui.ctx());
+    crate::panes::custom_time_dialogs(app, ui.ctx());
     crate::fun::dialogs(app, ui);
     crate::lightbox::show(app, ui);
     toasts(app, ui);

@@ -26,6 +26,10 @@ pub struct Panes {
     pub new_call: Option<String>,
     /// A chat action waiting on its confirmation (`chat_confirm_dialog`).
     pub chat_confirm: Option<(ConversationId, ChatConfirm)>,
+    /// Desktop's `DisappearingTimeDialog`: the chat, the number and unit.
+    pub custom_timer: Option<(ConversationId, u32, usize)>,
+    /// Desktop's `MuteUntilDialog`: the chat, and the date and time typed.
+    pub mute_until: Option<(ConversationId, String, String)>,
     /// Asking before clearing the call history.
     pub clear_calls: bool,
     /// A call link's details, by room id.
@@ -505,6 +509,10 @@ pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
 pub fn mute_items(app: &mut App, m: &mut crate::menu::Menu, id: &ConversationId) {
     m.label("Mute this chat for…");
     for (label, until) in mute_choices(false) {
+        if until == i64::MAX && m.item(None, "Until…") {
+            let at = chrono::Local::now() + chrono::Duration::hours(1);
+            app.panes.mute_until = Some((id.clone(), at.format("%Y-%m-%d").to_string(), at.format("%H:%M").to_string()));
+        }
         if m.item(None, label) {
             app.send(Command::SetChat { conversation: id.clone(), change: langis_core::ChatChange::MutedUntil(until) });
         }
@@ -571,6 +579,93 @@ pub fn chat_confirm_dialog(app: &mut App, ctx: &egui::Context) {
         }
         ChatConfirm::End => app.panes.chat_confirm = Some((id, ChatConfirm::EndForSure)),
         ChatConfirm::EndForSure => app.send(Command::EndGroup { conversation }),
+    }
+}
+
+/// Desktop's `DisappearingTimeDialog` units, in seconds, and how many of
+/// each it offers (`RANGES`, the end excluded).
+const TIME_UNITS: [(&str, u32, u32); 5] = [("Seconds", 1, 60), ("Minutes", 60, 60), ("Hours", 3600, 24), ("Days", 86_400, 7), ("Weeks", 604_800, 5)];
+
+/// A timer as Desktop's dialog starts it: the largest unit it fills.
+pub fn custom_timer_start(seconds: u32) -> (u32, usize) {
+    let mut out = (1, 0);
+    for (i, (_, unit, _)) in TIME_UNITS.iter().enumerate() {
+        if seconds < *unit {
+            break;
+        }
+        out = (seconds / unit, i);
+    }
+    out
+}
+
+/// The custom disappearing time and mute until dialogs.
+pub fn custom_time_dialogs(app: &mut App, ctx: &egui::Context) {
+    use crate::dialog::{self, Answer, Variant};
+    if let Some((id, mut value, mut unit)) = app.panes.custom_timer.clone() {
+        let answer = dialog::show_with(ctx, egui::Id::unique("custom-timer"), "Custom Time", "Choose a custom time for disappearing messages.", Some("Cancel"), &[("Set", Variant::StrongPrimary)], |ui| {
+            ui.add_space(12.);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8., 0.);
+                let (_, _, max) = TIME_UNITS[unit];
+                let numbers: Vec<String> = (1..max).map(|n| n.to_string()).collect();
+                let options: Vec<&str> = numbers.iter().map(String::as_str).collect();
+                if let Some(i) = crate::axo_list::select_pill(ui, egui::Id::unique("custom-timer-value"), 80., &options, (value as usize).saturating_sub(1)) {
+                    value = i as u32 + 1;
+                }
+                let units: Vec<&str> = TIME_UNITS.iter().map(|(n, _, _)| *n).collect();
+                if let Some(i) = crate::axo_list::select_pill(ui, egui::Id::unique("custom-timer-unit"), ui.available_width(), &units, unit) {
+                    unit = i;
+                    value = value.clamp(1, TIME_UNITS[i].2 - 1);
+                }
+            });
+        });
+        match answer {
+            Some(Answer::Action(_)) => {
+                app.send(Command::SetExpireTimer { conversation: id, seconds: value * TIME_UNITS[unit].1 });
+                app.panes.custom_timer = None;
+            }
+            Some(Answer::Cancel) => app.panes.custom_timer = None,
+            None => app.panes.custom_timer = Some((id, value, unit)),
+        }
+    }
+    if let Some((id, mut date, mut time)) = app.panes.mute_until.clone() {
+        use chrono::TimeZone as _;
+        let at = chrono::NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d")
+            .ok()
+            .zip(chrono::NaiveTime::parse_from_str(time.trim(), "%H:%M").ok())
+            .and_then(|(d, t)| chrono::Local.from_local_datetime(&d.and_time(t)).single())
+            .filter(|at| *at > chrono::Local::now());
+        // Desktop's `Intl` zone name, as the system links it.
+        let zone = std::env::var("TZ")
+            .ok()
+            .filter(|z| z.contains('/'))
+            .or_else(|| std::fs::read_link("/etc/localtime").ok().and_then(|p| p.to_str().and_then(|p| p.split_once("zoneinfo/")).map(|(_, z)| z.to_owned())))
+            .unwrap_or_else(|| chrono::Local::now().format("%:z").to_string());
+        let answer = dialog::show_with(ctx, egui::Id::unique("mute-until"), "Mute this chat until…", "", Some("Cancel"), &[("Mute", Variant::StrongPrimary)], |ui| {
+            ui.add_space(12.);
+            let palette = Palette::of(ui.ctx());
+            for (label, value, hint) in [("Date", &mut date, "YYYY-MM-DD"), ("Time", &mut time, "HH:MM")] {
+                ui.label(RichText::new(label).font(theme::medium(13.)).color(palette.text));
+                ui.add_space(4.);
+                ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(ui.available_width()));
+                ui.add_space(8.);
+            }
+            ui.label(RichText::new(format!("All times in {zone}")).font(theme::regular(12.)).color(palette.text_secondary));
+        });
+        match answer {
+            Some(Answer::Action(_)) => match at {
+                Some(at) => {
+                    app.send(Command::SetChat { conversation: id, change: langis_core::ChatChange::MutedUntil(at.timestamp_millis()) });
+                    app.panes.mute_until = None;
+                }
+                None => {
+                    app.toast("Choose a time in the future.");
+                    app.panes.mute_until = Some((id, date, time));
+                }
+            },
+            Some(Answer::Cancel) => app.panes.mute_until = None,
+            None => app.panes.mute_until = Some((id, date, time)),
+        }
     }
 }
 

@@ -324,3 +324,24 @@ pub fn select(ui: &mut Ui, id: egui::Id, item: Item<'_>, options: &[&str], chose
     }
     picked
 }
+
+/// `AxoSelect.Trigger` on its own, `width` wide: the chosen option and a
+/// chevron in a 28px pill, opening the options.
+pub fn select_pill(ui: &mut Ui, id: egui::Id, width: f32, options: &[&str], chosen: usize) -> Option<usize> {
+    let palette = Palette::of(ui.ctx());
+    let (r, c) = ui.allocate_exact_size(Vec2::new(width, 28.), Sense::click());
+    let fill = if c.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill };
+    ui.painter().rect_filled(r, CornerRadius::same(14), fill);
+    let label = options.get(chosen).copied().unwrap_or("");
+    ui.painter().text(Pos2::new(r.left() + 12., r.center().y), egui::Align2::LEFT_CENTER, label, theme::medium(13.), palette.text);
+    theme::paint_symbol(ui.painter(), "chevron-down", Pos2::new(r.right() - 10. - 7., r.center().y), 14., palette.text);
+    let mut picked = None;
+    crate::menu::dropdown(ui, &c, id, |m| {
+        for (i, option) in options.iter().enumerate() {
+            if m.check(chosen == i, option) {
+                picked = Some(i);
+            }
+        }
+    });
+    picked
+}

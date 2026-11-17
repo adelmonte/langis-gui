@@ -1612,11 +1612,18 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
         if !group || c.can_edit_info {
             m.sub(Some("timer"), "Disappearing messages", |m| {
                 // expirationTimer.DEFAULT_DURATIONS_IN_SECONDS
-                for seconds in [0u32, 2_419_200, 604_800, 86_400, 28_800, 3_600, 300, 30] {
+                const DEFAULTS: [u32; 8] = [0, 2_419_200, 604_800, 86_400, 28_800, 3_600, 300, 30];
+                for seconds in DEFAULTS {
                     let label = if seconds == 0 { "Off".to_owned() } else { crate::format::timer_long(seconds) };
                     if m.check(c.expire_timer == seconds, &label) {
                         app.send(Command::SetExpireTimer { conversation: id.clone(), seconds });
                     }
+                }
+                let custom = !DEFAULTS.contains(&c.expire_timer);
+                let label = if custom { format!("Custom time ({})", crate::format::timer_long(c.expire_timer)) } else { "Custom time...".to_owned() };
+                if m.check(custom, &label) {
+                    let (value, unit) = crate::panes::custom_timer_start(if custom { c.expire_timer } else { 3_600 });
+                    app.panes.custom_timer = Some((id.clone(), value, unit));
                 }
             });
         }
