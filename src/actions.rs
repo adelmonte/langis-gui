@@ -83,32 +83,6 @@ pub fn popover(ctx: &egui::Context, id: &str, at: Pos2, width: f32, keep: Option
     outside || ctx.input(|i| i.key_pressed(egui::Key::Escape))
 }
 
-/// One row of a menu: icon and label. True when clicked.
-pub fn menu_row(ui: &mut Ui, icon: Option<Icon>, label: &str, destructive: bool) -> bool {
-    menu_row_with(ui, |ui, rect, color| {
-        if let Some(icon) = icon {
-            icon.paint(ui, rect, 18., color);
-        }
-    }, icon.is_some(), label, destructive)
-}
-
-/// A menu row whose symbol is drawn by `symbol` in a 20px square.
-pub fn menu_row_with(ui: &mut Ui, symbol: impl FnOnce(&Ui, Rect, Color32), has_symbol: bool, label: &str, destructive: bool) -> bool {
-    let palette = Palette::of(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::click());
-    if response.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
-    }
-    let color = if destructive { palette.destructive } else { palette.text };
-    let mut x = rect.left() + 10.;
-    if has_symbol {
-        symbol(ui, Rect::from_min_size(Pos2::new(x, rect.top() + 6.), Vec2::splat(20.)), color);
-        x += 28.;
-    }
-    ui.painter().text(Pos2::new(x, rect.center().y), Align2::LEFT_CENTER, label, theme::regular(14.), color);
-    response.clicked()
-}
-
 /// The hover bar beside a bubble: react, reply, more. Returns which was
 /// clicked (0 react, 1 reply, 2 more) and where.
 pub fn hover_bar(ui: &Ui, palette: &Palette, id: i64, bubble: Rect, outgoing: bool) -> Option<(u8, Pos2)> {
@@ -181,55 +155,58 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
             let Some(m) = chat.iter().find(|m| m.id == *message) else { return vec![Do::Close] };
             let offer = offers(app, m, c, pinned.contains(message));
             let id = *message;
-            let closed = popover(ctx, "message-menu", *at, 200., None, |ui| {
+            let failed_send = m.direction == Direction::Outgoing && !m.deleted && m.status == langis_store::DeliveryStatus::Failed;
+            let menu = egui::Id::unique("message-menu").with((id, at.x.to_bits(), at.y.to_bits()));
+            if !crate::menu::is_open(ctx, menu) && !ctx.data(|d| d.get_temp::<bool>(menu.with("shown")).unwrap_or(false)) {
+                crate::menu::open_at(ctx, menu, *at);
+                ctx.data_mut(|d| d.insert_temp(menu.with("shown"), true));
+            }
+            // Desktop's `MessageContextMenu`, in its order.
+            let open = crate::menu::show(ctx, menu, |ui| {
                 if let Some(index) = offer.download
-                    && menu_row(ui, Some(Icon::Save), "Download", false)
+                    && ui.item(Some("download"), "Download")
                 {
                     out.push(Do::Save(id, index));
                 }
-                if offer.reply && menu_row(ui, Some(Icon::Reply), "Reply", false) {
+                if offer.reply && ui.item(Some("reply"), "Reply") {
                     out.push(Do::Reply(id));
                 }
-                if offer.react && menu_row(ui, Some(Icon::Emoji), "React", false) {
+                if offer.react && ui.item(Some("heart-plus"), "React") {
                     out.push(Do::ReactBar(id));
                 }
-                if offer.edit && menu_row(ui, Some(Icon::Edit), "Edit", false) {
-                    out.push(Do::Edit(id));
-                }
-                if offer.copy && menu_row(ui, Some(Icon::Copy), "Copy", false) {
-                    out.push(Do::Copy(plain_text(app, m)));
-                }
-                if offer.forward && menu_row(ui, Some(Icon::Forward), "Forward", false) {
-                    out.push(Do::Open(Dialog::Forward { messages: vec![id], query: String::new(), chosen: Vec::new() }));
-                }
-                if let Some(is_pinned) = offer.pin {
-                    let pin = |ui: &Ui, rect: Rect, color: Color32| crate::glyphs::pin(ui, rect.shrink(1.), color);
-                    if is_pinned {
-                        if menu_row_with(ui, pin, true, "Unpin", false) {
-                            out.push(Do::Command(Command::UnpinMessage { message_id: id }));
-                        }
-                    } else if menu_row_with(ui, pin, true, "Pin", false) {
-                        out.push(Do::Open(Dialog::Pin { message: id, choice: 0 }));
-                    }
-                }
-                if m.direction == Direction::Outgoing
-                    && m.poll.as_ref().is_some_and(|p| !p.ended)
-                    && !m.deleted
-                    && menu_row_with(ui, |ui, rect, color| crate::glyphs::poll(ui, rect, color), true, "End poll", false)
-                {
+                if m.direction == Direction::Outgoing && m.poll.as_ref().is_some_and(|p| !p.ended) && !m.deleted && ui.item(Some("stop-circle"), "End poll") {
                     out.push(Do::Command(Command::EndPoll { message_id: id }));
                 }
-                if menu_row(ui, Some(Icon::Info), "Info", false) {
+                if offer.forward && ui.item(Some("forward"), "Forward") {
+                    out.push(Do::Open(Dialog::Forward { messages: vec![id], query: String::new(), chosen: Vec::new() }));
+                }
+                if offer.edit && ui.item(Some("pencil"), "Edit") {
+                    out.push(Do::Edit(id));
+                }
+                if offer.copy && ui.item(Some("copy"), "Copy text") {
+                    out.push(Do::Copy(plain_text(app, m)));
+                }
+                match offer.pin {
+                    Some(true) if ui.item(Some("pin-slash"), "Unpin") => out.push(Do::Command(Command::UnpinMessage { message_id: id })),
+                    Some(false) if ui.item(Some("pin"), "Pin") => out.push(Do::Open(Dialog::Pin { message: id, choice: 0 })),
+                    _ => {}
+                }
+                if ui.item(Some("info-circle"), "Info") {
                     out.push(Do::Open(Dialog::Info { message: id, details: None }));
                 }
-                if offer.retry_delete && menu_row(ui, Some(Icon::Trash), "Retry Delete for Everyone", false) {
-                    out.push(Do::Command(Command::RetryDeleteForEveryone { message_id: id }));
-                }
-                if offer.delete && menu_row(ui, Some(Icon::Trash), "Delete", true) {
+                if offer.delete && ui.item(Some("trash"), "Delete") {
                     out.push(Do::Open(Dialog::Delete { message: id }));
                 }
+                if failed_send && ui.item(Some("send"), "Retry Send") {
+                    out.push(Do::Command(Command::RetrySend { message_id: id }));
+                }
+                if offer.retry_delete && ui.item(Some("trash"), "Retry Delete for Everyone") {
+                    out.push(Do::Command(Command::RetryDeleteForEveryone { message_id: id }));
+                }
             });
-            if closed || !out.is_empty() {
+            if !open || !out.is_empty() {
+                crate::menu::close(ctx, menu);
+                ctx.data_mut(|d| d.remove::<bool>(menu.with("shown")));
                 out.push(Do::Close);
             }
         }
