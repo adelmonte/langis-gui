@@ -312,7 +312,6 @@ pub fn menu_row(ui: &mut Ui, icon: Option<Icon>, label: &str, danger: bool) -> e
 
 /// Everything that floats over the window: dialogs and banners.
 pub fn overlays(app: &mut App, ui: &mut Ui) {
-    compose_dialog(app, ui);
     group_link_dialog(app, ui);
     lobby_dialog(app, ui);
     crate::profile::show(app, ui);
@@ -742,6 +741,128 @@ fn list_header(ui: &mut Ui, palette: &Palette, text: &str) {
     ui.painter().text(Pos2::new(r.left() + 24., r.center().y), egui::Align2::LEFT_CENTER, text, theme::semibold(14.), palette.text);
 }
 
+/// The left pane's footer: one button at the end.
+fn footer_button(ui: &mut Ui, label: &str, enabled: bool, then: impl FnOnce(bool)) {
+    ui.add_space(14.);
+    let clicked = ui
+        .horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(16.);
+                ui.add_enabled_ui(enabled, |ui| widgets::pill_button(ui, label, true).clicked()).inner
+            })
+            .inner
+        })
+        .inner;
+    then(clicked && enabled);
+}
+
+/// A `ListTile.checkbox`'s circle: Desktop's 20px round checkbox.
+pub fn round_check(ui: &Ui, palette: &Palette, center: Pos2, on: bool) {
+    if on {
+        ui.painter().circle_filled(center, 10., theme::rgb(0x2c6bed));
+        theme::paint_symbol(ui.painter(), "check", center, 14., Color32::WHITE);
+    } else {
+        ui.painter().circle_stroke(center, 9.5, egui::Stroke::new(1.5, palette.text_secondary));
+    }
+}
+
+/// Desktop's "Choose members" step. True on Next or Skip.
+fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut String, members: &mut Vec<String>, keep: &mut bool) -> bool {
+    ui.add_space(12.);
+    ui.horizontal(|ui| {
+        ui.add_space(12.);
+        if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            *keep = false;
+        }
+        ui.label(RichText::new("Choose members").font(theme::semibold(18.)));
+    });
+    ui.add_space(6.);
+    let field = ui.horizontal(|ui| {
+        ui.add_space(16.);
+        ui.add(egui::TextEdit::singleline(query).hint_text("Name, username, or number").desired_width(ui.available_width() - 16.))
+    });
+    if ui.ctx().memory(|m| m.focused().is_none()) {
+        field.inner.request_focus();
+    }
+    let enter = field.inner.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    ui.add_space(8.);
+    // `ContactPills`: the chosen, 8 by 12 apart, wrapping.
+    if !members.is_empty() {
+        let mut remove = None;
+        egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 16, top: 4, bottom: 4 }).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(12., 8.);
+            ui.horizontal_wrapped(|ui| {
+                for m in members.iter() {
+                    let name = app.name(m);
+                    let g = ui.painter().layout_no_wrap(name.clone(), theme::regular(13.), palette.text);
+                    let size = Vec2::new(8. + 20. + 6. + g.size().x.min(140.) + 6. + 16. + 8., 28.);
+                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let fill = if palette.dark { Color32::from_white_alpha(31) } else { Color32::from_black_alpha(20) };
+                    ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
+                    let avatar = Rect::from_min_size(Pos2::new(rect.left() + 8., rect.center().y - 10.), Vec2::splat(20.));
+                    let color = m.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                    widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::person(&name, color));
+                    let clip = Rect::from_min_max(Pos2::new(avatar.right() + 6., rect.top()), Pos2::new(rect.right() - 8. - 16. - 6., rect.bottom()));
+                    ui.painter().with_clip_rect(clip).galley(Pos2::new(clip.left(), rect.center().y - g.size().y / 2.), g, palette.text);
+                    let x = Rect::from_center_size(Pos2::new(rect.right() - 8. - 8., rect.center().y), Vec2::splat(16.));
+                    let r = ui.interact(x, egui::Id::unique("contact-pill").with(m), Sense::click());
+                    theme::paint_symbol(ui.painter(), "x", x.center(), 14., palette.text);
+                    if r.on_hover_text(format!("Remove {name}")).clicked() {
+                        remove = Some(m.clone());
+                    }
+                }
+            });
+        });
+        if let Some(m) = remove {
+            members.retain(|x| *x != m);
+        }
+        ui.add_space(10.);
+    }
+    let q = query.trim().to_lowercase();
+    let username = probably_username(&q);
+    let phone = !username && probably_phone(&q);
+    let mut people: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Direct && !c.blocked && (q.is_empty() || c.title.to_lowercase().contains(&q))).cloned().collect();
+    people.sort_by_key(|c| c.title.to_lowercase());
+    let footer = 64.;
+    let body_h = (ui.available_height() - footer).max(0.);
+    egui::ScrollArea::vertical().max_height(body_h).min_scrolled_height(body_h).auto_shrink(false).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        if !people.is_empty() && !username {
+            list_header(ui, palette, "Contacts");
+        }
+        for c in people.iter().filter(|_| !username) {
+            let Some(sid) = c.id.as_direct() else { continue };
+            let chosen = members.iter().any(|m| m == sid);
+            let (inner, response) = tile(ui, palette, 52., egui::Id::unique("choose-member").with(&c.id.0));
+            let avatar = Rect::from_min_size(Pos2::new(inner.left() + 14., inner.center().y - 18.), Vec2::splat(36.));
+            widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
+            ui.painter().text(Pos2::new(avatar.right() + 12., inner.center().y), egui::Align2::LEFT_CENTER, &c.title, theme::regular(14.), palette.text);
+            round_check(ui, palette, Pos2::new(inner.right() - 14. - 10., inner.center().y), chosen);
+            if response.clicked() {
+                if chosen {
+                    members.retain(|m| m != sid);
+                } else {
+                    members.push(sid.to_owned());
+                }
+            }
+        }
+        if username || phone {
+            list_header(ui, palette, if username { "Find by username" } else { "Find by phone number" });
+            let shown = query.trim().trim_start_matches('@').to_owned();
+            if step_button(ui, palette, if username { "at" } else { "number" }, &shown) || enter {
+                app.send(Command::FindRecipient { query: query.trim().to_owned() });
+            }
+        }
+        if people.is_empty() && !username && !phone {
+            ui.add_space(28.);
+            ui.vertical_centered(|ui| body(ui, palette, "No contacts found"));
+        }
+    });
+    let mut done = false;
+    footer_button(ui, if members.is_empty() { "Skip" } else { "Next" }, true, |clicked| done = clicked);
+    done
+}
+
 /// Desktop's `LeftPaneComposeHelper` and its find steps, in place of the
 /// chat list. False when there's no compose step open.
 pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
@@ -751,9 +872,80 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
     let mut next: Option<Compose> = None;
     let mut open: Option<ConversationId> = None;
     match &mut compose {
-        Compose::Group { .. } => {
-            app.panes.compose = Some(compose);
-            return false;
+        Compose::Group { picking: true, query, members, .. } => {
+            if choose_members(app, ui, &palette, query, members, &mut keep) {
+                if let Compose::Group { picking, .. } = &mut compose {
+                    *picking = false;
+                }
+            }
+            if !keep {
+                next = Some(Compose::Chat { query: String::new(), searching: false, found: None });
+                keep = true;
+            }
+        }
+        Compose::Group { picking, members, title: name, timer, avatar, .. } => {
+            ui.add_space(12.);
+            ui.horizontal(|ui| {
+                ui.add_space(12.);
+                if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back to member selection").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    *picking = true;
+                }
+                ui.label(RichText::new("Name this group").font(theme::semibold(18.)));
+            });
+            let footer = 64.;
+            let body_h = (ui.available_height() - footer).max(0.);
+            egui::ScrollArea::vertical().max_height(body_h).min_scrolled_height(body_h).auto_shrink(false).show(ui, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                ui.add_space(16.);
+                // `AvatarPreview`, 80px, choosing a photo on click.
+                let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 80.), Sense::hover());
+                let rect = Rect::from_center_size(r.center(), Vec2::splat(80.));
+                let response = ui.interact(rect, egui::Id::unique("new-group-photo"), Sense::click());
+                match avatar.as_ref() {
+                    Some(bytes) => {
+                        egui::Image::from_bytes("bytes://new-group-photo", bytes.clone()).corner_radius(CornerRadius::same(40)).paint_at(ui, rect);
+                    }
+                    None => {
+                        ui.painter().circle_filled(rect.center(), 40., palette.fill_secondary);
+                        theme::paint_symbol(ui.painter(), "camera", rect.center(), 32., palette.text_secondary);
+                    }
+                }
+                if response.on_hover_text("Choose a photo").clicked()
+                    && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp"]).pick_file()
+                {
+                    *avatar = std::fs::read(path).ok();
+                }
+                ui.add_space(16.);
+                ui.horizontal(|ui| {
+                    ui.add_space(16.);
+                    ui.add(egui::TextEdit::singleline(name).hint_text("Group name (required)").desired_width(ui.available_width() - 16.)).request_focus();
+                });
+                ui.add_space(16.);
+                ui.horizontal(|ui| {
+                    ui.add_space(16.);
+                    ui.label(RichText::new("Disappearing messages").font(theme::regular(14.)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(16.);
+                        crate::details::timer_picker(ui, "new-group-timer", timer);
+                    });
+                });
+                ui.add_space(8.);
+                list_header(ui, &palette, "Members");
+                for m in members.iter() {
+                    let (inner, _) = tile(ui, &palette, 52., egui::Id::unique("new-group-member").with(m));
+                    let avatar = Rect::from_min_size(Pos2::new(inner.left() + 14., inner.center().y - 18.), Vec2::splat(36.));
+                    let name = app.name(m);
+                    let color = m.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                    widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::person(&name, color));
+                    ui.painter().text(Pos2::new(avatar.right() + 12., inner.center().y), egui::Align2::LEFT_CENTER, name, theme::regular(14.), palette.text);
+                }
+            });
+            let ready = !name.trim().is_empty();
+            footer_button(ui, "Create", ready, |create| {
+                if create {
+                    app.send(Command::CreateGroup { title: name.trim().to_owned(), members: members.clone(), avatar: avatar.clone(), expire_timer: *timer });
+                }
+            });
         }
         Compose::Chat { query, searching, found } => {
             ui.add_space(12.);
@@ -928,101 +1120,6 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
         app.panes.compose = Some(compose);
     }
     true
-}
-
-fn compose_dialog(app: &mut App, ui: &mut Ui) {
-    let Some(mut compose) = app.panes.compose.take() else { return };
-    let palette = Palette::of(ui.ctx());
-    let mut keep = true;
-    match &mut compose {
-        // Drawn in the chat list (`compose_pane`).
-        Compose::Chat { .. } | Compose::Find { .. } => {}
-        Compose::Group { picking, query, members, title: name, timer, avatar } => {
-            let closed = modal(ui, "new-group", 420., |ui| {
-                if *picking {
-                    title(ui, "Add members");
-                    widgets::text_field(ui, query, "Name, username or number", false);
-                    ui.add_space(6.);
-                    // Chosen people, as chips.
-                    ui.horizontal_wrapped(|ui| {
-                        let mut remove = None;
-                        for m in members.iter() {
-                            if ui.button(format!("{}  ×", app.name(m))).clicked() {
-                                remove = Some(m.clone());
-                            }
-                        }
-                        if let Some(m) = remove {
-                            members.retain(|x| *x != m);
-                        }
-                    });
-                    let q = query.trim().to_lowercase();
-                    egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
-                        let people = app.conversations.iter().filter(|c| c.kind == ConversationKind::Direct && (q.is_empty() || c.title.to_lowercase().contains(&q)));
-                        for c in people.take(60) {
-                            let Some(sid) = c.id.as_direct() else { continue };
-                            let chosen = members.iter().any(|m| m == sid);
-                            let row = ui.horizontal(|ui| {
-                                let mut on = chosen;
-                                ui.checkbox(&mut on, "");
-                                contact_row(ui, &palette, &c.title, c.phone.as_deref(), c.color, c.avatar_path.as_deref())
-                            });
-                            if row.inner.clicked() || row.response.clicked() {
-                                if chosen {
-                                    members.retain(|m| m != sid);
-                                } else {
-                                    members.push(sid.to_owned());
-                                }
-                            }
-                        }
-                        if !q.is_empty() && (q.starts_with('+') || q.contains('.')) && menu_row(ui, Some(Icon::SearchCompactLight), "Find and add", false).clicked() {
-                            app.send(Command::FindRecipient { query: query.trim().to_owned() });
-                        }
-                    });
-                    match buttons(ui, &[if members.is_empty() { "Skip" } else { "Next" }, "Cancel"]) {
-                        Some(0) => *picking = false,
-                        Some(_) => keep = false,
-                        None => {}
-                    }
-                } else {
-                    title(ui, "Name this group");
-                    ui.horizontal(|ui| {
-                        let spec = widgets::AvatarSpec { name: name.as_str(), color: 3, photo: None, group: true, note_to_self: false };
-                        if widgets::avatar(ui, &spec, 64.).on_hover_text("Choose a photo").clicked()
-                            && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp"]).pick_file()
-                        {
-                            *avatar = std::fs::read(path).ok();
-                        }
-                        if avatar.is_some() {
-                            ui.label(RichText::new("Photo chosen").color(palette.text_secondary));
-                        }
-                    });
-                    ui.add_space(8.);
-                    widgets::text_field(ui, name, "Group name (required)", false);
-                    ui.add_space(8.);
-                    ui.horizontal(|ui| {
-                        ui.label("Disappearing messages");
-                        crate::details::timer_picker(ui, "new-group-timer", timer);
-                    });
-                    ui.add_space(8.);
-                    body(ui, &palette, &format!("{} members", members.len() + 1));
-                    match buttons(ui, &["Create", "Back"]) {
-                        Some(0) if !name.trim().is_empty() => {
-                            app.send(Command::CreateGroup { title: name.trim().to_owned(), members: members.clone(), avatar: avatar.clone(), expire_timer: *timer });
-                        }
-                        Some(0) => app.toast("Give the group a name."),
-                        Some(_) => *picking = true,
-                        None => {}
-                    }
-                }
-            });
-            if closed {
-                keep = false;
-            }
-        }
-    }
-    if keep && app.panes.compose.is_none() {
-        app.panes.compose = Some(compose);
-    }
 }
 
 /// A person in a list: avatar, name and (if known) number.
