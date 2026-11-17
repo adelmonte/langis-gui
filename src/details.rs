@@ -426,8 +426,21 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
             Some(Err(why)) => body(ui, palette, &why),
             Some(Ok(number)) => {
-                body(ui, palette, &format!("To verify end-to-end encryption with {}, compare the numbers above with their device. They can also scan your code with their device.", c.title));
-                ui.add_space(16.);
+                ui.add_space(8.);
+                // The code they scan (Desktop's `SafetyNumberViewer`), kept
+                // while the same fingerprint shows.
+                let key = egui::Id::unique(("safety-qr", &number.qr));
+                let texture = ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(key)).or_else(|| {
+                    let made = crate::startup::qr_texture_of(ui.ctx(), "safety-qr", &number.qr)?;
+                    ui.ctx().data_mut(|d| d.insert_temp(key, made.clone()));
+                    Some(made)
+                });
+                if let Some(texture) = texture {
+                    egui::Frame::new().fill(egui::Color32::WHITE).corner_radius(CornerRadius::same(12)).inner_margin(12).show(ui, |ui| {
+                        ui.add(egui::Image::new(&texture).fit_to_exact_size(egui::Vec2::splat(180.)));
+                    });
+                    ui.add_space(12.);
+                }
                 // Twelve groups of five, in three rows of four.
                 let groups: Vec<String> = number.digits.as_bytes().chunks(5).map(|g| String::from_utf8_lossy(g).into_owned()).collect();
                 egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(12)).inner_margin(16).show(ui, |ui| {
@@ -435,6 +448,8 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                         ui.label(RichText::new(line.join("  ")).font(egui::FontId::monospace(18.)));
                     }
                 });
+                ui.add_space(12.);
+                body(ui, palette, &format!("To verify end-to-end encryption with {}, compare the numbers above with their device. They can also scan your code with their device.", c.title));
                 ui.add_space(16.);
                 if number.verified {
                     ui.label(RichText::new("Verified").font(theme::medium(14.)).color(palette.green));

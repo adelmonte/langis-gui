@@ -111,8 +111,8 @@ fn load(app: &App) {
     });
 }
 
-/// Writes one of the app's own settings (or a local-only one the core reads
-/// as it goes; see CORE-WISHLIST.md).
+/// Writes one of the app's own settings (`ui.` keys; the core's go
+/// through commands).
 fn write(app: &App, key: &'static str, value: String) {
     app.load(move |db| async move {
         let _ = db.set_setting(key, &value).await;
@@ -230,7 +230,7 @@ fn appearance(app: &mut App, ui: &mut Ui, palette: &Palette) {
     if theme != app.theme {
         app.theme = theme.clone();
         app.apply_theme();
-        write(app, langis_core::SETTING_THEME, theme);
+        app.send(Command::SetLocalSetting(langis_core::LocalSetting::Theme(langis_core::Theme::from_setting(Some(&theme)))));
     }
 }
 
@@ -252,15 +252,20 @@ fn calls(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
     let mut incoming = s.incoming_calls;
     row(ui, palette, "Enable incoming calls", None, |ui| {
         if widgets::switch(ui, &mut incoming).changed() {
-            write(app, langis_core::SETTING_INCOMING_CALLS, incoming.to_string());
-            app.settings.stale = true;
+            app.send(Command::SetLocalSetting(langis_core::LocalSetting::IncomingCalls(incoming)));
+            // Shown at once; a reload could race the command.
+            if let Some(snapshot) = app.settings.snapshot.as_mut() {
+                snapshot.incoming_calls = incoming;
+            }
         }
     });
     let mut relay = s.always_relay;
     row(ui, palette, "Always relay calls", Some("Relay all calls through the Signal server to avoid revealing your IP address to your contact."), |ui| {
         if widgets::switch(ui, &mut relay).changed() {
-            write(app, langis_core::SETTING_ALWAYS_RELAY_CALLS, relay.to_string());
-            app.settings.stale = true;
+            app.send(Command::SetLocalSetting(langis_core::LocalSetting::AlwaysRelayCalls(relay)));
+            if let Some(snapshot) = app.settings.snapshot.as_mut() {
+                snapshot.always_relay = relay;
+            }
         }
     });
 

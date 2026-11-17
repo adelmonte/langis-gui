@@ -10,7 +10,12 @@ use crate::widgets;
 
 /// The provisioning URL as a QR code texture, black on white.
 pub fn qr_texture(ctx: &egui::Context, url: &str) -> Option<TextureHandle> {
-    let code = qrcode::QrCode::new(url.as_bytes()).ok()?;
+    qr_texture_of(ctx, "link-qr", url.as_bytes())
+}
+
+/// A QR code of any bytes (the safety number's scannable fingerprint too).
+pub fn qr_texture_of(ctx: &egui::Context, name: &str, data: &[u8]) -> Option<TextureHandle> {
+    let code = qrcode::QrCode::new(data).ok()?;
     let width = code.width();
     let quiet = 2;
     let side = width + quiet * 2;
@@ -24,7 +29,7 @@ pub fn qr_texture(ctx: &egui::Context, url: &str) -> Option<TextureHandle> {
         }
     }
     let image = ColorImage::new([side, side], pixels);
-    Some(ctx.load_texture("link-qr", image, TextureOptions::NEAREST))
+    Some(ctx.load_texture(name, image, TextureOptions::NEAREST))
 }
 
 /// A centered card for the screens before the account is ready.

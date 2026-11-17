@@ -199,7 +199,9 @@ impl App {
             fun: Default::default(),
         };
         let dir = &app.data_dir;
-        if app.demo || dir.join("database.key").exists() {
+        if !app.demo && in_use(dir) {
+            app.phase = Phase::Failed(ALREADY_RUNNING.into());
+        } else if app.demo || dir.join("database.key").exists() {
             app.start(KeySource::File);
         } else if dir.join("database.salt").exists() {
             app.phase = Phase::Unlock { passphrase: String::new(), error: None };
@@ -285,7 +287,9 @@ impl App {
                 Ok((backend, events)) => self.attach(backend, events),
                 Err(error) => {
                     // A wrong passphrase goes back to its prompt.
-                    if error.contains("wrong passphrase") {
+                    if error.contains("already in use") {
+                        self.phase = Phase::Failed(ALREADY_RUNNING.into());
+                    } else if error.contains("wrong passphrase") {
                         self.phase = Phase::Unlock { passphrase: String::new(), error: Some("That passphrase isn't right.".into()) };
                     } else {
                         self.phase = Phase::Failed(error);
@@ -747,4 +751,14 @@ fn device_name() -> String {
         Some(host) => format!("langis-gui on {host}"),
         None => "langis-gui".into(),
     }
+}
+
+const ALREADY_RUNNING: &str = "langis-gui is already running for this account. Switch to its window (or close it first).";
+
+/// Whether another running copy holds the data directory (the backend's
+/// `langis.lock`). Checked up front so a passphrase isn't asked for first;
+/// `Backend::start` still has the final say.
+fn in_use(dir: &std::path::Path) -> bool {
+    let Ok(file) = std::fs::File::open(dir.join("langis.lock")) else { return false };
+    matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
 }
