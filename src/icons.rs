@@ -247,10 +247,8 @@ impl Icon {
     pub fn paint(self, ui: &egui::Ui, rect: egui::Rect, size: f32, tint: Color32) {
         let square = egui::Rect::from_center_size(rect.center(), Vec2::splat(size));
         let wide = Vec2::new(size * self.aspect(), size);
-        let (uri, bytes) = self.source();
-        Image::new(ImageSource::Bytes { uri: uri.into(), bytes: bytes.into() })
+        self.image(size, tint)
             .fit_to_exact_size(wide)
-            .tint(tint)
             .paint_at(ui, egui::Rect::from_min_size(egui::Pos2::new(square.right() - wide.x, square.top()), wide));
     }
 }
