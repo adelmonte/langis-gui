@@ -11,6 +11,9 @@ use crate::theme::{self, Palette};
 use crate::widgets;
 
 pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
+    if app.nav_collapsed {
+        return;
+    }
     let palette = Palette::of(ui.ctx());
     let unread: u32 = app.conversations.iter().filter(|c| !c.muted).map(|c| c.unread_count + c.marked_unread as u32).sum();
     egui::Panel::left("nav-tabs")
@@ -22,6 +25,7 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
             let full = ui.max_rect();
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
             ui.add_space(12.);
+            nav_toggle(app, ui, &palette);
             let chats = tab_item(ui, &palette, if app.tab == Tab::Chats { Icon::ChatFill } else { Icon::Chat }, app.tab == Tab::Chats, unread);
             if chats.on_hover_text("Chats").clicked() {
                 app.tab = Tab::Chats;
@@ -56,6 +60,57 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
         });
 }
 
+/// Desktop's `NavTabsToggle`: the menu button atop the nav tabs, or, with
+/// them collapsed, before a list's title with the other tabs' unread count.
+fn nav_toggle(app: &mut App, ui: &mut Ui, palette: &Palette) {
+    let label = if app.nav_collapsed { "Show tabs" } else { "Hide tabs" };
+    let (outer, response) = if app.nav_collapsed {
+        ui.allocate_exact_size(Vec2::new(36., 36.), Sense::click())
+    } else {
+        ui.allocate_exact_size(Vec2::new(80., 36.), Sense::click())
+    };
+    let rect = Rect::from_center_size(outer.center(), Vec2::splat(28.));
+    if response.hovered() {
+        let fill = if response.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill };
+        ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
+    }
+    Icon::Menu.paint(ui, rect, 20., palette.text);
+    if app.nav_collapsed {
+        let chats: u32 = if app.tab == Tab::Chats { 0 } else { app.conversations.iter().filter(|c| !c.muted).map(|c| c.unread_count + c.marked_unread as u32).sum() };
+        let stories = if app.tab == Tab::Stories { 0 } else { crate::stories_unread(app) };
+        badge(ui, palette, rect, chats + stories);
+    }
+    if response.on_hover_text(label).clicked() {
+        app.nav_collapsed = !app.nav_collapsed;
+        crate::settings::write(app, crate::settings::SETTING_NAV_TABS_COLLAPSED, app.nav_collapsed.to_string());
+    }
+}
+
+/// Where a list's title starts: Desktop's header padding, or the nav toggle
+/// when the tabs are collapsed.
+pub fn header_start(app: &mut App, ui: &mut Ui) {
+    if app.nav_collapsed {
+        ui.add_space(10.);
+        nav_toggle(app, ui, &Palette::of(ui.ctx()));
+        ui.add_space(2.);
+    } else {
+        ui.add_space(24.);
+    }
+}
+
+/// A red count over an icon's top right.
+fn badge(ui: &Ui, palette: &Palette, rect: Rect, count: u32) {
+    if count == 0 {
+        return;
+    }
+    let text = if count > 99 { "99+".to_owned() } else { count.to_string() };
+    let galley = ui.painter().layout_no_wrap(text, theme::regular(10.), egui::Color32::WHITE);
+    let w = (galley.size().x + 4.).max(16.);
+    let at = Rect::from_min_size(Pos2::new(rect.center().x + 10. - 6. + 4., rect.center().y - 10. - 4.), Vec2::new(w, 16.));
+    ui.painter().rect_filled(at, CornerRadius::same(8), palette.destructive);
+    ui.painter().galley(at.center() - galley.size() / 2., galley, egui::Color32::WHITE);
+}
+
 /// One nav tab: a 20px icon in a rounded 60x40 button.
 fn tab_item(ui: &mut Ui, palette: &Palette, icon: Icon, selected: bool, badge: u32) -> egui::Response {
     let (outer, response) = ui.allocate_exact_size(Vec2::new(80., 44.), Sense::click());
@@ -65,14 +120,7 @@ fn tab_item(ui: &mut Ui, palette: &Palette, icon: Icon, selected: bool, badge: u
         ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
     }
     icon.paint(ui, rect, 20., palette.text);
-    if badge > 0 {
-        let text = if badge > 99 { "99+".to_owned() } else { badge.to_string() };
-        let galley = ui.painter().layout_no_wrap(text, theme::regular(10.), egui::Color32::WHITE);
-        let w = (galley.size().x + 4.).max(16.);
-        let at = Rect::from_min_size(Pos2::new(rect.center().x + 10. - 6. + 4., rect.center().y - 10. - 4.), Vec2::new(w, 16.));
-        ui.painter().rect_filled(at, CornerRadius::same(8), palette.destructive);
-        ui.painter().galley(at.center() - galley.size() / 2., galley, egui::Color32::WHITE);
-    }
+    self::badge(ui, palette, rect, badge);
     response
 }
 
@@ -99,7 +147,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     ui.label(RichText::new("Archived chats").font(theme::semibold(18.)));
                     return;
                 }
-                ui.add_space(24.);
+                header_start(app, ui);
                 ui.label(RichText::new("Chats").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(14.);

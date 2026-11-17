@@ -97,7 +97,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
             ui.add_space(12.);
             ui.horizontal(|ui| {
-                ui.add_space(24.);
+                crate::sidebar::header_start(app, ui);
                 ui.label(RichText::new("Calls").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(14.);

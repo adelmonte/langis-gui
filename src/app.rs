@@ -42,7 +42,7 @@ pub enum Loaded {
     Settings(Box<crate::settings::Snapshot>),
     Theme(Option<String>),
     /// Our notification settings: shown at all, and what they show.
-    NotifyPrefs { on: bool, content: String },
+    NotifyPrefs { on: bool, content: String, nav_collapsed: bool },
     /// Our own profile name and photo.
     Me { name: Option<String>, photo: Option<String> },
     /// A desktop notification to show.
@@ -130,6 +130,8 @@ pub struct App {
     pub focused: bool,
     /// Desktop notifications on, and what they show ("all", "name", "none").
     pub notify: (bool, String),
+    /// Desktop's collapsed nav tabs: the toggle moves into the list header.
+    pub nav_collapsed: bool,
     /// Our profile name and photo, for the nav avatar and mentions of us.
     pub me: (String, Option<String>),
     /// The calls and stories tabs, chat details, dialogs and menus.
@@ -191,6 +193,7 @@ impl App {
             theme: "system".into(),
             focused: true,
             notify: (true, "all".into()),
+            nav_collapsed: false,
             me: (String::new(), None),
             panes: Default::default(),
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
@@ -489,7 +492,10 @@ impl App {
                 }
             }
             Loaded::Settings(snapshot) => self.settings.snapshot = Some(*snapshot),
-            Loaded::NotifyPrefs { on, content } => self.notify = (on, content),
+            Loaded::NotifyPrefs { on, content, nav_collapsed } => {
+                self.notify = (on, content);
+                self.nav_collapsed = nav_collapsed;
+            }
             Loaded::Me { name, photo } => {
                 if let Some(name) = &name {
                     self.names.insert(self.aci.clone(), name.clone());
@@ -567,7 +573,8 @@ impl App {
         self.load(|db| async move {
             let on = db.setting(crate::settings::SETTING_NOTIFICATIONS).await.ok().flatten().as_deref() != Some("false");
             let content = db.setting(crate::settings::SETTING_NOTIFICATION_CONTENT).await.ok().flatten().unwrap_or_else(|| "all".into());
-            Some(Loaded::NotifyPrefs { on, content })
+            let nav_collapsed = db.setting(crate::settings::SETTING_NAV_TABS_COLLAPSED).await.ok().flatten().as_deref() == Some("true");
+            Some(Loaded::NotifyPrefs { on, content, nav_collapsed })
         });
     }
 

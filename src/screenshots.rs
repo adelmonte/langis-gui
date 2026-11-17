@@ -401,3 +401,16 @@ fn screenshots_fun() {
     save(&mut harness, "sticker-pack");
     finish(harness);
 }
+
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_nav_collapsed() {
+    let mut harness = demo_harness();
+    open_chat(&mut harness, langis_store::ConversationKind::Direct);
+    harness.state_mut().nav_collapsed = true;
+    wait(&mut harness, "the collapsed tabs", |_| true);
+    save(&mut harness, "nav-collapsed");
+    harness.state_mut().tab = Tab::Calls;
+    wait(&mut harness, "the calls tab", |_| true);
+    save(&mut harness, "nav-collapsed-calls");
+}

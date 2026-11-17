@@ -13,6 +13,8 @@ use crate::widgets;
 pub const SETTING_NOTIFICATIONS: &str = "ui.notifications";
 /// Ours: what notifications show: "all", "name" or "none".
 pub const SETTING_NOTIFICATION_CONTENT: &str = "ui.notification_content";
+/// Desktop's `navTabsCollapsed`: the nav tabs hidden, "true" or unset.
+pub const SETTING_NAV_TABS_COLLAPSED: &str = "ui.nav_tabs_collapsed";
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Section {
@@ -113,7 +115,7 @@ fn load(app: &App) {
 
 /// Writes one of the app's own settings (`ui.` keys; the core's go
 /// through commands).
-fn write(app: &App, key: &'static str, value: String) {
+pub fn write(app: &App, key: &'static str, value: String) {
     app.load(move |db| async move {
         let _ = db.set_setting(key, &value).await;
         None
@@ -136,7 +138,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
             ui.add_space(14.);
             ui.horizontal(|ui| {
-                ui.add_space(24.);
+                crate::sidebar::header_start(app, ui);
                 ui.label(RichText::new("Settings").font(theme::semibold(18.)));
             });
             ui.add_space(14.);
