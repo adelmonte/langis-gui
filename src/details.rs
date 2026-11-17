@@ -10,7 +10,7 @@ use langis_store::{ContactNickname, Conversation, ConversationId, ConversationKi
 
 use crate::app::{App, Loaded};
 use crate::icons::Icon;
-use crate::panes::{body, buttons, modal, title};
+use crate::panes::{ChatConfirm, body, buttons, modal, title};
 use crate::theme::{self, Palette};
 use crate::widgets;
 
@@ -36,17 +36,7 @@ pub struct Details {
     pub edit_info: Option<(String, String)>,
     pub nickname: Option<ContactNickname>,
     pub add_members: Option<(String, Vec<String>)>,
-    pub confirm: Option<Confirm>,
     pub label: Option<String>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Confirm {
-    Leave,
-    End,
-    Delete,
-    Block,
-    Unblock,
 }
 
 impl Details {
@@ -60,7 +50,6 @@ impl Details {
             edit_info: None,
             nickname: None,
             add_members: None,
-            confirm: None,
             label: None,
         }
     }
@@ -350,7 +339,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         axo_list::list(ui, None, None, |ui| {
             let red = |item: Item<'static>| Item { destructive: true, ..item };
             if group && !c.left && !c.ended && axo_list::item(ui, red(Item::new("Leave group").symbol("leave")), End::Click).clicked() {
-                confirm = Some(Confirm::Leave);
+                confirm = Some(ChatConfirm::Leave);
             }
             let label = match (group, c.blocked) {
                 (true, false) => "Block group",
@@ -359,30 +348,28 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 (false, true) => "Unblock",
             };
             if axo_list::item(ui, red(Item::new(label).symbol("block")), End::Click).clicked() {
-                confirm = Some(if c.blocked { Confirm::Unblock } else { Confirm::Block });
+                confirm = Some(if c.blocked { ChatConfirm::Unblock } else { ChatConfirm::Block });
             }
             if axo_list::item(ui, Item::new(if c.archived { "Unarchive chat" } else { "Archive chat" }).symbol("archive"), End::Click).clicked() {
                 app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::Archived(!c.archived) });
             }
             if (c.ended || c.left) && axo_list::item(ui, red(Item::new("Delete chat").symbol("trash")), End::Click).clicked() {
-                confirm = Some(Confirm::Delete);
+                app.panes.delete_chat = Some((c.id.clone(), false));
             }
             if !c.blocked && axo_list::item(ui, red(Item::new("Report spam").symbol("error-octagon")), End::Click).clicked() {
-                app.send(Command::AnswerMessageRequest { conversation: c.id.clone(), answer: langis_store::MessageRequestResponse::Spam });
+                confirm = Some(ChatConfirm::ReportSpam);
             }
         });
         if group && admin && !c.left && !c.ended {
             axo_list::gap(ui);
             axo_list::list(ui, None, None, |ui| {
                 if axo_list::item(ui, Item { destructive: true, ..Item::new("End group").symbol("x-circle") }, End::Click).clicked() {
-                    confirm = Some(Confirm::End);
+                    confirm = Some(ChatConfirm::End);
                 }
             });
         }
-        if let Some(confirm) = confirm
-            && let Some(d) = app.panes.details.as_mut()
-        {
-            d.confirm = Some(confirm);
+        if let Some(confirm) = confirm {
+            app.panes.chat_confirm = Some((c.id.clone(), confirm));
         }
     }
 }
@@ -779,41 +766,6 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             Some(_) => {}
             None if closed => {}
             None => d.add_members = Some((query, chosen)),
-        }
-    }
-    if let Some(confirm) = d.confirm.take() {
-        let group = c.kind == ConversationKind::Group;
-        let (heading, text, action) = match confirm {
-            Confirm::Leave => ("Leave group?", "You will no longer be able to send or receive messages in this group.", "Leave"),
-            Confirm::End => ("End group?", "This ends the group for everyone. No one will be able to send messages in it.", "End group"),
-            Confirm::Delete => ("Delete chat?", "This chat will be deleted from all your devices.", "Delete"),
-            Confirm::Block if group => ("Block and leave this group?", "You will no longer receive messages or updates from this group.", "Block"),
-            Confirm::Block => ("Block this person?", "Blocked people won't be able to call you or send you messages.", "Block"),
-            Confirm::Unblock => ("Unblock?", "You will be able to message and call each other.", "Unblock"),
-        };
-        let mut answer = None;
-        let closed = modal(ui, "details-confirm", 360., |ui| {
-            title(ui, heading);
-            body(ui, palette, text);
-            answer = buttons(ui, &[action, "Cancel"]);
-        });
-        match answer {
-            Some(0) => {
-                let id = c.id.clone();
-                match confirm {
-                    Confirm::Leave => app.send(Command::LeaveGroup { conversation: id }),
-                    Confirm::End => app.send(Command::EndGroup { conversation: id }),
-                    Confirm::Delete => {
-                        app.send(Command::DeleteConversation { conversation: id });
-                        return;
-                    }
-                    Confirm::Block => app.send(Command::SetChat { conversation: id, change: ChatChange::Blocked(true) }),
-                    Confirm::Unblock => app.send(Command::SetChat { conversation: id, change: ChatChange::Blocked(false) }),
-                }
-            }
-            Some(_) => {}
-            None if closed => {}
-            None => d.confirm = Some(confirm),
         }
     }
     if app.panes.details.is_none() {

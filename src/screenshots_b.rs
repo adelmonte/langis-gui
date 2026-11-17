@@ -116,6 +116,10 @@ fn screenshots_panes() {
     crate::details::open(harness.state_mut(), direct.clone());
     wait(&mut harness, "direct details", |app| app.panes.details.as_ref().is_some_and(|d| d.contact.is_some()));
     save(&mut harness, "details-direct");
+    harness.state_mut().panes.chat_confirm = Some((direct.clone(), crate::panes::ChatConfirm::Block));
+    wait(&mut harness, "block confirm", |_| true);
+    save(&mut harness, "confirm-block");
+    harness.state_mut().panes.chat_confirm = None;
     harness.state().send(Command::LoadSafetyNumber { conversation: direct });
     if let Some(d) = harness.state_mut().panes.details.as_mut() {
         d.page = crate::details::Page::Safety;

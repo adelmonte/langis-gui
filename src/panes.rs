@@ -24,6 +24,8 @@ pub struct Panes {
     pub call_search: String,
     /// Desktop's new call view in place of the calls list, and its query.
     pub new_call: Option<String>,
+    /// A chat action waiting on its confirmation (`chat_confirm_dialog`).
+    pub chat_confirm: Option<(ConversationId, ChatConfirm)>,
     /// Asking before clearing the call history.
     pub clear_calls: bool,
     /// A call link's details, by room id.
@@ -505,6 +507,69 @@ pub fn mute_items(app: &mut App, m: &mut crate::menu::Menu, id: &ConversationId)
         if m.item(None, label) {
             app.send(Command::SetChat { conversation: id.clone(), change: langis_core::ChatChange::MutedUntil(until) });
         }
+    }
+}
+
+/// The chat actions Desktop confirms first (`ConversationDetailsActions`
+/// and the header menu).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChatConfirm {
+    Leave,
+    Block,
+    Unblock,
+    ReportSpam,
+    End,
+    /// Desktop asks a second time before ending a group.
+    EndForSure,
+}
+
+/// The open chat confirmation, and what its answer does.
+pub fn chat_confirm_dialog(app: &mut App, ctx: &egui::Context) {
+    use crate::dialog::{self, Answer, Variant};
+    let Some((id, which)) = app.panes.chat_confirm.clone() else { return };
+    let Some(c) = app.conversation(&id).cloned() else {
+        app.panes.chat_confirm = None;
+        return;
+    };
+    let group = c.kind == ConversationKind::Group;
+    let name = c.title.clone();
+    let (title, body, actions): (String, &str, Vec<(&str, Variant)>) = match which {
+        ChatConfirm::Leave => ("Do you really want to leave?".into(), "You will no longer be able to send or receive messages in this group.", vec![("Leave", Variant::StrongDestructive)]),
+        ChatConfirm::Block if group => (format!("Block and Leave the \"{name}\" Group?"), "You will no longer receive messages or updates from this group.", vec![("Block", Variant::StrongDestructive)]),
+        ChatConfirm::Block => (format!("Block {name}?"), "Blocked people won't be able to call you or send you messages.", vec![("Block", Variant::StrongDestructive)]),
+        ChatConfirm::Unblock if group => (format!("Unblock the \"{name}\" Group?"), "Your contacts will be able to add you to this group.", vec![("Unblock", Variant::StrongDestructive)]),
+        ChatConfirm::Unblock => (format!("Unblock {name}?"), "You will be able to message and call each other.", vec![("Unblock", Variant::StrongPrimary)]),
+        ChatConfirm::ReportSpam => (
+            "Report as spam?".into(),
+            if group {
+                "Signal will be notified that the person who invited you to this group may be sending spam. Signal can't see the content of any chats."
+            } else {
+                "Signal will be notified that this person may be sending spam. Signal can\u{2019}t see the content of any chats."
+            },
+            vec![("Report spam", Variant::StrongDestructive), ("Report and block", Variant::StrongDestructive)],
+        ),
+        ChatConfirm::End => (
+            format!("End \"{name}\"?"),
+            "Members will no longer be able to send messages or start calls in the group. They will be notified that you ended the group, and will still have access to message history.",
+            vec![("End group", Variant::StrongDestructive)],
+        ),
+        ChatConfirm::EndForSure => ("This will end the group permanently. Are you sure you want to proceed?".into(), "", vec![("End group", Variant::StrongDestructive)]),
+    };
+    let key = egui::Id::unique("chat-confirm").with((&id.0, which as u8));
+    let Some(answer) = dialog::show(ctx, key, &title, body, Some("Cancel"), &actions) else { return };
+    app.panes.chat_confirm = None;
+    let Answer::Action(index) = answer else { return };
+    let conversation = id.clone();
+    match which {
+        ChatConfirm::Leave => app.send(Command::LeaveGroup { conversation }),
+        ChatConfirm::Block => app.send(Command::SetChat { conversation, change: langis_core::ChatChange::Blocked(true) }),
+        ChatConfirm::Unblock => app.send(Command::SetChat { conversation, change: langis_core::ChatChange::Blocked(false) }),
+        ChatConfirm::ReportSpam => {
+            let answer = if index == 0 { langis_store::MessageRequestResponse::Spam } else { langis_store::MessageRequestResponse::BlockAndSpam };
+            app.send(Command::AnswerMessageRequest { conversation, answer });
+        }
+        ChatConfirm::End => app.panes.chat_confirm = Some((id, ChatConfirm::EndForSure)),
+        ChatConfirm::EndForSure => app.send(Command::EndGroup { conversation }),
     }
 }
 
