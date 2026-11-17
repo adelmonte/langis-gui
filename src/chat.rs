@@ -836,7 +836,10 @@ fn message(
         Some(rich_text(m, &|sid| ctx.app.name(sid), in_color, link_color, revealed, font_size))
     };
 
-    let inner_max = max_bubble - 24.;
+    // Desktop's `getWidth`: a photo's bubble is as wide as the photo, and
+    // its text wraps inside.
+    let media_w = images.first().map(|(_, a)| media_size(a, None).x.min(max_bubble)).unwrap_or(0.);
+    let inner_max = if images.is_empty() { max_bubble - 24. } else { media_w - 24. };
     let poll_view = m.poll.as_ref().filter(|_| !m.deleted).map(|p| crate::polls::layout(ui, p, inner_max.min(300.), in_color));
     let galley = rich.as_ref().map(|r| {
         let mut job = r.job.clone();
@@ -893,7 +896,6 @@ fn message(
 
     // Sizes of each part.
     let pad = Vec2::new(12., 8.);
-    let media_w = images.first().map(|(_, a)| media_size(a, max_bubble).x).unwrap_or(0.);
     let text_w = galley.as_ref().map(|g| g.size().x).unwrap_or(0.);
     let last_row_w = galley.as_ref().and_then(|g| g.rows.last()).map(|r| r.rect().width()).unwrap_or(0.);
     let meta_inline = show_meta && galley.is_some() && last_row_w + meta_w + 8. <= inner_max;
@@ -908,12 +910,12 @@ fn message(
     if m.quote.is_some() || m.link_preview.is_some() || !files.is_empty() || poll_view.is_some() {
         content_w = content_w.max(inner_max.min(300.));
     }
-    let bubble_w = (content_w + pad.x * 2.).max(media_w).min(max_bubble).max(if jumbo { 0. } else { 48. });
+    let bubble_w = if images.is_empty() { (content_w + pad.x * 2.).min(max_bubble).max(if jumbo { 0. } else { 48. }) } else { media_w };
 
     // Heights.
     let name_h = name_galley.as_ref().map(|g| g.size().y + 2.).unwrap_or(0.);
     let quote_h = if m.quote.is_some() { 58. } else { 0. };
-    let media_h: f32 = images.iter().map(|(_, a)| media_size(a, bubble_w).y + 2.).sum();
+    let media_h: f32 = images.iter().map(|(_, a)| media_size(a, Some(bubble_w)).y + 2.).sum();
     let files_h = files.len() as f32 * 48.;
     let preview_h = if m.link_preview.is_some() { 84. } else { 0. };
     let poll_h = poll_view.as_ref().map(|p| p.height).unwrap_or(0.);
@@ -969,7 +971,7 @@ fn message(
         y += quote_h;
     }
     for (index, a) in &images {
-        let size = media_size(a, bubble_w);
+        let size = media_size(a, Some(bubble_w));
         let rect = Rect::from_min_size(Pos2::new(bubble.left(), y), Vec2::new(bubble_w, size.y));
         let mr = if media_only { radius } else if y <= bubble.top() + 1. { CornerRadius { nw: radius.nw, ne: radius.ne, sw: 0, se: 0 } } else { CornerRadius::ZERO };
         if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
@@ -1180,12 +1182,15 @@ fn avatar_for(ui: &Ui, ctx: &Ctx<'_>, m: &Message, at: Pos2) {
     widgets::paint_avatar(ui, Rect::from_min_size(at, Vec2::splat(28.)), &spec);
 }
 
-/// An image or video's size in a bubble `width` wide.
-fn media_size(a: &langis_store::AttachmentMeta, width: f32) -> Vec2 {
-    let (w, h) = (a.width.unwrap_or(4).max(1) as f32, a.height.unwrap_or(3).max(1) as f32);
-    let w_fit = width.min(320.);
-    let h_fit = (w_fit * h / w).clamp(80., 360.);
-    Vec2::new(w_fit, h_fit)
+/// Desktop's `getImageDimensionsForTimeline`: the photo's own width within
+/// 200 to 300 (or `width`), and the height that keeps its shape within 50 to
+/// 450. Unknown sizes get the smallest box.
+fn media_size(a: &langis_store::AttachmentMeta, width: Option<f32>) -> Vec2 {
+    let (Some(w), Some(h)) = (a.width.filter(|w| *w > 0), a.height.filter(|h| *h > 0)) else {
+        return Vec2::new(width.unwrap_or(200.), 50.);
+    };
+    let target = width.unwrap_or((w as f32).clamp(200., 300.));
+    Vec2::new(target, (target * h as f32 / w as f32).round().clamp(50., 450.))
 }
 
 /// A photo or video. True when clicked.
@@ -1194,7 +1199,19 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
     let image = a.content_type.starts_with("image/");
     match a.local_path.as_deref().filter(|_| image).or(a.thumbnail_path.as_deref()) {
         Some(path) => {
-            egui::Image::new(format!("file://{path}")).corner_radius(radius).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+            // `object-fit: cover`: fills the box, cropped evenly, never stretched.
+            let mut uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
+            if let (Some(w), Some(h)) = (a.width.filter(|w| *w > 0), a.height.filter(|h| *h > 0)) {
+                let (photo, frame) = (w as f32 / h as f32, rect.width() / rect.height());
+                if photo > frame {
+                    let keep = frame / photo;
+                    uv = Rect::from_min_max(Pos2::new((1. - keep) / 2., 0.), Pos2::new((1. + keep) / 2., 1.));
+                } else if photo < frame {
+                    let keep = photo / frame;
+                    uv = Rect::from_min_max(Pos2::new(0., (1. - keep) / 2.), Pos2::new(1., (1. + keep) / 2.));
+                }
+            }
+            egui::Image::new(format!("file://{path}")).corner_radius(radius).uv(uv).fit_to_exact_size(rect.size()).paint_at(ui, rect);
         }
         None => {
             ui.painter().rect_filled(rect, radius, if palette.dark { Color32::from_gray(40) } else { Color32::from_gray(200) });
