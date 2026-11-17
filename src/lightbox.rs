@@ -34,6 +34,8 @@ pub struct Lightbox {
     pub index: usize,
     /// A view-once copy, deleted when the viewer closes.
     pub view_once: Option<PathBuf>,
+    /// Desktop's click to zoom: the photo at full size, panned by the pointer.
+    pub zoomed: bool,
 }
 
 /// Photos and videos of a message, as viewer items.
@@ -63,7 +65,7 @@ impl App {
     pub fn open_lightbox(&mut self, m: &Message, index: usize) {
         let items = items_of(m);
         let at = items.iter().position(|i| i.index == index).unwrap_or(0);
-        self.lightbox = Some(Lightbox { conversation: Some(m.conversation_id.clone()), items, index: at, view_once: None });
+        self.lightbox = Some(Lightbox { conversation: Some(m.conversation_id.clone()), items, index: at, view_once: None, zoomed: false });
         let (conversation, message_id) = (m.conversation_id.clone(), m.id);
         self.load(move |db| async move {
             let mut messages = db.media_messages(&conversation, 500).await.ok()?;
@@ -108,7 +110,7 @@ impl App {
             caption: String::new(),
             size: opened.size,
         };
-        self.lightbox = Some(Lightbox { conversation: None, items: vec![item], index: 0, view_once: Some(opened.path) });
+        self.lightbox = Some(Lightbox { conversation: None, items: vec![item], index: 0, view_once: Some(opened.path), zoomed: false });
     }
 
     pub fn close_lightbox(&mut self) {
@@ -129,6 +131,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let view_once = lightbox.view_once.is_some();
     let count = lightbox.items.len();
     let index = lightbox.index.min(count.saturating_sub(1));
+    let zoomed = lightbox.zoomed;
+    let mut toggle_zoom = false;
     let Some(item) = lightbox.items.get(index).cloned() else {
         app.lightbox = None;
         return;
@@ -180,12 +184,39 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let scale = (area.width() / w).min(area.height() / h).min(if item.size.is_some() { 2. } else { f32::MAX });
         let media = Rect::from_center_size(area.center(), Vec2::new(w * scale, h * scale));
         let image = item.content_type.starts_with("image/");
+        // Full size is the photo's pixels, at least twice the fitted size.
+        let full = (1. / ui.ctx().pixels_per_point()).max(scale * 2.);
+        let zoomable = image && item.path.is_some() && item.size.is_some() && !view_once;
         match item.path.as_deref().filter(|_| image).or(item.thumbnail.as_deref()) {
+            Some(path) if zoomable && zoomed => {
+                let size = Vec2::new(w * full, h * full);
+                let pointer = ui.ctx().pointer_hover_pos().unwrap_or(area.center());
+                let along = ((pointer - area.min) / area.size()).clamp(Vec2::ZERO, Vec2::splat(1.));
+                let slack = (size - area.size()).max(Vec2::ZERO);
+                let min = Pos2::new(
+                    if slack.x > 0. { area.left() - slack.x * along.x } else { area.center().x - size.x / 2. },
+                    if slack.y > 0. { area.top() - slack.y * along.y } else { area.center().y - size.y / 2. },
+                );
+                ui.scope(|ui| {
+                    ui.set_clip_rect(area);
+                    egui::Image::new(format!("file://{path}")).fit_to_exact_size(size).paint_at(ui, Rect::from_min_size(min, size));
+                });
+            }
             Some(path) => {
                 egui::Image::new(format!("file://{path}")).fit_to_exact_size(media.size()).paint_at(ui, media);
             }
             None => {
                 ui.painter().rect_filled(media, CornerRadius::same(4), Color32::from_gray(40));
+            }
+        }
+        if zoomable {
+            let target = if zoomed { area } else { media };
+            let r = ui.interact(target, ui.scope_id().with("lightbox-zoom"), Sense::click());
+            if r.hovered() {
+                ui.ctx().set_cursor_icon(if zoomed { egui::CursorIcon::ZoomOut } else { egui::CursorIcon::ZoomIn });
+            }
+            if r.clicked() {
+                toggle_zoom = true;
             }
         }
         let center = Rect::from_center_size(media.center(), Vec2::splat(64.));
@@ -249,7 +280,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
         }
 
-        if backdrop.clicked() && !media.contains(backdrop.interact_pointer_pos().unwrap_or_default()) {
+        if backdrop.clicked() && !zoomed && !media.contains(backdrop.interact_pointer_pos().unwrap_or_default()) {
             close = true;
         }
     });
@@ -273,8 +304,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if save {
         save_item(app, &item);
     }
-    if let (Some(to), Some(lightbox)) = (go, app.lightbox.as_mut()) {
-        lightbox.index = to;
+    if let Some(lightbox) = app.lightbox.as_mut() {
+        if toggle_zoom {
+            lightbox.zoomed = !lightbox.zoomed;
+        }
+        if let Some(to) = go {
+            lightbox.index = to;
+            lightbox.zoomed = false;
+        }
     }
     if close {
         app.close_lightbox();
