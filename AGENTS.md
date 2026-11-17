@@ -66,5 +66,6 @@ never use Signal's logo or name as the app's identity.
 - Commits: atomic, as your own git identity (adelmonte),
   with no Co-Authored-By or Claude attribution lines. Don't run
   `cargo fmt`. No em dashes in docs.
-- The repo is private on GitHub (adelmonte/langis-gui, as is
-  adelmonte/langis). Push only when the user asks.
+- The repo is public on GitHub (adelmonte/langis-gui, as is
+  adelmonte/langis). Push only when the user asks. No screenshots in the
+  repo except the one the user adds to the README.
