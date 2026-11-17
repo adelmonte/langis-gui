@@ -1254,18 +1254,18 @@ fn file_row(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: 
 }
 
 fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, rect: Rect, ctx: &Ctx<'_>) {
-    let fill = if outgoing {
-        Color32::from_white_alpha(56)
-    } else if palette.dark {
-        Color32::from_black_alpha(60)
-    } else {
-        Color32::from_white_alpha(150)
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+    // `Quote.scss`: the chat's color, shaded, fixed to the window like the
+    // bubbles; the bar is its start color, white in our own bubbles.
+    let color = crate::chat_colors::for_chat(ctx.app, ctx.chat_id);
+    let radius = CornerRadius { nw: 8, ne: 8, sw: 4, se: 4 };
+    crate::chat_colors::paint(ui.painter(), rect, radius, crate::chat_colors::quote_fill(color, palette.dark), ui.ctx().content_rect());
     let bar = Rect::from_min_size(rect.min, Vec2::new(4., rect.height()));
-    let bar_color = if outgoing { Color32::WHITE } else { q.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.accent) };
-    ui.painter().rect_filled(bar, CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, bar_color);
-    let text_color = if outgoing { Color32::WHITE } else { palette.text };
+    let bar_color = match color {
+        _ if outgoing => Color32::WHITE,
+        crate::chat_colors::Bubble::Solid(c) | crate::chat_colors::Bubble::Gradient(_, c, _) => c,
+    };
+    ui.painter().rect_filled(bar, CornerRadius { nw: 8, sw: 4, ne: 0, se: 0 }, bar_color);
+    let text_color = if palette.dark { theme::rgb(0xe9e9e9) } else { theme::rgb(0x1b1b1b) };
     let author = match &q.author {
         None => "You".to_owned(),
         Some(a) => ctx.app.names.get(a).cloned().unwrap_or_else(|| q.author_name.clone()),

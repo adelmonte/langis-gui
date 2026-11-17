@@ -89,6 +89,38 @@ pub fn hsl(c: HueSaturation) -> Color32 {
     Color32::from_rgb(byte(r), byte(g), byte(b))
 }
 
+/// Desktop's quote fill (`Quote.scss`): the chat's color with its HSL
+/// lightness taken 40% toward black in the dark theme, 60% toward white in
+/// the light one.
+pub fn quote_fill(bubble: Bubble, dark: bool) -> Bubble {
+    let shade = |c: Color32| {
+        let (r, g, b) = (c.r() as f32 / 255., c.g() as f32 / 255., c.b() as f32 / 255.);
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let l = (max + min) / 2.;
+        let d = max - min;
+        let (h, s) = if d == 0. {
+            (0., 0.)
+        } else {
+            let s = d / (1. - (2. * l - 1.).abs());
+            let h = if max == r {
+                60. * ((g - b) / d).rem_euclid(6.)
+            } else if max == g {
+                60. * ((b - r) / d + 2.)
+            } else {
+                60. * ((r - g) / d + 4.)
+            };
+            (h, s)
+        };
+        let l = if dark { l * 0.6 } else { l + (1. - l) * 0.6 };
+        hsl(HueSaturation { hue: h, saturation: s * 100., lightness: Some(l) })
+    };
+    match bubble {
+        Bubble::Solid(c) => Bubble::Solid(shade(c)),
+        Bubble::Gradient(deg, a, b) => Bubble::Gradient(deg, shade(a), shade(b)),
+    }
+}
+
 /// A custom color: solid, or a gradient at Desktop's own angle, which CSS
 /// gets as `270 - deg`.
 pub fn custom(c: &CustomColor) -> Bubble {
