@@ -609,6 +609,8 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         if chat.loaded {
             chat.scroll_to_bottom -= 1;
         }
+        // Straight to the end, as Desktop opens a chat: no scroll animation.
+        scroll = scroll.vertical_scroll_offset((chat.last_height - ui.available_height()).max(0.));
         ui.ctx().request_repaint();
     } else if let Some(offset) = chat.pending_offset.take() {
         scroll = scroll.vertical_scroll_offset(offset);
@@ -643,7 +645,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             }
             let area = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
             if chat.scroll_target == Some(m.id) {
-                ui.scroll_to_rect(area, Some(egui::Align::Center));
+                ui.scroll_to_rect_animation(area, Some(egui::Align::Center), egui::style::ScrollAnimation::none());
                 reached = Some(m.id);
             }
             if let Some((id, since)) = chat.highlight
@@ -669,10 +671,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             typing_bubble(ui, &ctx, author);
         }
         ui.add_space(16.);
-        let end = ui.allocate_response(Vec2::new(1., 1.), Sense::hover());
-        if to_bottom {
-            end.scroll_to_me(Some(egui::Align::BOTTOM));
-        }
+        ui.allocate_response(Vec2::new(1., 1.), Sense::hover());
     });
     chat.last_height = output.content_size.y;
     if let Some(before) = chat.keep_from_height.take() {
