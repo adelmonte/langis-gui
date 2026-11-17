@@ -12,7 +12,6 @@ Unofficial, and not affiliated with Signal.
 
 ## Not there yet
 
-- Settings don't match Desktop's yet.
 - Video stories don't play.
 - Chat folders can't be reordered.
 - Signal links from other apps aren't handed over (paste them into New chat).
