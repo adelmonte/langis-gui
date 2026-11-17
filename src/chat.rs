@@ -508,13 +508,7 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(12.);
                     let more = widgets::icon_button(ui, Icon::More, 20., "More");
-                    egui::Popup::menu(&more).show(|ui| {
-                        if crate::panes::menu_row(ui, Some(Icon::Settings), "Chat settings", false).clicked() {
-                            crate::details::open(app, c.id.clone());
-                            ui.close();
-                        }
-                        crate::panes::chat_menu(app, ui, c);
-                    });
+                    header_menu(app, ui, &more, c);
                     if widgets::icon_button(ui, Icon::Search, 20., "Search in chat").clicked() {
                         app.find_requested = true;
                     }
@@ -1510,3 +1504,55 @@ mod tests {
         assert_eq!(urls, ["https://example.org/a", "https://www.example.com"]);
     }
 }
+
+/// Desktop's `HeaderDropdownMenuContent` for an accepted chat.
+fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::Conversation) {
+    use langis_core::ChatChange;
+    let id = c.id.clone();
+    let group = c.kind == ConversationKind::Group;
+    crate::menu::dropdown(ui, more, egui::Id::unique("chat-header-menu"), |m| {
+        if !group || c.can_edit_info {
+            m.sub(Some("timer"), "Disappearing messages", |m| {
+                // expirationTimer.DEFAULT_DURATIONS_IN_SECONDS
+                for seconds in [0u32, 2_419_200, 604_800, 86_400, 28_800, 3_600, 300, 30] {
+                    let label = if seconds == 0 { "off".to_owned() } else { crate::format::timer_long(seconds) };
+                    if m.check(c.expire_timer == seconds, &label) {
+                        app.send(Command::SetExpireTimer { conversation: id.clone(), seconds });
+                    }
+                }
+            });
+        }
+        if c.muted {
+            if m.item(Some("bell"), "Unmute") {
+                app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(0) });
+            }
+        } else {
+            m.sub(Some("bell-slash"), "Mute notifications", |m| {
+                m.label("Mute this chat for…");
+                for (label, until) in crate::panes::mute_choices(false) {
+                    if m.item(None, label) {
+                        app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(until) });
+                    }
+                }
+            });
+        }
+        if m.item(Some("settings"), if group { "Group settings" } else { "Chat settings" }) {
+            crate::details::open(app, id.clone());
+        }
+        m.separator();
+        if !c.marked_unread && m.item(Some("message-badge"), "Mark as unread") {
+            app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(true) });
+        }
+        if m.item(Some(if c.pinned { "pin-slash" } else { "pin" }), if c.pinned { "Unpin chat" } else { "Pin chat" }) {
+            app.send(Command::SetPinned { conversation: id.clone(), pinned: !c.pinned });
+        }
+        if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { "Unarchive" } else { "Archive" }) {
+            app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(!c.archived) });
+        }
+        if m.item(Some("trash"), "Delete") {
+            app.panes.details = None;
+            app.send(Command::DeleteConversation { conversation: id.clone() });
+        }
+    });
+}
+

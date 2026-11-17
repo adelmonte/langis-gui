@@ -142,6 +142,8 @@ pub const ITALIC: &str = "Inter Italic";
 /// Color emoji first, for emoji shown on their own (reactions, the picker)
 /// and emoji runs in text, where Inter's plain hearts and stars would win.
 pub const EMOJI: &str = "Emoji";
+/// Desktop's SignalSymbols, the glyphs `AxoSymbol` draws (`symbols.rs`).
+pub const SYMBOLS: &str = "Symbols";
 
 pub fn emoji(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(EMOJI.into()))
@@ -153,6 +155,19 @@ pub fn medium(size: f32) -> FontId {
 
 pub fn semibold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
+}
+
+pub fn symbols(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(SYMBOLS.into()))
+}
+
+/// `AxoSymbol.Icon`: the named symbol, `size` square, centered on `center`.
+pub fn paint_symbol(painter: &egui::Painter, name: &str, center: egui::Pos2, size: f32, color: Color32) {
+    let Some(glyph) = crate::symbols::icon(name) else {
+        debug_assert!(false, "no symbol {name}");
+        return;
+    };
+    painter.text(center, egui::Align2::CENTER_CENTER, glyph, symbols(size), color);
 }
 
 pub fn regular(size: f32) -> FontId {
@@ -193,6 +208,8 @@ pub fn fonts() -> FontDefinitions {
     emoji_family.push("Inter".into());
     emoji_family.extend(fallbacks.iter().filter(|f| f.as_str() != "Color Emoji").cloned());
     fonts.families.insert(FontFamily::Name(EMOJI.into()), emoji_family);
+    fonts.font_data.insert(SYMBOLS.into(), FontData::from_static(include_bytes!("../assets/fonts/SignalSymbols-Regular.ttf")).into());
+    fonts.families.insert(FontFamily::Name(SYMBOLS.into()), vec![SYMBOLS.into()]);
     for (name, bytes) in faces {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
         let mut family = vec![name.to_owned()];
