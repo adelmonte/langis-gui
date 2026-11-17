@@ -12,6 +12,7 @@ use crate::theme::{self, Palette};
 pub enum Variant {
     StrongPrimary,
     StrongDestructive,
+    SubtleDestructive,
 }
 
 /// What the person chose this frame.
@@ -100,6 +101,9 @@ pub fn show(ctx: &egui::Context, id: Id, title: &str, description: &str, cancel:
                     Some(Variant::StrongDestructive) if palette.dark => (theme::rgb(0xee382c), theme::rgb(0xef493e), Color32::WHITE),
                     Some(Variant::StrongDestructive) => (theme::rgb(0xf21c0d), theme::rgb(0xe41a0c), Color32::WHITE),
                     Some(Variant::StrongPrimary) => (palette.accent, palette.accent.gamma_multiply(0.9), Color32::WHITE),
+                    // `fill-destructive-tint`, `label-destructive`.
+                    Some(Variant::SubtleDestructive) if palette.dark => (Color32::from_rgba_unmultiplied(0xff, 0x4a, 0x3a, 31), Color32::from_rgba_unmultiplied(0xff, 0x4a, 0x3a, 41), theme::rgb(0xff4a3a)),
+                    Some(Variant::SubtleDestructive) => (Color32::from_rgba_unmultiplied(0xf2, 0x16, 0x02, 15), Color32::from_rgba_unmultiplied(0xf2, 0x16, 0x02, 26), theme::rgb(0xf21602)),
                 };
                 if button(ui, id.with(("button", i)), rect, label, bg, pressed, text) {
                     answer = Some(match (cancel.is_some(), i) {
