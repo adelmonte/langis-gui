@@ -189,7 +189,7 @@ fn screenshots_message_actions() {
     save(&mut harness, "reaction-bar");
     harness.state_mut().chat.as_mut().unwrap().popup = None;
 
-    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Delete { message: ours });
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Delete { messages: vec![ours] });
     wait(&mut harness, "delete dialog", |_| true);
     save(&mut harness, "delete-dialog");
 
@@ -208,6 +208,16 @@ fn screenshots_message_actions() {
     wait(&mut harness, "forward dialog", |_| true);
     save(&mut harness, "forward-dialog");
     harness.state_mut().chat.as_mut().unwrap().dialog = None;
+
+    harness.state_mut().chat.as_mut().unwrap().selected = Some(vec![theirs, ours]);
+    wait(&mut harness, "select mode", |_| true);
+    save(&mut harness, "select-mode");
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Delete { messages: vec![theirs, ours] });
+    wait(&mut harness, "delete selected", |_| true);
+    save(&mut harness, "select-mode-delete");
+    let chat = harness.state_mut().chat.as_mut().unwrap();
+    chat.dialog = None;
+    chat.selected = None;
 
     harness.state().send(langis_core::Command::PinMessage { message_id: theirs, duration: None });
     wait(&mut harness, "pinned bar", |app| app.chat.as_ref().is_some_and(|c| !c.pinned.is_empty()));

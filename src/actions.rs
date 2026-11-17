@@ -25,7 +25,8 @@ pub enum Popup {
 
 /// A dialog over the chat.
 pub enum Dialog {
-    Delete { message: i64 },
+    /// Desktop's `DeleteMessagesModal`, for one message or a selection.
+    Delete { messages: Vec<i64> },
     Pin { message: i64, choice: usize },
     Forward { messages: Vec<i64>, query: String, chosen: Vec<ConversationId> },
     Info { message: i64, details: Option<Details> },
@@ -53,6 +54,8 @@ pub enum Do {
     /// The reaction bar for this message, at the menu's place.
     ReactBar(i64),
     Open(Dialog),
+    /// Select mode, starting with this message.
+    Select(i64),
     Close,
 }
 
@@ -183,6 +186,9 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
                 if offer.edit && ui.item(Some("pencil"), "Edit") {
                     out.push(Do::Edit(id));
                 }
+                if !m.deleted && ui.item(Some("check-circle"), "Select") {
+                    out.push(Do::Select(id));
+                }
                 if offer.copy && ui.item(Some("copy"), "Copy text") {
                     out.push(Do::Copy(plain_text(app, m)));
                 }
@@ -195,7 +201,7 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
                     out.push(Do::Open(Dialog::Info { message: id, details: None }));
                 }
                 if offer.delete && ui.item(Some("trash"), "Delete") {
-                    out.push(Do::Open(Dialog::Delete { message: id }));
+                    out.push(Do::Open(Dialog::Delete { messages: vec![id] }));
                 }
                 if failed_send && ui.item(Some("send"), "Retry Send") {
                     out.push(Do::Command(Command::RetrySend { message_id: id }));
@@ -275,39 +281,38 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
     let mut out = Vec::new();
     let frame = egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24);
     match dialog {
-        Dialog::Delete { message } => {
-            let id = *message;
-            let Some(m) = chat.iter().find(|m| m.id == id) else { return vec![Do::Close] };
+        Dialog::Delete { messages } => {
+            let chosen: Vec<&Message> = messages.iter().filter_map(|id| chat.iter().find(|m| m.id == *id)).collect();
+            if chosen.is_empty() {
+                return vec![Do::Close];
+            }
             let note_to_self = c.kind == ConversationKind::NoteToSelf;
             let now = chrono::Utc::now().timestamp_millis();
-            let for_everyone = langis_core::deletes::can_send(m, note_to_self, now);
-            let modal = egui::Modal::new(egui::Id::unique("delete-message")).frame(frame).show(ui.ctx(), |ui| {
-                ui.set_width(360.);
-                ui.label(RichText::new("Delete message?").font(theme::semibold(18.)));
-                ui.add_space(8.);
-                let text = if note_to_self {
-                    "This message will be deleted from all your devices."
-                } else {
-                    "Who would you like to delete this message for?"
-                };
-                ui.label(RichText::new(text).color(palette.text_secondary));
-                ui.add_space(16.);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if for_everyone && widgets::pill_button(ui, "Delete for everyone", true).clicked() {
-                        out.push(Do::Command(Command::DeleteForEveryone { message_id: id }));
-                    }
-                    let label = if note_to_self { "Delete" } else { "Delete for me" };
-                    if widgets::pill_button(ui, label, !for_everyone).clicked() {
-                        out.push(Do::Command(Command::DeleteForMe { message_ids: vec![id] }));
-                    }
-                    if widgets::pill_button(ui, "Cancel", false).clicked() {
-                        out.push(Do::Close);
-                    }
-                });
-            });
-            if modal.should_close() || !out.is_empty() {
-                out.push(Do::Close);
+            let for_everyone = chosen.iter().all(|m| langis_core::deletes::can_send(m, note_to_self, now));
+            let n = chosen.len();
+            let title = if n == 1 { "Delete selected message?".to_owned() } else { format!("Delete selected {n} messages?") };
+            let body = match (note_to_self, n) {
+                (true, 1) => "This message will be deleted from all your devices.",
+                (true, _) => "These messages will be deleted from all your devices.",
+                (false, 1) => "Who would you like to delete this message for?",
+                (false, _) => "Who would you like to delete these messages for?",
+            };
+            let mut actions = vec![(if note_to_self { "Delete" } else { "Delete for me" }, crate::dialog::Variant::SubtleDestructive)];
+            if for_everyone && !note_to_self {
+                actions.push(("Delete for everyone", crate::dialog::Variant::SubtleDestructive));
             }
+            let ids: Vec<i64> = chosen.iter().map(|m| m.id).collect();
+            match crate::dialog::show(ui.ctx(), egui::Id::unique("delete-messages"), &title, body, Some("Cancel"), &actions) {
+                Some(crate::dialog::Answer::Action(0)) => out.push(Do::Command(Command::DeleteForMe { message_ids: ids })),
+                Some(crate::dialog::Answer::Action(_)) => {
+                    for message_id in ids {
+                        out.push(Do::Command(Command::DeleteForEveryone { message_id }));
+                    }
+                }
+                Some(crate::dialog::Answer::Cancel) => {}
+                None => return out,
+            }
+            out.push(Do::Close);
         }
         Dialog::Pin { message, choice } => {
             let id = *message;

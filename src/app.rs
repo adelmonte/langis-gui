@@ -111,6 +111,8 @@ pub struct App {
     pub message_search: crate::search::Global,
     /// The chat header's search button was pressed.
     pub find_requested: bool,
+    /// The header menu asked for select mode in the open chat.
+    pub select_requested: bool,
     pub selected: Option<ConversationId>,
     pub chat: Option<ChatView>,
     pub names: HashMap<String, String>,
@@ -183,6 +185,7 @@ impl App {
             search: String::new(),
             message_search: Default::default(),
             find_requested: false,
+            select_requested: false,
             selected: None,
             chat: None,
             names: HashMap::new(),

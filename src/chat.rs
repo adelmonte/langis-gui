@@ -26,6 +26,8 @@ const GROUP_GAP_MS: i64 = 3 * 60 * 1000;
 
 pub struct ChatView {
     pub id: ConversationId,
+    /// Desktop's select mode: the chosen messages, in the order chosen.
+    pub selected: Option<Vec<i64>>,
     /// Oldest first.
     pub messages: Vec<Message>,
     pub loaded: bool,
@@ -127,6 +129,7 @@ impl ChatView {
     pub fn new(id: ConversationId, draft: String) -> Self {
         Self {
             id,
+            selected: None,
             messages: Vec::new(),
             loaded: false,
             loading_older: false,
@@ -291,9 +294,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if std::mem::take(&mut app.find_requested) || ctrl_f {
         chat.find = Some(crate::search::Find::open());
     }
+    if std::mem::take(&mut app.select_requested) {
+        chat.selected = Some(Vec::new());
+    }
+    if chat.selected.is_some() && chat.dialog.is_none() && chat.popup.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        chat.selected = None;
+    }
     crate::search::find_bar(app, ui, &palette, &mut chat);
     pinned_bar(app, ui, &palette, &mut chat);
-    if !crate::panes::message_request_bar(app, ui, &palette, &conversation) {
+    if chat.selected.is_some() {
+        select_bar(app, ui, &palette, &mut chat);
+    } else if !crate::panes::message_request_bar(app, ui, &palette, &conversation) {
         crate::composer::show(app, ui, &palette, &mut chat, &conversation);
     }
     let mut actions = Vec::new();
@@ -423,7 +434,13 @@ fn popups(app: &mut App, ui: &mut Ui) {
                     chat.start_editing(app, m.clone());
                 }
             }
-            Do::Command(command) => app.send(command),
+            Do::Command(command) => {
+                // A selection's delete or forward is done with it.
+                if !from_popup {
+                    chat.selected = None;
+                }
+                app.send(command);
+            }
             Do::Copy(text) => {
                 ui.ctx().copy_text(text);
                 app.toast("Copied to clipboard");
@@ -438,6 +455,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
                 chat.popup = Some(Popup::Reactions { message: id, at, full: false, picker: Default::default() });
                 replaced = true;
             }
+            Do::Select(id) => chat.selected = Some(vec![id]),
             Do::Open(dialog) => {
                 if let crate::actions::Dialog::Info { message, .. } = &dialog {
                     crate::actions::load_details(app, *message);
@@ -627,7 +645,8 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         let menu_for = chat.popup.as_ref().map(|p| match p {
             crate::actions::Popup::Menu { message, .. } | crate::actions::Popup::Reactions { message, .. } => *message,
         });
-        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for };
+        let selecting = chat.selected.is_some();
+        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting };
         let messages = &chat.messages;
         let mut reached = None;
         for (i, m) in messages.iter().enumerate() {
@@ -644,6 +663,11 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 }
             }
             let area = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+            if let Some(selected) = chat.selected.as_mut()
+                && m.notice.is_none()
+            {
+                select_row(ui, palette, area, m.id, selected);
+            }
             if chat.scroll_target == Some(m.id) {
                 ui.scroll_to_rect_animation(area, Some(egui::Align::Center), egui::style::ScrollAnimation::none());
                 reached = Some(m.id);
@@ -712,6 +736,9 @@ struct Ctx<'a> {
     chat_id: &'a ConversationId,
     /// The message whose menu or reaction bar is open: its hover bar stays.
     menu_for: Option<i64>,
+    /// In select mode: the bubbles take no input, and incoming ones make
+    /// room for the checkbox.
+    selecting: bool,
 }
 
 /// The top of a chat's history: Desktop's `ConversationHero`.
@@ -773,6 +800,8 @@ fn message(
     let show_avatar = ctx.group && !outgoing;
     let avatar_col = if show_avatar { 36. } else { 0. };
     let side = 16.;
+    // Desktop's `translate: 16px + 22px` for incoming bubbles in select mode.
+    let lead = side + if ctx.selecting && !outgoing { 38. } else { 0. };
     let max_bubble = ((ctx.width - side * 2. - avatar_col) * 0.75).clamp(220., 480.);
     let in_color = if outgoing { palette.bubble_out_text() } else { palette.text };
     let meta_color = if outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
@@ -833,7 +862,7 @@ fn message(
     if let Some(s) = sticker {
         let size = Vec2::splat(144.);
         let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, size.y + 18.), Sense::hover());
-        let x = if outgoing { row.right() - side - size.x } else { row.left() + side + avatar_col };
+        let x = if outgoing { row.right() - side - size.x } else { row.left() + lead + avatar_col };
         let rect = Rect::from_min_size(Pos2::new(x, row.top()), size);
         if let Some(path) = s.local_path.as_deref().or(s.thumbnail_path.as_deref()) {
             egui::Image::new(format!("file://{path}")).maintain_aspect_ratio(true).paint_at(ui, rect);
@@ -857,7 +886,7 @@ fn message(
         let at = Pos2::new(if outgoing { rect.right() - meta_w } else { rect.left() }, rect.bottom() + 2.);
         ui.painter().galley(at, meta, palette.text_secondary);
         if show_avatar && !collapsed_below {
-            avatar_for(ui, ctx, m, Pos2::new(row.left() + side, rect.bottom() - 28.));
+            avatar_for(ui, ctx, m, Pos2::new(row.left() + lead, rect.bottom() - 28.));
         }
         return None;
     }
@@ -907,7 +936,7 @@ fn message(
     let reactions_h = if reactions { 18. } else { 0. };
     let failed_h = if m.status == DeliveryStatus::Failed { 18. } else { 0. };
     let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, bubble_h + reactions_h + failed_h), Sense::hover());
-    let x = if outgoing { row.right() - side - bubble_w } else { row.left() + side + avatar_col };
+    let x = if outgoing { row.right() - side - bubble_w } else { row.left() + lead + avatar_col };
     let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(bubble_w, bubble_h));
     let response = ui.interact(bubble, ui.scope_id().with(("bubble", m.id)), Sense::click());
 
@@ -1056,14 +1085,15 @@ fn message(
         }
     }
     if show_avatar && !collapsed_below {
-        avatar_for(ui, ctx, m, Pos2::new(row.left() + side, bubble.bottom() - 28.));
+        avatar_for(ui, ctx, m, Pos2::new(row.left() + lead, bubble.bottom() - 28.));
     }
 
     // Desktop's hover bar: react, reply and more, beside the bubble; and
     // its context menu on right-click.
     let hover_zone = Rect::from_min_max(Pos2::new(row.left(), bubble.top()), Pos2::new(row.right(), bubble.bottom()));
     let menu_open = ctx.menu_for == Some(m.id);
-    if (ui.rect_contains_pointer(hover_zone) || menu_open)
+    if !ctx.selecting
+        && (ui.rect_contains_pointer(hover_zone) || menu_open)
         && let Some((what, at)) = crate::actions::hover_bar(ui, palette, m.id, bubble, outgoing)
     {
         actions.push(match what {
@@ -1072,7 +1102,7 @@ fn message(
             _ => Action::Menu { message_id: m.id, at },
         });
     }
-    if response.secondary_clicked() {
+    if !ctx.selecting && response.secondary_clicked() {
         let at = response.interact_pointer_pos().unwrap_or(bubble.center());
         actions.push(Action::Menu { message_id: m.id, at });
     }
@@ -1510,6 +1540,69 @@ mod tests {
     }
 }
 
+/// A message in select mode: the whole row toggles it, with Desktop's
+/// checkbox (`module-message__select-checkbox`) and tint.
+fn select_row(ui: &mut Ui, palette: &Palette, area: Rect, id: i64, selected: &mut Vec<i64>) {
+    let on = selected.contains(&id);
+    let response = ui.interact(area, egui::Id::unique("select-row").with(id), Sense::click());
+    if on {
+        // `rgba($color-ultramarine, 8%)`.
+        ui.painter().rect_filled(area, 0, Color32::from_rgba_unmultiplied(0x2c, 0x6b, 0xed, 20));
+    }
+    let center = Pos2::new(area.left() + 16. + 10., area.center().y);
+    if on {
+        ui.painter().circle_filled(center, 10., theme::rgb(0x2c6bed));
+        theme::paint_symbol(ui.painter(), "check", center, 14., Color32::WHITE);
+    } else {
+        ui.painter().circle_stroke(center, 9.5, egui::Stroke::new(1., if palette.dark { theme::rgb(0x5e5e5e) } else { theme::rgb(0xdedede) }));
+    }
+    if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        if on {
+            selected.retain(|x| *x != id);
+        } else {
+            selected.push(id);
+        }
+    }
+}
+
+/// Desktop's `SelectModeActions`, in the composer's place: exit, the
+/// count, delete and forward.
+fn select_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
+    let chosen: Vec<i64> = chat.selected.clone().unwrap_or_default();
+    egui::Panel::bottom("select-mode")
+        .exact_size(54.)
+        .show_separator_line(false)
+        .frame(egui::Frame::new().fill(palette.background))
+        .show(ui, |ui| {
+            let rect = ui.max_rect();
+            let icon = if palette.dark { theme::rgb(0xe9e9e9) } else { theme::rgb(0x3b3b3b) };
+            let disabled = if palette.dark { theme::rgb(0x5e5e5e) } else { theme::rgb(0xb9b9b9) };
+            let button = |ui: &mut Ui, x: f32, symbol: &str, label: &str, enabled: bool| {
+                let r = Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(44.));
+                let response = ui.interact(r, egui::Id::unique("select-bar").with(label), Sense::click());
+                theme::paint_symbol(ui.painter(), symbol, r.center(), 20., if enabled { icon } else { disabled });
+                response.on_hover_text(label).clicked() && enabled
+            };
+            if button(ui, rect.left() + 4. + 22., "x", "Exit select mode", true) {
+                chat.selected = None;
+            }
+            let forwardable = !chosen.is_empty()
+                && chosen.iter().all(|id| chat.messages.iter().find(|m| m.id == *id).is_some_and(|m| !m.deleted && m.view_once.is_none() && m.poll.is_none() && m.notice.is_none()));
+            if button(ui, rect.right() - 4. - 22., "forward", "Forward selected messages", forwardable) {
+                if chosen.len() > 30 {
+                    app.toast("You can only forward up to 30 messages");
+                } else {
+                    chat.dialog = Some(crate::actions::Dialog::Forward { messages: chosen.clone(), query: String::new(), chosen: Vec::new() });
+                }
+            }
+            if button(ui, rect.right() - 4. - 44. - 22., "trash", "Delete selected messages", !chosen.is_empty()) {
+                chat.dialog = Some(crate::actions::Dialog::Delete { messages: chosen.clone() });
+            }
+            let text = format!("{} selected", chosen.len());
+            ui.painter().text(Pos2::new(rect.left() + 4. + 44. + 10., rect.center().y), egui::Align2::LEFT_CENTER, text, theme::regular(14.), if palette.dark { theme::rgb(0xbebebe) } else { theme::rgb(0x5e5e5e) });
+        });
+}
+
 /// Desktop's `HeaderDropdownMenuContent` for an accepted chat.
 fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::Conversation) {
     use langis_core::ChatChange;
@@ -1539,6 +1632,10 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
         }
         if m.item(Some("album"), "All media") {
             crate::details::open_media(app, id.clone());
+        }
+        m.separator();
+        if m.item(Some("check-circle"), "Select messages") {
+            app.select_requested = true;
         }
         m.separator();
         if !c.marked_unread && m.item(Some("message-badge"), "Mark as unread") {
