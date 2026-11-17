@@ -414,3 +414,32 @@ fn screenshots_nav_collapsed() {
     wait(&mut harness, "the calls tab", |_| true);
     save(&mut harness, "nav-collapsed-calls");
 }
+
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_menus() {
+    let mut harness = demo_harness();
+    harness.state().ctx.set_theme(egui::ThemePreference::Dark);
+    open_chat(&mut harness, langis_store::ConversationKind::Direct);
+    let ctx = harness.state().ctx.clone();
+    let more = egui::Rect::from_center_size(egui::pos2(1172., 26.), egui::vec2(28., 28.));
+    crate::menu::open_below(&ctx, egui::Id::unique("chat-header-menu"), more);
+    wait(&mut harness, "the header menu", |_| true);
+    save(&mut harness, "menu-header");
+    // Hover the first row, the disappearing messages submenu.
+    let panel = ctx.memory(|m| m.area_rect(egui::Id::unique("chat-header-menu").with("panel"))).expect("menu panel");
+    harness.event(egui::Event::PointerMoved(egui::pos2(panel.left() + 60., panel.top() + 21.)));
+    wait(&mut harness, "the submenu", |_| true);
+    save(&mut harness, "menu-header-sub");
+    crate::menu::close(&ctx, egui::Id::unique("chat-header-menu"));
+    let row = egui::pos2(150., 420.);
+    let id = harness.state().conversations.iter().find(|c| c.kind == langis_store::ConversationKind::Direct).map(|c| c.id.clone()).unwrap();
+    crate::menu::open_at(&ctx, egui::Id::unique("chat-list-menu").with(&id.0), row);
+    wait(&mut harness, "the chat menu", |_| true);
+    save(&mut harness, "menu-chat-list");
+    harness.state_mut().panes.delete_chat = Some((id, false));
+    crate::menu::close(&ctx, egui::Id::unique("chat-list-menu"));
+    wait(&mut harness, "the delete dialog", |_| true);
+    save(&mut harness, "dialog-delete-chat");
+}
+

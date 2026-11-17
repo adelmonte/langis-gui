@@ -190,7 +190,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     if row.clicked() {
                         open = Some(c.id.clone());
                     }
-                    row.context_menu(|ui| crate::panes::chat_menu(app, ui, c));
+                    crate::menu::context(ui, &row, egui::Id::unique("chat-list-menu").with(&c.id.0), |m| crate::panes::chat_menu(app, m, c));
                 }
                 // Desktop's "Archived chats (n)" at the end of the list.
                 let archived = app.conversations.iter().filter(|c| c.archived).count();

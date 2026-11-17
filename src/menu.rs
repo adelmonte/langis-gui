@@ -1,7 +1,7 @@
 //! Desktop's menus: `AxoDropdownMenu` and `AxoContextMenu`, both drawn by
 //! `AxoBaseMenu` (`ts/axo/_internal/AxoBaseMenu.dom.tsx`) on Radix.
 //!
-//! A panel is 200 to 300px wide with 6px padding, `material-tertiary`,
+//! A panel is 200 to 300px wide with 6px padding, `material-tertiary` (opaque, as egui can't blur behind it),
 //! `curved-xl` corners and `shadow-elevation-3`. Rows are 6px padded, 13px
 //! text on an 18px line, with a leading column for 16px symbols or 14px
 //! checks shared by every row of the panel. Submenus open on hover beside
@@ -156,7 +156,7 @@ fn panel(ctx: &egui::Context, root: Id, id: Id, depth: usize, pos: Pos2, state: 
     let palette = Palette::of(ctx);
     let last = measure(ctx, id);
     let width = last.width.clamp(MIN_W, MAX_W);
-    let fill = if palette.dark { Color32::from_rgba_unmultiplied(0x2a, 0x2a, 0x2a, 245) } else { Color32::from_rgba_unmultiplied(0xef, 0xef, 0xef, 245) };
+    let fill = if palette.dark { Color32::from_rgb(0x2a, 0x2a, 0x2a) } else { Color32::from_rgb(0xef, 0xef, 0xef) };
     let outline = if palette.dark { Color32::TRANSPARENT } else { Color32::from_black_alpha(31) };
     let shadow = Shadow { offset: [0, 6], blur: 16, spread: 0, color: Color32::from_black_alpha(if palette.dark { 61 } else { 31 }) };
     let response = egui::Area::new(id.with("panel")).order(Order::Tooltip).fixed_pos(pos).show(ctx, |ui| {

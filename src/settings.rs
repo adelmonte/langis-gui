@@ -80,7 +80,7 @@ pub struct SettingsView {
     custom_quality: Option<ShareQuality>,
     /// A chat folder being made or changed: its id (new or existing) and
     /// what it holds.
-    folder: Option<(String, bool, langis_store::ChatFolderParams)>,
+    pub folder: Option<(String, bool, langis_store::ChatFolderParams)>,
     confirm_unlink: bool,
 }
 
@@ -565,7 +565,7 @@ fn folder_editor(app: &mut App, ui: &mut Ui, palette: &Palette) {
 }
 
 /// A new folder's id (a random UUID, as Desktop makes them).
-fn new_id() -> String {
+pub fn new_id() -> String {
     use std::io::Read as _;
     let mut b = [0u8; 16];
     if let Ok(mut f) = std::fs::File::open("/dev/urandom") {

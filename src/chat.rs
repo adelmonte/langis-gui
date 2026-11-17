@@ -1515,7 +1515,7 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
             m.sub(Some("timer"), "Disappearing messages", |m| {
                 // expirationTimer.DEFAULT_DURATIONS_IN_SECONDS
                 for seconds in [0u32, 2_419_200, 604_800, 86_400, 28_800, 3_600, 300, 30] {
-                    let label = if seconds == 0 { "off".to_owned() } else { crate::format::timer_long(seconds) };
+                    let label = if seconds == 0 { "Off".to_owned() } else { crate::format::timer_long(seconds) };
                     if m.check(c.expire_timer == seconds, &label) {
                         app.send(Command::SetExpireTimer { conversation: id.clone(), seconds });
                     }
@@ -1527,14 +1527,7 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
                 app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(0) });
             }
         } else {
-            m.sub(Some("bell-slash"), "Mute notifications", |m| {
-                m.label("Mute this chat for…");
-                for (label, until) in crate::panes::mute_choices(false) {
-                    if m.item(None, label) {
-                        app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(until) });
-                    }
-                }
-            });
+            m.sub(Some("bell-slash"), "Mute notifications", |m| crate::panes::mute_items(app, m, &id));
         }
         if m.item(Some("settings"), if group { "Group settings" } else { "Chat settings" }) {
             crate::details::open(app, id.clone());
@@ -1550,8 +1543,8 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(!c.archived) });
         }
         if m.item(Some("trash"), "Delete") {
-            app.panes.details = None;
-            app.send(Command::DeleteConversation { conversation: id.clone() });
+            let member = group && !c.left && !c.ended;
+            app.panes.delete_chat = Some((id.clone(), member));
         }
     });
 }

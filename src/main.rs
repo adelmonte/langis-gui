@@ -8,6 +8,7 @@ mod calls_tab;
 mod chat;
 mod composer;
 mod details;
+mod dialog;
 mod emoji_picker;
 mod format;
 mod fun;

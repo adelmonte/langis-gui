@@ -46,6 +46,8 @@ pub struct Panes {
     pub folders: Vec<ChatFolder>,
     /// The folder shown (`None`: all chats).
     pub folder: Option<String>,
+    /// A chat waiting on "Delete chat?", and whether we're still in it.
+    pub delete_chat: Option<(ConversationId, bool)>,
     pub menu_for: Option<ConversationId>,
 
     // The account's alerts.
@@ -432,55 +434,92 @@ pub fn visible(app: &App, c: &Conversation) -> bool {
     }
 }
 
-/// A chat's right-click menu (Desktop's `ConversationListItem` context menu).
-pub fn chat_menu(app: &mut App, ui: &mut Ui, c: &Conversation) {
+/// A chat's right-click menu: Desktop's
+/// `LeftPaneConversationListItemContextMenu`.
+pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
     use langis_core::ChatChange;
     let id = c.id.clone();
-    if menu_row(ui, None, if c.pinned { "Unpin chat" } else { "Pin chat" }, false).clicked() {
-        app.send(Command::SetPinned { conversation: id.clone(), pinned: !c.pinned });
-        ui.close();
-    }
-    if menu_row(ui, None, if c.archived { "Unarchive" } else { "Archive" }, false).clicked() {
-        app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(!c.archived) });
-        ui.close();
-    }
-    if c.unread_count > 0 || c.marked_unread {
-        if menu_row(ui, None, "Mark as read", false).clicked() {
-            app.send(Command::MarkRead { conversation: id.clone() });
-            if c.marked_unread {
-                app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(false) });
-            }
-            ui.close();
+    let unread = c.unread_count > 0 || c.marked_unread;
+    if c.unread_count > 0 && m.item(Some("message-check"), "Mark read") {
+        app.send(Command::MarkRead { conversation: id.clone() });
+        if c.marked_unread {
+            app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(false) });
         }
-    } else if menu_row(ui, None, "Mark as unread", false).clicked() {
+    }
+    if !unread && m.item(Some("message-badge"), "Mark as unread") {
         app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(true) });
-        ui.close();
     }
-    ui.menu_button(RichText::new(if c.muted { "Unmute" } else { "Mute notifications" }).font(theme::regular(14.)), |ui| {
-        for (label, until) in mute_choices(c.muted) {
-            if menu_row(ui, None, label, false).clicked() {
-                app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(until) });
-                ui.close();
-            }
+    if m.item(Some(if c.pinned { "pin-slash" } else { "pin" }), if c.pinned { "Unpin chat" } else { "Pin chat" }) {
+        app.send(Command::SetPinned { conversation: id.clone(), pinned: !c.pinned });
+    }
+    if c.muted {
+        if m.item(Some("bell"), "Unmute") {
+            app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(0) });
         }
-    });
+    } else {
+        m.sub(Some("bell-slash"), "Mute notifications", |m| mute_items(app, m, &id));
+    }
+    let all_chats = app.panes.folder.is_none();
     let custom: Vec<ChatFolder> = app.panes.folders.iter().filter(|f| f.folder_type == langis_store::ChatFolderType::Custom).cloned().collect();
-    if !custom.is_empty() {
-        ui.menu_button(RichText::new("Add to folder").font(theme::regular(14.)), |ui| {
-            for f in custom {
+    if all_chats && !custom.is_empty() {
+        m.sub(Some("folder-plus"), "Add to folder", |m| {
+            for f in &custom {
                 let inside = f.included.contains(&id);
-                if menu_row(ui, inside.then_some(Icon::Check), &f.name, false).clicked() {
+                if m.check(inside, &f.name) {
                     app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::ToggleChat { id: f.id.clone(), chat: id.clone(), add: !inside }));
-                    ui.close();
                 }
+            }
+            if m.item(Some("plus"), "Create folder") {
+                let params = langis_store::ChatFolderParams { included: vec![id.clone()], ..langis_store::ChatFolderParams::defaults() };
+                app.settings.folder = Some((crate::settings::new_id(), true, params));
+                app.settings.section = crate::settings::Section::ChatFolders;
+                app.tab = crate::app::Tab::Settings;
             }
         });
     }
-    ui.separator();
-    if menu_row(ui, None, "Delete", true).clicked() {
-        app.panes.details = None;
-        app.send(Command::DeleteConversation { conversation: id });
-        ui.close();
+    if let Some(folder) = app.panes.folder.clone()
+        && m.item(Some("folder-minus"), "Remove from folder")
+    {
+        app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::ToggleChat { id: folder, chat: id.clone(), add: false }));
+    }
+    if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { "Unarchive" } else { "Archive" }) {
+        app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(!c.archived) });
+    }
+    if m.item(Some("trash"), "Delete") {
+        let member = c.kind == langis_store::ConversationKind::Group && !c.left && !c.ended;
+        app.panes.delete_chat = Some((id, member));
+    }
+}
+
+/// Desktop's `MuteNotificationsMenuItems` for a chat that isn't muted.
+pub fn mute_items(app: &mut App, m: &mut crate::menu::Menu, id: &ConversationId) {
+    m.label("Mute this chat for…");
+    for (label, until) in mute_choices(false) {
+        if m.item(None, label) {
+            app.send(Command::SetChat { conversation: id.clone(), change: langis_core::ChatChange::MutedUntil(until) });
+        }
+    }
+}
+
+/// Desktop's `DeleteMessagesConfirmationDialog`, for a chat deleted from a
+/// menu.
+pub fn delete_chat_dialog(app: &mut App, ctx: &egui::Context) {
+    let Some((id, member)) = app.panes.delete_chat.clone() else { return };
+    let description = if member {
+        "All messages in this chat will be deleted from all your devices. You will still be a member of this group."
+    } else {
+        "All messages in this chat will be deleted from all your devices."
+    };
+    match crate::dialog::confirm(ctx, egui::Id::unique("delete-chat"), "Delete chat?", description, "Delete", crate::dialog::Variant::StrongDestructive) {
+        Some(crate::dialog::Choice::Action) => {
+            app.panes.delete_chat = None;
+            if app.panes.details.as_ref().is_some_and(|d| d.conversation == id) {
+                app.panes.details = None;
+            }
+            app.send(Command::DeleteConversation { conversation: id });
+        }
+        Some(crate::dialog::Choice::Cancel) => app.panes.delete_chat = None,
+        None => {}
     }
 }
 
@@ -491,7 +530,8 @@ pub fn mute_choices(muted: bool) -> Vec<(&'static str, i64)> {
     }
     let now = chrono::Utc::now().timestamp_millis();
     let hour = 3_600_000;
-    vec![("Mute for one hour", now + hour), ("Mute for eight hours", now + 8 * hour), ("Mute for one day", now + 24 * hour), ("Mute for one week", now + 7 * 24 * hour), ("Mute always", i64::MAX)]
+    // getMuteValuesOptions, without "Until…" for now.
+    vec![("1 hour", now + hour), ("8 hours", now + 8 * hour), ("1 day", now + 24 * hour), ("1 week", now + 7 * 24 * hour), ("Always", i64::MAX)]
 }
 
 /// The chat list's "More" menu.

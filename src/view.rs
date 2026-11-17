@@ -42,6 +42,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     crate::panes::overlays(app, ui);
     safety_dialog(app, ui);
     share_picker(app, ui);
+    crate::panes::delete_chat_dialog(app, ui.ctx());
     crate::fun::dialogs(app, ui);
     crate::lightbox::show(app, ui);
     toasts(app, ui);
