@@ -46,6 +46,11 @@ pub enum Answer {
 /// The dialog with a footer of `cancel` (when given) and `actions`: two
 /// buttons share a row; more stack, full width.
 pub fn show(ctx: &egui::Context, id: Id, title: &str, description: &str, cancel: Option<&str>, actions: &[(&str, Variant)]) -> Option<Answer> {
+    show_with(ctx, id, title, description, cancel, actions, |_| {})
+}
+
+/// `show`, with more under the description (`AxoDialog.Body`), 24 in.
+pub fn show_with(ctx: &egui::Context, id: Id, title: &str, description: &str, cancel: Option<&str>, actions: &[(&str, Variant)], body: impl FnOnce(&mut egui::Ui)) -> Option<Answer> {
     let palette = Palette::of(ctx);
     let screen = ctx.content_rect();
     let overlay = if palette.dark { Color32::from_black_alpha(122) } else { Color32::from_black_alpha(61) };
@@ -83,6 +88,10 @@ pub fn show(ctx: &egui::Context, id: Id, title: &str, description: &str, cancel:
                 let (r, _) = ui.allocate_exact_size(Vec2::new(width, desc_g.size().y), Sense::hover());
                 painter.galley(Pos2::new(r.left() + 24., r.top()), desc_g, palette.text_secondary);
             }
+            egui::Frame::new().inner_margin(egui::Margin { left: 24, right: 24, top: 0, bottom: 0 }).show(ui, |ui| {
+                ui.set_width(inner);
+                body(ui);
+            });
             ui.add_space(16.);
             let side_by_side = buttons.len() <= 2;
             let rows = if side_by_side { 1 } else { buttons.len() };
