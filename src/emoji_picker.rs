@@ -31,6 +31,12 @@ impl Picker {
             let options = langis_emoji::SearchOptions { limit: 90, ..Default::default() };
             langis_emoji::search(self.query.trim(), &options).into_iter().map(|m| m.emoji).collect()
         };
+        // Desktop draws every emoji from its own sheet; here the system font
+        // does, so leave out what it is too old to have.
+        let font = theme::emoji(24.);
+        let emoji: Vec<_> = ui.ctx().fonts_mut(|f| {
+            emoji.into_iter().filter(|e| e.glyph.chars().filter(|c| !matches!(c, '\u{200d}' | '\u{fe0f}' | '\u{fe0e}' | '\u{20e3}')).all(|c| f.has_glyph(&font, c))).collect()
+        });
         egui::ScrollArea::vertical().max_height(270.).auto_shrink([false, false]).show(ui, |ui| {
             for row in emoji.chunks(COLUMNS) {
                 ui.horizontal(|ui| {
