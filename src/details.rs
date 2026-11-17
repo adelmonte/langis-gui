@@ -259,7 +259,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
         });
     });
-    egui::Popup::new(egui::Id::unique("details-mute"), ui.ctx().clone(), egui::PopupAnchor::Pointer, egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("details-mute-layer")))
+    egui::Popup::new(egui::Id::unique("details-mute"), ui.ctx().clone(), egui::PopupAnchor::PointerFixed, egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("details-mute-layer")))
         .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
         .show(|ui| {
             for (label, until) in crate::panes::mute_choices(false) {
