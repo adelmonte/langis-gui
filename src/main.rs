@@ -22,6 +22,7 @@ mod profile;
 mod screenshots;
 #[cfg(test)]
 mod screenshots_b;
+mod scroll;
 mod search;
 mod settings;
 mod sidebar;

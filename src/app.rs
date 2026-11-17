@@ -132,6 +132,7 @@ pub struct App {
     pub notify: (bool, String),
     /// Desktop's collapsed nav tabs: the toggle moves into the list header.
     pub nav_collapsed: bool,
+    momentum: crate::scroll::Momentum,
     /// Our profile name and photo, for the nav avatar and mentions of us.
     pub me: (String, Option<String>),
     /// The calls and stories tabs, chat details, dialogs and menus.
@@ -194,6 +195,7 @@ impl App {
             focused: true,
             notify: (true, "all".into()),
             nav_collapsed: false,
+            momentum: Default::default(),
             me: (String::new(), None),
             panes: Default::default(),
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
@@ -742,16 +744,15 @@ impl eframe::App for App {
         crate::view::show(self, ui);
     }
 
-    /// Touchpads report scrolling in points, which egui moves one to one;
-    /// that crawls next to Chromium. `LANGIS_SCROLL_SPEED` overrides 2.5.
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    /// Touchpad scrolling as Chromium's (`scroll.rs`). `LANGIS_SCROLL_SPEED`
+    /// overrides the 2.5 times speed.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         static SPEED: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| {
             std::env::var("LANGIS_SCROLL_SPEED").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| *v > 0.).unwrap_or(2.5)
         });
-        for event in &mut raw_input.events {
-            if let egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, .. } = event {
-                *delta *= *SPEED;
-            }
+        self.momentum.apply(raw_input, *SPEED);
+        if self.momentum.flinging() {
+            ctx.request_repaint();
         }
     }
 
