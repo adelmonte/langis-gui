@@ -75,6 +75,7 @@ pub fn dropdown(ui: &Ui, trigger: &egui::Response, id: Id, add: impl FnOnce(&mut
 }
 
 /// Opens a dropdown below `rect` without a click on a trigger.
+#[cfg(test)]
 pub fn open_below(ctx: &egui::Context, id: Id, rect: Rect) {
     set_state(ctx, id, State { anchor: Some(Anchor::Below(rect)), ..Default::default() });
 }
@@ -211,24 +212,9 @@ impl Menu<'_> {
         self.row(symbol.map_or(Lead::None, Lead::Symbol), None, label, None, true)
     }
 
-    /// An `Item` that can't be chosen.
-    pub fn item_disabled(&mut self, symbol: Option<&str>, label: &str) -> bool {
-        self.row(symbol.map_or(Lead::None, Lead::Symbol), None, label, None, false)
-    }
-
-    /// `Item` with a secondary line under the label.
-    pub fn item_described(&mut self, symbol: Option<&str>, label: &str, description: &str) -> bool {
-        self.row(symbol.map_or(Lead::None, Lead::Symbol), None, label, Some(description), true)
-    }
-
     /// `CheckboxItem` and `RadioItem`: a check before the label when chosen.
     pub fn check(&mut self, checked: bool, label: &str) -> bool {
         self.row(Lead::Check(checked), None, label, None, true)
-    }
-
-    /// A `CheckboxItem` with a symbol before its label.
-    pub fn check_symbol(&mut self, checked: bool, symbol: &str, label: &str) -> bool {
-        self.row(Lead::Check(checked), Some(symbol), label, None, true)
     }
 
     /// `Label`: small secondary text, not choosable.
