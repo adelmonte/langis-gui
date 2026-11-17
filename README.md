@@ -17,20 +17,39 @@ Early. Checked so far:
   (below) are compared against Signal Desktop by eye.
 - Nothing has run against a real account yet.
 
-Works: linking with a QR code; a passphrase or key file for the database;
-the chat list with search, unread counts, drafts and typing; the timeline
-with grouped bubbles, day headers, delivery status, reactions, quotes,
-photos, files, link previews, mentions and text styles; sending text,
-photos and files, replies and reactions; the safety number prompt
-("Send anyway"); incoming calls, the call screen with video, mute,
-camera, present and hang up; group call tiles; desktop notifications;
-settings for theme, chats, calls (devices, screen share quality),
-notifications, privacy and auto-download.
+What's in place (each screen checked by screenshot on demo data; clicks
+in a real window and a real account are not tested yet):
 
-Not yet: stories, the calls tab, new chat and group creation, chat
-details and menus, editing and deleting messages, voice messages, stickers
-and GIF pickers, polls, the image viewer, message search results, and
-anything else Desktop does past the list above.
+- **Start:** a passphrase or key file for the database, linking by QR
+  code, a clear message if another copy is already running.
+- **Chats:** the chat list with search (chats and message results),
+  folders, archive, pin, mute, mark read, message requests, megaphones;
+  new chat by name, number or username, new group, pasted group and call
+  links.
+- **Conversation:** Desktop's bubbles, day headers, delivery status, the
+  disappearing timer, reactions, quotes, photos, files, voice messages,
+  stickers, polls, link previews, mentions and text styles; hover bar and
+  context menu (reply, react, copy, forward, edit, delete for me or
+  everyone, pin, info, save); search in the chat (Ctrl+F); the photo and
+  video viewer; view-once.
+- **Composer:** formatting, @mentions, link previews, attachments,
+  view-once, polls, voice recording (needs `ffmpeg`), emoji, sticker and
+  GIF picker, drafts, editing.
+- **Chat details:** members and admins, permissions, group link and
+  requests, disappearing timer, mute, block, nickname, safety number with
+  its QR code, leave or end group, delete.
+- **Calls:** 1:1 and group calls, the lobby, video tiles, mute, camera,
+  screen sharing through the desktop's picker (quality in Settings), raise
+  hand, reactions, call links, the calls tab with history.
+- **Stories:** the list, the viewer, replies and reactions, posting text
+  and photo stories, story privacy.
+- **Profile and settings:** name, about, photo, username and its link;
+  appearance, chats, calls, notifications, privacy, data usage, chat
+  folders, and unlinking this device. Desktop notifications.
+
+Not yet: video stories don't play in the viewer, chat folders can't be
+reordered, and Signal links from other apps aren't handed over (paste
+them into New chat).
 
 ## Building
 
