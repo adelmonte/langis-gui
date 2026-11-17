@@ -8,6 +8,8 @@
 use egui::{Color32, CornerRadius, Painter, Pos2, Rect};
 use langis_store::{ChatColor, ChatColors, ConversationId, CustomColor, HueSaturation};
 
+use langis_core::Command;
+
 use crate::app::{App, Loaded};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -163,6 +165,138 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 pub fn paint_swatch(painter: &Painter, center: Pos2, radius: f32, bubble: Bubble) {
     let rect = Rect::from_center_size(center, egui::Vec2::splat(radius * 2.));
     paint(painter, rect, CornerRadius::same(radius.round() as u8), bubble, rect);
+}
+
+/// Desktop's `ChatColorPicker`: a preview, the presets and custom colors,
+/// and resetting. For one chat (`chat`), or the default for all.
+pub fn picker(app: &mut App, ui: &mut egui::Ui, chat: Option<ConversationId>) {
+    use egui::{Sense, Stroke, Vec2};
+    use langis_store::ChatColorEdit;
+
+    use crate::axo_list::{self, End, Item};
+    use crate::theme;
+
+    let palette = crate::theme::Palette::of(ui.ctx());
+    let colors = app.chat_colors.clone();
+    let current = match &chat {
+        Some(chat) => colors.of(chat).clone(),
+        None => colors.default.clone(),
+    };
+    let selected = of(&current, &colors);
+    // `SampleMessageBubbles`, on the page's color in a bordered card.
+    egui::Frame::new()
+        .fill(palette.background)
+        .stroke(Stroke::new(0.5, palette.border))
+        .corner_radius(CornerRadius::same(18))
+        .inner_margin(egui::Margin::symmetric(0, 16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let width = ui.available_width();
+            let samples = [
+                (true, "Here's a preview of the chat color.", "4h"),
+                (false, "Another bubble.", "2h"),
+                (true, "The color is visible to only you.", "Now"),
+            ];
+            let fixed = ui.max_rect();
+            for (i, (outgoing, text, time)) in samples.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(12.);
+                }
+                let color = if *outgoing { palette.bubble_out_text() } else { palette.text };
+                let meta = if *outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
+                let g = ui.painter().layout((*text).to_owned(), theme::regular(14.), color, width * 0.6);
+                let t = ui.painter().layout_no_wrap((*time).to_owned(), theme::regular(11.), meta);
+                let w = g.size().x + 8. + t.size().x + 24.;
+                let h = g.size().y + 16.;
+                let (row, _) = ui.allocate_exact_size(Vec2::new(width, h), Sense::hover());
+                let x = if *outgoing { row.right() - 16. - w } else { row.left() + 16. };
+                let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(w, h));
+                if *outgoing {
+                    paint(ui.painter(), bubble, CornerRadius::same(18), selected, fixed);
+                } else {
+                    ui.painter().rect_filled(bubble, CornerRadius::same(18), palette.bubble_in);
+                }
+                let gh = g.size().y;
+                ui.painter().galley(Pos2::new(bubble.left() + 12., bubble.top() + 8.), g, color);
+                ui.painter().galley(Pos2::new(bubble.right() - 12. - t.size().x, bubble.top() + 8. + gh - t.size().y), t, meta);
+            }
+        });
+    ui.add_space(16.);
+    let choose = |app: &mut App, color: ChatColor| {
+        let edit = match &chat {
+            Some(chat) => ChatColorEdit::Chat(chat.clone(), Some(color)),
+            None => ChatColorEdit::Default(color),
+        };
+        app.send(Command::EditChatColors(edit));
+    };
+    axo_list::list(ui, None, None, |ui| {
+        // `ChatColorPicker__bubbles`: 52px swatches 24px apart, centered.
+        let mut swatches: Vec<(ChatColor, Bubble)> =
+            langis_store::CHAT_COLOR_PRESETS.iter().map(|name| (ChatColor::preset(name), preset(name).unwrap_or(DEFAULT))).collect();
+        for (id, value) in &colors.custom.colors {
+            swatches.push((ChatColor::Custom { id: id.clone(), value: *value }, custom(value)));
+        }
+        let width = ui.available_width();
+        let per_row = (((width + 24.) / (52. + 24.)).floor() as usize).max(1);
+        let rows = swatches.len().div_ceil(per_row);
+        ui.add_space(20.);
+        let (area, _) = ui.allocate_exact_size(Vec2::new(width, rows as f32 * 52. + (rows - 1) as f32 * 24.), Sense::hover());
+        ui.add_space(20.);
+        let row_w = per_row as f32 * 52. + (per_row - 1) as f32 * 24.;
+        let left = area.left() + (width - row_w) / 2.;
+        let ring = if palette.dark { Color32::WHITE } else { theme::rgb(0x3b3b3b) };
+        for (i, (color, bubble)) in swatches.iter().enumerate() {
+            let (r, c) = (i / per_row, i % per_row);
+            let rect = Rect::from_min_size(Pos2::new(left + c as f32 * 76., area.top() + r as f32 * 76.), Vec2::splat(52.));
+            let response = ui.interact(rect, egui::Id::unique("chat-color-swatch").with(i), Sense::click());
+            let chosen = match (color, &current) {
+                (ChatColor::Preset { name: a }, ChatColor::Preset { name: b }) => a == b,
+                (ChatColor::Custom { id: a, .. }, ChatColor::Custom { id: b, .. }) => a == b,
+                _ => false,
+            };
+            if chosen {
+                ui.painter().circle_stroke(rect.center(), 24., Stroke::new(4., ring));
+            }
+            paint_swatch(ui.painter(), rect.center(), 20., *bubble);
+            if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                choose(app, color.clone());
+            }
+        }
+    });
+    axo_list::gap(ui);
+    let ask = egui::Id::unique("chat-color-reset");
+    axo_list::list(ui, None, None, |ui| {
+        if let Some(chat) = &chat
+            && axo_list::item(ui, Item::new("Reset chat color"), End::Click).clicked()
+        {
+            app.send(Command::EditChatColors(ChatColorEdit::Chat(chat.clone(), None)));
+        }
+        if axo_list::item(ui, Item::new("Reset all chat colors"), End::Click).clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(ask, true));
+        }
+    });
+    if ui.ctx().data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
+        use crate::dialog::{self, Answer, Variant};
+        let message = "Would you like to override all chat colors?";
+        let answer = if chat.is_none() {
+            // Desktop asks whether the default goes too.
+            dialog::show(ui.ctx(), ask.with("dialog"), "Reset Chat Colors", message, Some("Cancel"), &[("Reset default colors", Variant::StrongPrimary), ("Reset all chat colors", Variant::StrongPrimary)])
+        } else {
+            dialog::show(ui.ctx(), ask.with("dialog"), "Reset all chat colors", message, Some("Cancel"), &[("Reset", Variant::StrongPrimary)])
+        };
+        match (answer, chat.is_none()) {
+            (Some(Answer::Action(0)), true) => app.send(Command::EditChatColors(ChatColorEdit::ResetDefault)),
+            (Some(Answer::Action(_)), true) => {
+                app.send(Command::EditChatColors(ChatColorEdit::ResetDefault));
+                app.send(Command::EditChatColors(ChatColorEdit::ResetChats));
+            }
+            (Some(Answer::Action(_)), false) => app.send(Command::EditChatColors(ChatColorEdit::ResetChats)),
+            _ => {}
+        }
+        if answer.is_some() {
+            ui.ctx().data_mut(|d| d.remove::<bool>(ask));
+        }
+    }
 }
 
 #[cfg(test)]
