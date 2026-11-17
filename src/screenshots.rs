@@ -311,14 +311,18 @@ fn screenshots_composer() {
         let chat = harness.state_mut().chat.as_mut().unwrap();
         chat.composer.clear();
         chat.preview = Default::default();
-        chat.attach_menu = true;
+    }
+    {
+        let ctx = harness.state().ctx.clone();
+        crate::menu::open_below(&ctx, egui::Id::unique("composer-add-menu"), egui::Rect::from_center_size(egui::pos2(1170., 770.), egui::vec2(32., 32.)));
     }
     wait(&mut harness, "attach menu", |_| true);
     save(&mut harness, "composer-attach-menu");
 
     {
+        let ctx = harness.state().ctx.clone();
+        crate::menu::close(&ctx, egui::Id::unique("composer-add-menu"));
         let chat = harness.state_mut().chat.as_mut().unwrap();
-        chat.attach_menu = false;
         let mut poll = crate::polls::NewPoll::default();
         poll.question = "Which trail on Saturday?".into();
         poll.options = vec!["Ridge loop".into(), "Lakeside".into(), String::new()];

@@ -516,38 +516,68 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
         }
     }
 
+    // Desktop's CompositionArea row: emoji, the input, then the mic while
+    // the input is empty (or the edit buttons), then the + menu. Buttons
+    // sit 4px apart and 12px from the edges, the input 6px further in, all
+    // aligned to the input's bottom.
     let mut input_rect = Rect::NOTHING;
-    ui.horizontal(|ui| {
-        let fun = widgets::icon_button(ui, Icon::Emoji, 20., "Emoji, stickers and GIFs");
+    let height_id = id.with("row-height");
+    let row_h: f32 = ui.data(|d| d.get_temp(height_id)).unwrap_or(32.);
+    // Buttons sit on the input's bottom edge, a top-aligned row padded by
+    // the input's height last frame (a bottom-aligned row would stretch to
+    // the panel).
+    let at_bottom = |ui: &mut Ui, size: f32, add: &mut dyn FnMut(&mut Ui)| {
+        ui.vertical(|ui| {
+            ui.add_space((row_h - size - (32. - size) / 2.).max(0.));
+            add(ui);
+        });
+    };
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let editing = chat.editing.is_some();
+        let dirty = !chat.composer.is_empty();
+        let right_w = if editing { 4. + 28. + 16. + 28. + 4. + 4. + 32. } else if dirty { 4. + 32. } else { 4. + 32. + 8. + 32. } ;
+        let width = (ui.available_width() - (4. + 32. + 4.) - 12. - right_w).max(100.);
+        ui.add_space(4.);
+        let mut fun = None;
+        at_bottom(ui, 32., &mut |ui| fun = Some(widgets::axo_icon_button(ui, "face-smiling", "Emoji, stickers and GIFs")));
+        let fun = fun.unwrap();
         if fun.clicked() {
             chat.emoji_open = !chat.emoji_open;
         }
-        let has_text = !chat.composer.trim().is_empty();
-        let right_w = 2. * 32. + 8.;
-        let width = (ui.available_width() - right_w).max(100.);
+        ui.add_space(4. + 6.);
         let spans = chat.spans.clone();
         let pal = *palette;
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| layout(ui, text.as_str(), &spans, &pal, wrap);
-        let response = egui::Frame::new()
+        let framed = egui::Frame::new()
             .fill(palette.bubble_in)
             .corner_radius(CornerRadius::same(18))
-            .inner_margin(egui::Margin::symmetric(12, 8))
+            .inner_margin(egui::Margin::symmetric(12, 6))
             .show(ui, |ui| {
                 ui.set_width(width - 24.);
-                ui.add(
-                    egui::TextEdit::multiline(&mut chat.composer)
-                        .hint_text(if chat.editing.is_some() { "Edit message" } else { "Message" })
-                        .frame(egui::Frame::NONE)
-                        .desired_rows(1)
-                        .desired_width(width - 24.)
-                        .font(theme::regular(14.))
-                        .layouter(&mut layouter)
-                        .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
-                        .id(id),
-                )
-            })
-            .inner;
-        input_rect = response.rect;
+                egui::ScrollArea::vertical().max_height(60.).min_scrolled_height(0.).stick_to_bottom(true).show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut chat.composer)
+                            .hint_text(if editing { "Edit message" } else { "Message" })
+                            .frame(egui::Frame::NONE)
+                            .margin(egui::Margin::ZERO)
+                            .desired_rows(1)
+                            .min_size(Vec2::new(0., 20.))
+                            .desired_width(width - 24.)
+                            .font(theme::regular(14.))
+                            .layouter(&mut layouter)
+                            .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
+                            .id(id),
+                    )
+                })
+                .inner
+            });
+        let response = framed.inner;
+        input_rect = framed.response.rect;
+        if (input_rect.height() - row_h).abs() > 0.5 {
+            ui.data_mut(|d| d.insert_temp(height_id, input_rect.height()));
+            ui.ctx().request_repaint();
+        }
         chat.spans.follow(&chat.composer);
         if response.changed() {
             chat.last_typed = Some(Instant::now());
@@ -562,36 +592,55 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
         if !response.has_focus() && app.safety.is_none() && app.lightbox.is_none() && chat.dialog.is_none() && ui.memory(|m| m.focused().is_none()) {
             response.request_focus();
         }
-        if widgets::icon_button(ui, Icon::Plus, 20., "Add attachment").clicked() {
-            chat.attach_menu = !chat.attach_menu;
-        }
-        let attach_button = ui.min_rect();
-        if has_text || chat.editing.is_some() {
-            let (rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
-            ui.painter().circle_filled(rect.center(), 16., palette.badge);
-            let icon = if chat.editing.is_some() { Icon::Check } else { Icon::SendFill };
-            icon.paint(ui, rect, 18., Color32::WHITE);
-            if r.on_hover_text(if chat.editing.is_some() { "Save" } else { "Send" }).clicked() {
+        ui.add_space(6. + 4.);
+        if editing {
+            // Desktop's discard and accept buttons while editing.
+            let mut r = None;
+            at_bottom(ui, 28., &mut |ui| r = Some(ui.allocate_exact_size(Vec2::splat(28.), Sense::click())));
+            let (discard, r) = r.unwrap();
+            ui.painter().circle_filled(discard.center(), 14., theme::rgb(0x848484));
+            theme::paint_symbol(ui.painter(), "x", discard.center(), 20., Color32::WHITE);
+            if r.on_hover_text("Discard edit").clicked() {
+                chat.editing = None;
+                chat.composer.clear();
+                chat.spans.clear();
+                chat.preview.reset();
+            }
+            ui.add_space(16.);
+            let mut r = None;
+            at_bottom(ui, 28., &mut |ui| r = Some(ui.allocate_exact_size(Vec2::splat(28.), Sense::click())));
+            let (accept, r) = r.unwrap();
+            ui.painter().circle_filled(accept.center(), 14., theme::rgb(0x3b45fd));
+            theme::paint_symbol(ui.painter(), "check", accept.center(), 20., Color32::WHITE);
+            if r.on_hover_text("Save").clicked() {
                 send = true;
             }
-        } else if widgets::icon_button(ui, Icon::Mic, 20., "Voice message").clicked() {
-            crate::voice::start(app, chat);
+            ui.add_space(4. + 4.);
+        } else if !dirty {
+            let mut mic = false;
+            at_bottom(ui, 32., &mut |ui| mic = widgets::axo_icon_button(ui, "mic", "Voice message").clicked());
+            if mic {
+                crate::voice::start(app, chat);
+            }
+            ui.add_space(4. + 4.);
         }
+        let mut plus = None;
+        at_bottom(ui, 32., &mut |ui| plus = Some(widgets::axo_icon_button(ui, "plus", "Add attachment or poll")));
+        let plus = plus.unwrap();
+        ui.add_space(4.);
+        attach_menu(app, ui, &plus, chat, c);
         if chat.emoji_open {
             let anchor = fun.rect.left_top();
             if let Some(picked) = crate::fun::show(app, ui.ctx(), anchor, chat, c) {
                 insert_at_cursor(ui.ctx(), id, chat, picked);
             }
         }
-        if chat.attach_menu {
-            attach_menu(app, ui, palette, chat, c, Pos2::new(attach_button.right() - 220., input_rect.top() - 8.));
-        }
     });
 
     if let Some((replace, found)) = mention {
         let index = picked_mention.unwrap_or(usize::MAX);
         let mut chosen = (index != usize::MAX).then(|| found[index.min(found.len() - 1)].clone());
-        let at = Pos2::new(input_rect.left(), input_rect.top() - 12. - found.len() as f32 * 40. - 12.);
+        let at = Pos2::new(input_rect.left(), input_rect.top() - 8. - found.len() as f32 * 40. - 24.);
         let closed = crate::actions::popover(ui.ctx(), "mentions", at, 260., Some(input_rect), |ui| {
             for (i, (aci, name)) in found.iter().enumerate() {
                 let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::click());
@@ -696,26 +745,27 @@ fn insert_at_cursor(ctx: &egui::Context, id: egui::Id, chat: &mut ChatView, text
     set_cursor(ctx, id, char_index + text.chars().count());
 }
 
-/// Desktop's attachment menu: photos and files, a poll, view-once media.
-fn attach_menu(app: &mut App, ui: &Ui, palette: &Palette, chat: &mut ChatView, c: &langis_store::Conversation, at: Pos2) {
-    let _ = palette;
+/// Desktop's + menu: photos and videos, a file, a poll. View-once media is
+/// ours here until drafts can carry Desktop's view-once toggle.
+fn attach_menu(app: &mut App, ui: &Ui, plus: &egui::Response, chat: &mut ChatView, c: &langis_store::Conversation) {
     let mut choice = None;
-    let closed = crate::actions::popover(ui.ctx(), "attach-menu", at - Vec2::new(0., 3. * 32. + 12.), 210., None, |ui| {
-        if crate::actions::menu_row(ui, Some(Icon::PhotoSquare), "Photos, videos & files", false) {
+    crate::menu::dropdown(ui, plus, egui::Id::unique("composer-add-menu"), |m| {
+        if m.item(Some("photo"), "Photos & videos") {
             choice = Some(0);
         }
-        if c.kind != ConversationKind::NoteToSelf && crate::actions::menu_row(ui, Some(Icon::ViewOnce), "View-once photo or video", false) {
-            choice = Some(2);
+        if m.item(Some("file"), "File") {
+            choice = Some(3);
         }
-        if crate::actions::menu_row_with(ui, |ui, rect, color| crate::glyphs::poll(ui, rect, color), true, "Poll", false) {
+        if m.item(Some("poll"), "Poll") {
             choice = Some(1);
         }
+        if c.kind != ConversationKind::NoteToSelf && m.item(Some("viewonce"), "View-once photo or video") {
+            choice = Some(2);
+        }
     });
-    if closed || choice.is_some() {
-        chat.attach_menu = false;
-    }
     match choice {
-        Some(0) => attach(app, chat, c),
+        Some(0) => attach(app, chat, c, true),
+        Some(3) => attach(app, chat, c, false),
         Some(1) => chat.dialog = Some(crate::actions::Dialog::Poll(crate::polls::NewPoll::default())),
         Some(2) => attach_view_once(app, c),
         _ => {}
@@ -758,8 +808,12 @@ pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversat
 
 /// Picks files to send: images go optimized as photos, the rest as files,
 /// with the composer's text as the caption.
-fn attach(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation) {
-    let Some(paths) = rfd::FileDialog::new().set_title("Add attachment").pick_files() else { return };
+fn attach(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation, media: bool) {
+    let mut dialog = rfd::FileDialog::new().set_title("Add attachment");
+    if media {
+        dialog = dialog.add_filter("Photos & videos", &["jpg", "jpeg", "png", "gif", "webp", "heic", "avif", "mp4", "mov", "webm", "mkv", "m4v"]);
+    }
+    let Some(paths) = dialog.pick_files() else { return };
     let (caption, mentions, styles) = chat.spans.to_send(&chat.composer);
     chat.composer.clear();
     chat.spans.clear();

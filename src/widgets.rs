@@ -74,6 +74,20 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, tip: &str) -> Response {
     response.on_hover_text(tip)
 }
 
+/// `AxoIconButton` size `md`, variant `implied-secondary`: a 20px symbol
+/// in a 32px circle that fills on hover and press.
+pub fn axo_icon_button(ui: &mut Ui, symbol: &str, label: &str) -> Response {
+    let palette = Palette::of(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
+    if response.is_pointer_button_down_on() {
+        ui.painter().circle_filled(rect.center(), 16., palette.fill_pressed);
+    } else if response.hovered() {
+        ui.painter().circle_filled(rect.center(), 16., palette.fill);
+    }
+    theme::paint_symbol(ui.painter(), symbol, rect.center(), 20., palette.text);
+    response.on_hover_text(label)
+}
+
 /// Desktop's round button (`AxoButton`): accent-filled or quiet.
 pub fn pill_button(ui: &mut Ui, text: &str, primary: bool) -> Response {
     let palette = Palette::of(ui.ctx());
