@@ -34,7 +34,7 @@ pub struct Lightbox {
     pub index: usize,
     /// A view-once copy, deleted when the viewer closes.
     pub view_once: Option<PathBuf>,
-    /// Desktop's click to zoom: the photo at full size, panned by the pointer.
+    /// Desktop's click to zoom: the photo at 3 times, panned by the pointer.
     pub zoomed: bool,
 }
 
@@ -124,6 +124,60 @@ impl App {
     }
 }
 
+const ZOOM_SCALE: f32 = 3.;
+
+/// Desktop's `IMAGE_SPRING_PROPS` (react-spring: tension 350, friction 20,
+/// mass 0.5, clamped so it stops at the target instead of overshooting) for
+/// the scale and the two offsets.
+#[derive(Clone, Copy)]
+struct Spring {
+    index: usize,
+    at: [f32; 3],
+    velocity: [f32; 3],
+}
+
+fn spring(ctx: &egui::Context, id: egui::Id, index: usize, target: [f32; 3]) -> [f32; 3] {
+    let mut z = ctx.data(|d| d.get_temp::<Spring>(id)).filter(|z| z.index == index).unwrap_or(Spring { index, at: [1., 0., 0.], velocity: [0.; 3] });
+    let moving = z.step(target, ctx.input(|i| i.stable_dt).min(0.05));
+    ctx.data_mut(|d| d.insert_temp(id, z));
+    if moving {
+        ctx.request_repaint();
+    }
+    z.at
+}
+
+impl Spring {
+    /// Moves `dt` seconds towards `target`; true while still moving.
+    fn step(&mut self, target: [f32; 3], dt: f32) -> bool {
+        let steps = (dt / 0.002).ceil().max(1.) as usize;
+        let h = dt / steps as f32;
+        let mut moving = false;
+        for k in 0..3 {
+            for _ in 0..steps {
+                let before = self.at[k] - target[k];
+                if before == 0. && self.velocity[k] == 0. {
+                    break;
+                }
+                let accel = (-350. * before - 20. * self.velocity[k]) / 0.5;
+                self.velocity[k] += accel * h;
+                self.at[k] += self.velocity[k] * h;
+                if (self.at[k] - target[k]) * before < 0. {
+                    self.at[k] = target[k];
+                    self.velocity[k] = 0.;
+                }
+            }
+            let precision = if k == 0 { 0.001 } else { 0.1 };
+            if (self.at[k] - target[k]).abs() < precision && self.velocity[k].abs() < precision * 10. {
+                self.at[k] = target[k];
+                self.velocity[k] = 0.;
+            } else {
+                moving = true;
+            }
+        }
+        moving
+    }
+}
+
 pub fn show(app: &mut App, ui: &mut Ui) {
     let Some(lightbox) = app.lightbox.as_ref() else { return };
     let ctx = ui.ctx().clone();
@@ -154,6 +208,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let (rect, backdrop) = ui.allocate_exact_size(screen.size(), Sense::click());
         ui.painter().rect_filled(rect, 0, Color32::from_black_alpha(242));
 
+        // Desktop's `Lightbox__container--zoom`: the header and footer fade
+        // out while zoomed.
+        let chrome = 1. - ctx.animate_bool_with_time_and_easing(egui::Id::unique("lightbox-chrome"), zoomed, 0.15, egui::emath::easing::cubic_out);
+        let previous = ui.opacity();
+        ui.multiply_opacity(chrome);
         // Top bar: who and when, then Save and Close.
         let top = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 56.));
         if !view_once {
@@ -175,6 +234,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         if !view_once && button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::Save, "Save") {
             save = true;
         }
+        ui.set_opacity(previous);
 
         // The media, as large as fits.
         let strip_h = if count > 1 && !view_once { 72. } else { 0. };
@@ -184,22 +244,30 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let scale = (area.width() / w).min(area.height() / h).min(if item.size.is_some() { 2. } else { f32::MAX });
         let media = Rect::from_center_size(area.center(), Vec2::new(w * scale, h * scale));
         let image = item.content_type.starts_with("image/");
-        // Full size is the photo's pixels, at least twice the fitted size.
-        let full = (1. / ui.ctx().pixels_per_point()).max(scale * 2.);
         let zoomable = image && item.path.is_some() && item.size.is_some() && !view_once;
+        // Desktop's `positionImage`: 3 times the fitted size, offset by
+        // three times the pointer's distance from the window's center, at
+        // most the photo's own size, on the axes it overflows.
+        let target = if zoomable && zoomed {
+            let pointer = ctx.pointer_hover_pos().unwrap_or(rect.center());
+            let pan = |overflows: bool, offset: f32, max: f32| if overflows { (offset * ZOOM_SCALE).clamp(-max, max) } else { 0. };
+            [
+                ZOOM_SCALE,
+                pan(media.width() * ZOOM_SCALE > rect.width(), rect.center().x - pointer.x, media.width()),
+                pan(media.height() * ZOOM_SCALE > rect.height(), rect.center().y - pointer.y, media.height()),
+            ]
+        } else {
+            [1., 0., 0.]
+        };
+        let [s, tx, ty] = spring(&ctx, egui::Id::unique("lightbox-spring"), index, target);
         match item.path.as_deref().filter(|_| image).or(item.thumbnail.as_deref()) {
-            Some(path) if zoomable && zoomed => {
-                let size = Vec2::new(w * full, h * full);
-                let pointer = ui.ctx().pointer_hover_pos().unwrap_or(area.center());
-                let along = ((pointer - area.min) / area.size()).clamp(Vec2::ZERO, Vec2::splat(1.));
-                let slack = (size - area.size()).max(Vec2::ZERO);
-                let min = Pos2::new(
-                    if slack.x > 0. { area.left() - slack.x * along.x } else { area.center().x - size.x / 2. },
-                    if slack.y > 0. { area.top() - slack.y * along.y } else { area.center().y - size.y / 2. },
-                );
+            Some(path) if zoomable && (s - 1.).abs() > 0.001 => {
+                // `translate(x, y) scale(s)` about the photo's center, over
+                // the header and footer.
+                let shown = Rect::from_center_size(media.center() + Vec2::new(tx, ty), media.size() * s);
                 ui.scope(|ui| {
-                    ui.set_clip_rect(area);
-                    egui::Image::new(format!("file://{path}")).fit_to_exact_size(size).paint_at(ui, Rect::from_min_size(min, size));
+                    ui.set_clip_rect(rect);
+                    egui::Image::new(format!("file://{path}")).fit_to_exact_size(shown.size()).paint_at(ui, shown);
                 });
             }
             Some(path) => {
@@ -234,6 +302,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
         }
 
+        ui.multiply_opacity(chrome);
         if caption_h > 0. {
             let mut job = egui::text::LayoutJob::simple(item.caption.clone(), theme::regular(14.), Color32::WHITE, area.width());
             job.halign = egui::Align::Center;
@@ -242,8 +311,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.painter().galley(Pos2::new(area.center().x, area.bottom() + 12.), g, Color32::WHITE);
         }
 
-        // Arrows.
-        if count > 1 {
+        // Arrows, gone while zoomed.
+        if count > 1 && !zoomed {
             if index > 0 && button(ui, Rect::from_center_size(Pos2::new(rect.left() + 36., area.center().y), Vec2::splat(44.)), Icon::ChevronLeft, "Previous") {
                 go = Some(index - 1);
             }
@@ -280,6 +349,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
         }
 
+        ui.set_opacity(previous);
         if backdrop.clicked() && !zoomed && !media.contains(backdrop.interact_pointer_pos().unwrap_or_default()) {
             close = true;
         }
@@ -339,4 +409,28 @@ fn button(ui: &Ui, rect: Rect, icon: Icon, tip: &str) -> bool {
     ui.painter().circle_filled(rect.center(), rect.width() / 2., fill);
     icon.paint(ui, rect, rect.width() * 0.5, Color32::WHITE);
     r.clicked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Spring;
+
+    #[test]
+    fn zoom_eases_in_without_overshoot() {
+        let mut z = Spring { index: 0, at: [1., 0., 0.], velocity: [0.; 3] };
+        let target = [3., -400., 120.];
+        let mut frames = 0;
+        let mut half = None;
+        while z.step(target, 1. / 60.) {
+            frames += 1;
+            assert!(z.at[0] <= 3. && z.at[1] >= -400. && z.at[2] <= 120.);
+            if half.is_none() && z.at[0] >= 2. {
+                half = Some(frames);
+            }
+            assert!(frames < 120);
+        }
+        eprintln!("halfway at frame {half:?}, settled after {frames} frames");
+        assert!(half.unwrap() >= 3 && frames >= 6, "animates over several frames");
+        assert_eq!(z.at, target);
+    }
 }
