@@ -37,9 +37,12 @@ in its guide), not a workaround here.
 | `lightbox.rs` | Photo/video viewer. |
 | `search.rs` | Message search. |
 | `details.rs` | Chat details, safety number. |
+| `media_gallery.rs` | All media: photos and videos, audio, links, files. |
+| `chat_colors.rs` | Chat colors: presets, custom colors, bubble gradients, the picker. |
 | `profile.rs` | Profile, username. |
 | `stories.rs`, `calls_tab.rs`, `call.rs` | Stories, call history and links, the call screen. |
 | `settings.rs` | Settings. |
+| `menu.rs`, `dialog.rs`, `axo_list.rs` | Desktop's Axo menus, dialogs and settings lists. |
 | `theme.rs`, `widgets.rs`, `icons.rs`, `glyphs.rs`, `format.rs`, `notices.rs` | Shared drawing and text. |
 
 Colors and sizes come from Signal Desktop's stylesheets (its Axo tokens).
