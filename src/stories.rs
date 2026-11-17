@@ -125,11 +125,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.label(RichText::new("Stories").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(14.);
-                    let more = widgets::icon_button(ui, Icon::More, 20., "More");
-                    egui::Popup::menu(&more).show(|ui| {
-                        if menu_row(ui, Some(Icon::Lock), "Story privacy", false).clicked() {
+                    let more = widgets::icon_button(ui, Icon::More, 20., "More actions");
+                    crate::menu::dropdown(ui, &more, egui::Id::unique("stories-more"), |m| {
+                        if m.item(Some("lock"), "Story privacy") {
                             app.panes.stories.privacy = true;
-                            ui.close();
                         }
                     });
                     if !app.panes.stories.disabled && widgets::icon_button(ui, Icon::Plus, 20., "Add a story").clicked() {
