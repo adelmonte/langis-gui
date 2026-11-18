@@ -41,6 +41,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         crate::call::incoming_bar(app, ui);
     }
     crate::call::pip(app, ui.ctx());
+    crate::call::settings_dialog(app, ui.ctx());
     crate::panes::overlays(app, ui);
     safety_dialog(app, ui);
     share_picker(app, ui);

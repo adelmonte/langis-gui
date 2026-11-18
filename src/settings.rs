@@ -573,6 +573,28 @@ pub fn new_id() -> String {
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
+/// `CallingDeviceSelectionItems`: Video, Microphone and Speakers, each a
+/// select of what's there.
+pub fn device_items(app: &mut App, ui: &mut Ui, salt: &str) {
+    let devices = app.call_devices.clone();
+    let lists = [
+        (DeviceKind::Camera, "Video", "videocamera", &devices.devices.cameras, &devices.camera),
+        (DeviceKind::Microphone, "Microphone", "mic", &devices.devices.microphones, &devices.microphone),
+        (DeviceKind::Speaker, "Speakers", "speaker", &devices.devices.speakers, &devices.speaker),
+    ];
+    for (kind, label, symbol, list, chosen) in lists {
+        let names: Vec<&str> = if list.is_empty() { vec!["No devices available"] } else { list.iter().map(|d| d.name.as_str()).collect() };
+        let index = chosen.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).or(Some(0));
+        let item = Item::new(label).symbol(symbol).disabled(list.is_empty());
+        if let Some(i) = axo_list::select(ui, egui::Id::unique(salt).with(("device", label)), item, &names, index)
+            && let Some(d) = list.get(i)
+        {
+            app.send(Command::SetCallDevice { kind, id: d.id.clone() });
+            app.send(Command::LoadCallDevices);
+        }
+    }
+}
+
 fn calls(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
         let mut incoming = s.incoming_calls;
@@ -585,25 +607,7 @@ fn calls(app: &mut App, ui: &mut Ui, s: &Snapshot) {
         }
     });
     axo_list::gap(ui);
-    let devices = app.call_devices.clone();
-    axo_list::list(ui, Some("Devices"), None, |ui| {
-        let lists = [
-            (DeviceKind::Camera, "Video", "videocamera", &devices.devices.cameras, &devices.camera),
-            (DeviceKind::Microphone, "Microphone", "mic", &devices.devices.microphones, &devices.microphone),
-            (DeviceKind::Speaker, "Speakers", "speaker", &devices.devices.speakers, &devices.speaker),
-        ];
-        for (kind, label, symbol, list, chosen) in lists {
-            let names: Vec<&str> = if list.is_empty() { vec!["No devices available"] } else { list.iter().map(|d| d.name.as_str()).collect() };
-            let index = chosen.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).or(Some(0));
-            let item = Item::new(label).symbol(symbol).disabled(list.is_empty());
-            if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with(("device", label)), item, &names, index)
-                && let Some(d) = list.get(i)
-            {
-                app.send(Command::SetCallDevice { kind, id: d.id.clone() });
-                app.send(Command::LoadCallDevices);
-            }
-        }
-    });
+    axo_list::list(ui, Some("Devices"), None, |ui| device_items(app, ui, "settings"));
     axo_list::gap(ui);
     axo_list::list(ui, Some("Advanced"), None, |ui| {
         let mut relay = s.always_relay;

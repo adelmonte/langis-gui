@@ -117,6 +117,19 @@ fn screenshots() {
     }
     wait(&mut harness, "call", |_| true);
     save(&mut harness, "call");
+    {
+        let d = |id: &str, name: &str| langis_core::Device { id: id.into(), name: name.into() };
+        let app = harness.state_mut();
+        app.call_devices.devices.cameras = vec![d("cam", "Built-in Camera")];
+        app.call_devices.devices.microphones = vec![d("mic", "Built-in Microphone"), d("usb", "USB Headset")];
+        app.call_devices.devices.speakers = vec![d("spk", "Built-in Speakers")];
+        app.call_view.settings_open = true;
+    }
+    for _ in 0..10 {
+        harness.step();
+    }
+    save(&mut harness, "call-settings");
+    harness.state_mut().call_view.settings_open = false;
     // Minimized: the chats, with the call in a corner, its controls shown.
     harness.state_mut().call_view.pip = true;
     for _ in 0..30 {

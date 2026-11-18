@@ -20,6 +20,8 @@ pub struct CallView {
     /// Desktop's `CallingPip`: the call minimized to a small window over
     /// the app.
     pub pip: bool,
+    /// `CallingDeviceSelection`, opened from the header.
+    pub settings_open: bool,
     pip_snap: PipSnap,
     /// Where the pointer took hold of the window, while it's dragged.
     pip_grab: Option<Vec2>,
@@ -27,7 +29,7 @@ pub struct CallView {
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None }
     }
 }
 
@@ -230,7 +232,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         if hang_up {
             app.send(Command::HangUp);
         }
-        crate::calls_tab::in_call_extras(app, ui, full);
+        let x = header(app, ui, full);
+        crate::calls_tab::in_call_extras(app, ui, full, x);
     });
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
 }
@@ -441,4 +444,86 @@ pub fn pip(app: &mut App, ctx: &egui::Context) {
         app.call_view.pip = false;
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
+}
+
+/// Desktop's `CallingDeviceSelection`: an `sm` AxoDialog, "Call Settings",
+/// with the camera, microphone and speakers to choose from.
+pub fn settings_dialog(app: &mut App, ctx: &egui::Context) {
+    if !app.call_view.settings_open || app.call.is_none() {
+        app.call_view.settings_open = false;
+        return;
+    }
+    let palette = Palette::of(ctx);
+    let fill = if palette.dark { Color32::from_rgb(0x32, 0x32, 0x32) } else { Color32::from_rgb(0xfa, 0xfa, 0xfa) };
+    let mut close = false;
+    let modal = egui::Modal::new(egui::Id::unique("call-settings"))
+        .frame(egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(34)).inner_margin(egui::Margin { left: 0, right: 0, top: 12, bottom: 16 }))
+        .show(ctx, |ui| {
+            let width = 320f32.min(ctx.content_rect().width() - 32.);
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            let (head, _) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::hover());
+            ui.painter().text(head.center(), Align2::CENTER_CENTER, "Call Settings", theme::semibold(14.), palette.text);
+            let x = Rect::from_center_size(Pos2::new(head.right() - 16. - 16., head.center().y), Vec2::splat(32.));
+            let response = ui.interact(x, ui.scope_id().with("close"), Sense::click());
+            if response.hovered() {
+                ui.painter().circle_filled(x.center(), 16., palette.fill);
+            }
+            theme::paint_symbol(ui.painter(), "x", x.center(), 20., palette.text);
+            close |= response.on_hover_text("Close").clicked();
+            ui.add_space(8.);
+            // `forceStackedLayout`: each label over its select.
+            let devices = app.call_devices.clone();
+            let lists = [
+                (langis_core::DeviceKind::Camera, "Video", "videocamera", &devices.devices.cameras, &devices.camera),
+                (langis_core::DeviceKind::Microphone, "Microphone", "mic", &devices.devices.microphones, &devices.microphone),
+                (langis_core::DeviceKind::Speaker, "Speakers", "speaker", &devices.devices.speakers, &devices.speaker),
+            ];
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 0)).show(ui, |ui| {
+                for (kind, label, symbol, list, chosen) in lists {
+                    ui.add_space(8.);
+                    let (row, _) = ui.allocate_exact_size(Vec2::new(width - 48., 28.), Sense::hover());
+                    theme::paint_symbol(ui.painter(), symbol, Pos2::new(row.left() + 10., row.center().y), 20., palette.text);
+                    ui.painter().text(Pos2::new(row.left() + 30., row.center().y), Align2::LEFT_CENTER, label, theme::regular(14.), palette.text);
+                    let names: Vec<&str> = if list.is_empty() { vec!["No devices available"] } else { list.iter().map(|d| d.name.as_str()).collect() };
+                    let index = chosen.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).unwrap_or(0);
+                    ui.add_space(4.);
+                    if let Some(i) = crate::axo_list::select_pill(ui, egui::Id::unique("call-settings").with(label), width - 48., &names, index)
+                        && let Some(d) = list.get(i)
+                    {
+                        app.send(Command::SetCallDevice { kind, id: d.id.clone() });
+                        app.send(Command::LoadCallDevices);
+                    }
+                    ui.add_space(4.);
+                }
+            });
+        });
+    if close || modal.should_close() {
+        app.call_view.settings_open = false;
+    }
+}
+
+/// Desktop's `CallingHeader`, top right: Call Settings, then Minimize call
+/// (into `CallingPip`). Returns where the next button to the left ends.
+fn header(app: &mut App, ui: &mut Ui, area: Rect) -> f32 {
+    let mut x = area.right() - 16.;
+    let mut button = |ui: &mut Ui, symbol: &str, on: bool, tip: &str| {
+        let rect = Rect::from_min_size(Pos2::new(x - 40., area.top() + 12.), Vec2::splat(40.));
+        x -= 48.;
+        let response = ui.interact(rect, ui.scope_id().with(("call-header", tip)), Sense::click()).on_hover_text(tip);
+        let fill = if on { Color32::from_white_alpha(70) } else if response.hovered() { Color32::from_white_alpha(40) } else { Color32::from_white_alpha(20) };
+        ui.painter().circle_filled(rect.center(), 20., fill);
+        theme::paint_symbol(ui.painter(), symbol, rect.center(), 20., Color32::WHITE);
+        response.clicked()
+    };
+    if button(ui, "pip", false, "Minimize call") {
+        app.call_view.pip = true;
+        app.panes.participants_open = false;
+        app.panes.reactions_open = false;
+    }
+    if button(ui, "settings", app.call_view.settings_open, "Call Settings") {
+        app.call_view.settings_open = true;
+        app.send(Command::LoadCallDevices);
+    }
+    x
 }
