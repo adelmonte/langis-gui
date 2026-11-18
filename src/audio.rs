@@ -203,7 +203,7 @@ impl Player {
         let Some(pcm) = decoder.stdout.take() else { return };
         let output = die_with_parent(
             Command::new("pw-play")
-                .args(["--format", "f32", "--rate", &PLAY_RATE.to_string(), "--channels", "1"])
+                .args(["--raw", "--format", "f32", "--rate", &PLAY_RATE.to_string(), "--channels", "1"])
                 .args(["-P", "{ application.name = langis media.role = Music }", "-"])
                 .stdin(Stdio::from(pcm))
                 .stdout(Stdio::null())
