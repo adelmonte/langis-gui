@@ -217,7 +217,7 @@ fn screenshots_panes() {
         .iter()
         .take(3)
         .enumerate()
-        .map(|(i, aci)| langis_core::CallParticipant { aci: aci.clone(), demux_id: i as u32 + 1, video: false, audio: i != 1, presenting: false })
+        .map(|(i, aci)| langis_core::CallParticipant { aci: aci.clone(), demux_id: i as u32 + 1, video: false, audio: i != 1, presenting: false, speaker_time: None })
         .collect();
     let first = participants.first().map(|p| p.aci.clone()).unwrap_or_default();
     harness.state_mut().call = Some(langis_core::CallUpdate {

@@ -22,6 +22,7 @@ pub struct CallView {
     pub pip: bool,
     /// `CallingDeviceSelection`, opened from the header.
     pub settings_open: bool,
+    pub layout: Layout,
     pip_snap: PipSnap,
     /// Where the pointer took hold of the window, while it's dragged.
     pip_grab: Option<Vec2>,
@@ -29,7 +30,7 @@ pub struct CallView {
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None }
     }
 }
 
@@ -190,47 +191,130 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 }
 
 /// A group call's participants in a grid, video where it's on.
-fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate, video: &langis_core::CallVideo, stage: Rect) {
-    let people = &call.participants;
-    if people.is_empty() {
-        ui.painter().text(stage.center(), Align2::CENTER_CENTER, "No one else is here", theme::regular(15.), Color32::from_white_alpha(200));
-        return;
+/// Desktop's `CallViewMode`: who gets the stage in a group call.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum Layout {
+    /// `Paginated`: everyone in tiles.
+    #[default]
+    Grid,
+    /// Large tiles for who fits; the rest in a column at the side.
+    Sidebar,
+    /// The first in line large; everyone else in the column.
+    Speaker,
+}
+
+impl Layout {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Grid => "Grid",
+            Self::Sidebar => "Sidebar",
+            Self::Speaker => "Speaker",
+        }
     }
-    let n = people.len();
+
+    fn symbol(self) -> &'static str {
+        match self {
+            Self::Grid => "grid",
+            Self::Sidebar => "grid-sidebar",
+            Self::Speaker => "sidebar",
+        }
+    }
+}
+
+/// `GroupCallOverflowArea`'s tiles: 107 wide.
+const OVERFLOW_W: f32 = 107.;
+/// `LARGE_TILES_MIN_HEIGHT`, for the sidebar layout's grid.
+const LARGE_TILE_H: f32 = 200.;
+
+/// One participant's tile: their video, or their avatar, and their name.
+fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::CallParticipant, video: &langis_core::CallVideo, rect: Rect, small: bool) {
+    ui.painter().rect_filled(rect, CornerRadius::same(if small { 8 } else { 12 }), Color32::from_gray(50));
+    let name = app.name(&p.aci);
+    let frame = (p.video || p.presenting).then(|| app.call_view.texture(ctx, &format!("group-{}", p.demux_id), &video.group.slot(p.demux_id))).flatten();
+    match frame {
+        Some((texture, size)) if small => paint_cover(ui, &texture, size, rect, CornerRadius::same(8)),
+        Some((texture, size)) => {
+            egui::Image::new(&texture).corner_radius(CornerRadius::same(12)).paint_at(ui, fit_in(size, rect));
+        }
+        None => {
+            let color = p.aci.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+            let side = (rect.size().min_elem() * 0.4).min(96.);
+            widgets::paint_avatar(ui, Rect::from_center_size(rect.center(), Vec2::splat(side)), &widgets::AvatarSpec::person(&name, color));
+        }
+    }
+    if !small {
+        let label = if p.audio { name } else { format!("{name} (muted)") };
+        ui.painter().text(rect.left_bottom() + Vec2::new(10., -10.), Align2::LEFT_BOTTOM, label, theme::medium(13.), Color32::WHITE);
+    } else if !p.audio {
+        theme::paint_symbol(ui.painter(), "mic-slash", rect.left_bottom() + Vec2::new(12., -12.), 14., Color32::WHITE);
+    }
+}
+
+/// Tiles in a grid of about equal rows and columns.
+fn grid_rects(n: usize, area: Rect) -> Vec<Rect> {
+    if n == 0 {
+        return Vec::new();
+    }
     let columns = (n as f32).sqrt().ceil() as usize;
     let rows = n.div_ceil(columns);
     let gap = 8.;
-    let tile = Vec2::new((stage.width() - gap * (columns - 1) as f32) / columns as f32, (stage.height() - gap * (rows - 1) as f32) / rows as f32);
-    let mut visible = Vec::new();
-    for (i, p) in people.iter().enumerate() {
-        let (col, row) = (i % columns, i / columns);
-        let rect = Rect::from_min_size(stage.min + Vec2::new(col as f32 * (tile.x + gap), row as f32 * (tile.y + gap)), tile);
-        ui.painter().rect_filled(rect, CornerRadius::same(12), Color32::from_gray(50));
-        let name = app.name(&p.aci);
-        let frame = (p.video || p.presenting).then(|| app.call_view.texture(ctx, &format!("group-{}", p.demux_id), &video.group.slot(p.demux_id))).flatten();
-        match frame {
-            Some((texture, size)) => {
-                egui::Image::new(&texture).corner_radius(CornerRadius::same(12)).paint_at(ui, fit_in(size, rect));
-            }
-            None => {
-                let color = p.aci.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
-                let side = (tile.min_elem() * 0.4).min(96.);
-                widgets::paint_avatar(ui, Rect::from_center_size(rect.center(), Vec2::splat(side)), &widgets::AvatarSpec::person(&name, color));
-            }
+    let tile = Vec2::new((area.width() - gap * (columns - 1) as f32) / columns as f32, (area.height() - gap * (rows - 1) as f32) / rows as f32);
+    (0..n).map(|i| Rect::from_min_size(area.min + Vec2::new((i % columns) as f32 * (tile.x + gap), (i / columns) as f32 * (tile.y + gap)), tile)).collect()
+}
+
+fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate, video: &langis_core::CallVideo, stage: Rect) {
+    if call.participants.is_empty() {
+        ui.painter().text(stage.center(), Align2::CENTER_CENTER, "No one else is here", theme::regular(15.), Color32::from_white_alpha(200));
+        return;
+    }
+    // `prioritySortedParticipants`: presenters, then the latest speakers.
+    let mut people = call.participants.clone();
+    people.sort_by(|a, b| b.presenting.cmp(&a.presenting).then(b.speaker_time.unwrap_or(i64::MIN).cmp(&a.speaker_time.unwrap_or(i64::MIN))));
+    let layout = if people.len() < 2 { Layout::Grid } else { app.call_view.layout };
+    let gap = 8.;
+    let main_area = Rect::from_min_max(stage.min, Pos2::new(stage.right() - OVERFLOW_W - gap, stage.bottom()));
+    let (large, overflow): (usize, bool) = match layout {
+        Layout::Grid => (people.len(), false),
+        Layout::Speaker => (1, true),
+        Layout::Sidebar => {
+            // As many large tiles as fit at 200 high (4:3), the rest beside.
+            let rows = ((main_area.height() + gap) / (LARGE_TILE_H + gap)).floor().max(1.) as usize;
+            let columns = ((main_area.width() + gap) / (LARGE_TILE_H * 4. / 3. + gap)).floor().max(1.) as usize;
+            let fit = (rows * columns).min(people.len());
+            (fit, fit < people.len())
         }
-        let label = if p.audio { name } else { format!("{name} (muted)") };
-        ui.painter().text(rect.left_bottom() + Vec2::new(10., -10.), Align2::LEFT_BOTTOM, label, theme::medium(13.), Color32::WHITE);
+    };
+    let area = if overflow { main_area } else { stage };
+    let mut visible = Vec::new();
+    for (p, rect) in people.iter().zip(grid_rects(large, area)) {
+        paint_tile(app, ui, ctx, p, video, rect, false);
         visible.push(p.demux_id);
     }
+    if overflow {
+        // `GroupCallOverflowArea`: the rest, 107 wide, top to bottom.
+        let tile_h = OVERFLOW_W * 3. / 4.;
+        let mut y = stage.top();
+        for p in &people[large..] {
+            if y + tile_h > stage.bottom() {
+                break;
+            }
+            let rect = Rect::from_min_size(Pos2::new(stage.right() - OVERFLOW_W, y), Vec2::new(OVERFLOW_W, tile_h));
+            paint_tile(app, ui, ctx, p, video, rect, true);
+            visible.push(p.demux_id);
+            y += tile_h + gap;
+        }
+    }
     // Ask for video only of who's shown, as Desktop does.
-    let main = people.iter().find(|p| p.presenting).map(|p| p.demux_id);
+    let main = match layout {
+        Layout::Speaker => people.first().map(|p| p.demux_id),
+        _ => people.iter().find(|p| p.presenting).map(|p| p.demux_id),
+    };
     let want = (visible.clone(), main);
     let key = egui::Id::unique("group-video-shown");
     if ctx.data(|d| d.get_temp::<(Vec<u32>, Option<u32>)>(key)) != Some(want.clone()) {
         ctx.data_mut(|d| d.insert_temp(key, want));
         app.send(Command::ShowGroupVideo { visible, main });
     }
-    let _ = RichText::new("");
 }
 
 /// `size` scaled to fit in `outer`, centered.
@@ -475,6 +559,27 @@ fn header(app: &mut App, ui: &mut Ui, area: Rect) -> f32 {
     if button(ui, "settings", app.call_view.settings_open, "Call Settings") {
         app.call_view.settings_open = true;
         app.send(Command::LoadCallDevices);
+    }
+    // Change layout, when there are three or more in the call.
+    if app.call.as_ref().is_some_and(|c| c.group && c.participants.len() >= 2) {
+        let rect = Rect::from_min_size(Pos2::new(x - 40., area.top() + 12.), Vec2::splat(40.));
+        x -= 48.;
+        let response = ui.interact(rect, ui.scope_id().with("call-layout"), Sense::click()).on_hover_text("Change layout");
+        let fill = if response.hovered() { Color32::from_white_alpha(40) } else { Color32::from_white_alpha(20) };
+        ui.painter().circle_filled(rect.center(), 20., fill);
+        theme::paint_symbol(ui.painter(), app.call_view.layout.symbol(), rect.center(), 20., Color32::WHITE);
+        let current = app.call_view.layout;
+        let mut chosen = None;
+        crate::menu::dropdown(ui, &response, egui::Id::unique("call-layout-menu"), |m| {
+            for layout in [Layout::Grid, Layout::Sidebar, Layout::Speaker] {
+                if m.check(current == layout, layout.label()) {
+                    chosen = Some(layout);
+                }
+            }
+        });
+        if let Some(layout) = chosen {
+            app.call_view.layout = layout;
+        }
     }
     x
 }
