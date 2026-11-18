@@ -379,6 +379,23 @@ mod tests {
     }
 
     #[test]
+    fn decodes_a_file_with_ffmpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.ogg");
+        let made = Command::new("ffmpeg")
+            .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", "libopus"])
+            .arg(&path)
+            .status();
+        if !made.is_ok_and(|s| s.success()) {
+            eprintln!("no ffmpeg with opus; skipped");
+            return;
+        }
+        let peaks = peaks_of(&decode(path.to_str().unwrap()).unwrap());
+        assert!((peaks.duration - 2.).abs() < 0.1, "{}", peaks.duration);
+        assert!(peaks.bars.iter().all(|b| *b > 0.5), "{:?}", peaks.bars);
+    }
+
+    #[test]
     fn waveform_follows_loudness() {
         // A second of silence, then a second of a full-scale tone.
         let rate = WAVEFORM_RATE as usize;
