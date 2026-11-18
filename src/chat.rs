@@ -68,6 +68,12 @@ pub struct ChatView {
     want_newer: bool,
     /// A message to bring into view, and one to flash once it is.
     pub scroll_target: Option<i64>,
+    /// Desktop's `LastSeenIndicator`: how many were unread when the chat
+    /// opened, the message the divider goes above, and whether the chat
+    /// still has to scroll to it.
+    pub unread_at_open: u32,
+    pub unread_marker: Option<(i64, u32)>,
+    scroll_to_unread: bool,
     highlight: Option<(i64, Instant)>,
     /// Scrolled up from the bottom (for the jump-down button).
     scrolled_up: bool,
@@ -156,6 +162,9 @@ impl ChatView {
             loading_newer: false,
             want_newer: false,
             scroll_target: None,
+            unread_at_open: 0,
+            unread_marker: None,
+            scroll_to_unread: false,
             highlight: None,
             scrolled_up: false,
             want_latest: false,
@@ -236,6 +245,16 @@ impl ChatView {
             self.messages = page;
             self.loaded = true;
             self.scroll_to_bottom = 10;
+            // The divider above the oldest unread: that many incoming
+            // messages back from the newest (all loaded ones, if fewer).
+            if self.unread_at_open > 0 && self.unread_marker.is_none() {
+                let incoming: Vec<i64> = self.messages.iter().rev().filter(|m| m.direction == Direction::Incoming && m.notice.is_none()).take(self.unread_at_open as usize).map(|m| m.id).collect();
+                if let Some(oldest) = incoming.last() {
+                    self.unread_marker = Some((*oldest, self.unread_at_open));
+                    self.scroll_to_unread = true;
+                    self.scroll_to_bottom = 0;
+                }
+            }
         }
     }
 
@@ -250,6 +269,8 @@ impl ChatView {
                 let at = self.messages.partition_point(|m| (m.sent_at, m.id) <= (message.sent_at, message.id));
                 if message.direction == Direction::Outgoing {
                     self.scroll_to_bottom = 10;
+                    // Desktop drops the divider once we send.
+                    self.unread_marker = None;
                 }
                 self.messages.insert(at, message);
             }
@@ -618,6 +639,20 @@ fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
     }
 }
 
+/// Desktop's `LastSeenIndicator`: a 1px gray-45 line, then "N Unread
+/// Messages" in bold, 25 above and 35 below.
+fn last_seen_indicator(ui: &mut Ui, palette: &Palette, count: u32) -> Rect {
+    let text = if count == 1 { "1 Unread Message".to_owned() } else { format!("{count} Unread Messages") };
+    let galley = ui.painter().layout_no_wrap(text, theme::semibold(13.), palette.text);
+    let height = 25. + 1. + 3. + galley.size().y + 35.;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let line = Rect::from_min_size(Pos2::new(rect.left(), rect.top() + 25.), Vec2::new(rect.width(), 1.));
+    ui.painter().rect_filled(line, 0, theme::rgb(0x848484));
+    let color = if palette.dark { theme::rgb(0xe9e9e9) } else { theme::rgb(0x1b1b1b) };
+    ui.painter().galley(Pos2::new(rect.center().x - galley.size().x / 2., line.bottom() + 3.), galley, color);
+    rect
+}
+
 fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_store::Conversation, actions: &mut Vec<Action>) {
     let group = c.kind == ConversationKind::Group;
     let typing: Vec<String> = app.typing.get(&chat.id).map(|t| t.iter().cloned().collect()).unwrap_or_default();
@@ -654,6 +689,15 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             let next = messages.get(i + 1);
             if prev.is_none_or(|p| !crate::format::same_day(p.sent_at, m.sent_at)) {
                 date_header(ui, palette, m.sent_at);
+            }
+            if let Some((marker, count)) = chat.unread_marker
+                && marker == m.id
+            {
+                let rect = last_seen_indicator(ui, palette, count);
+                if chat.scroll_to_unread {
+                    chat.scroll_to_unread = false;
+                    ui.scroll_to_rect_animation(rect, Some(egui::Align::Min), egui::style::ScrollAnimation::none());
+                }
             }
             let revealed = chat.revealed.contains(&m.id);
             let top = ui.cursor().top();

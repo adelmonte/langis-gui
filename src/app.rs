@@ -660,6 +660,7 @@ impl App {
         let draft = self.conversation(&id).and_then(|c| c.draft.clone()).unwrap_or_default();
         let styles = self.conversation(&id).map(|c| c.draft_styles.clone()).unwrap_or_default();
         let mut chat = ChatView::new(id.clone(), draft.clone());
+        chat.unread_at_open = self.conversation(&id).map(|c| c.unread_count).unwrap_or(0);
         chat.spans = crate::composer::Spans::new(&draft, styles, Vec::new());
         self.chat = Some(chat);
         self.selected = Some(id.clone());
