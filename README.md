@@ -8,6 +8,9 @@ Same layout, colors, fonts, icons and menus as Signal Desktop, drawn with
 secondary device, just like Desktop: chats, groups, calls, stories,
 reactions, polls, voice messages, stickers and the rest.
 
+Calls minimize to a small window so you can keep chatting, and Desktop's
+keyboard shortcuts work (Ctrl+/ lists them).
+
 Unofficial, and not affiliated with Signal.
 
 ## Not there yet
@@ -20,7 +23,9 @@ Unofficial, and not affiliated with Signal.
 
 Needs [langis](https://github.com/adelmonte/langis) checked out next to it
 (`../langis`) and its build tools: `protoc`, `clang`, `cmake`, PulseAudio
-and PipeWire headers. For color emoji, install Noto Color Emoji.
+and PipeWire headers. At runtime, voice messages need `ffmpeg` (recording
+and playback) and PipeWire's `pw-play` (playback). For color emoji, install
+Noto Color Emoji.
 
 ```sh
 ./install.sh               # builds and installs for your user
