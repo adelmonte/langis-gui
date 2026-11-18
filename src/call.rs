@@ -155,11 +155,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.painter().rect_filled(full, 0, palette.calling);
         let stage = Rect::from_min_max(full.min + Vec2::new(16., 64.), full.max - Vec2::new(16., 112.));
 
-        // Who and how long, at the top.
-        let title = conversation.as_ref().map(|c| c.title.clone()).unwrap_or_default();
-        ui.painter().text(Pos2::new(full.center().x, full.top() + 20.), Align2::CENTER_TOP, &title, theme::semibold(16.), Color32::WHITE);
-        ui.painter().text(Pos2::new(full.center().x, full.top() + 42.), Align2::CENTER_TOP, status_text(&call), theme::regular(13.), Color32::from_white_alpha(190));
-
         if call.group {
             group_grid(app, ui, &ctx, &call, &video, stage);
         } else {
@@ -187,53 +182,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             egui::Image::new(&texture).corner_radius(CornerRadius::same(10)).paint_at(ui, rect);
         }
 
-        // Desktop's call controls, in a bar at the bottom.
-        let can_present = app.share_available != Some(false);
-        let buttons = if can_present { 4. } else { 3. };
-        let bar = Rect::from_center_size(Pos2::new(full.center().x, full.bottom() - 56.), Vec2::new(buttons * 56. + (buttons - 1.) * 16. + 32., 72.));
-        ui.painter().rect_filled(bar, CornerRadius::same(36), Color32::from_white_alpha(14));
-        let mut x = bar.left() + 16.;
-        let mut button = |icon: Icon, on: bool, fill: Option<Color32>, tip: &str| {
-            let rect = Rect::from_min_size(Pos2::new(x, bar.top() + 8.), Vec2::splat(56.));
-            x += 56. + 16.;
-            let response = ui.interact(rect, ui.scope_id().with(("call-control", tip)), Sense::click()).on_hover_text(tip);
-            let (bg, fg) = match fill {
-                Some(fill) => (fill, Color32::WHITE),
-                None if on => (Color32::from_white_alpha(40), Color32::WHITE),
-                None => (Color32::WHITE, Color32::BLACK),
-            };
-            let bg = if response.hovered() { bg.gamma_multiply(0.85) } else { bg };
-            ui.painter().circle_filled(rect.center(), 28., bg);
-            icon.paint(ui, rect, 24., fg);
-            response.clicked()
-        };
-        let present = can_present
-            && button(Icon::ShareScreenFillLight, !call.sharing, call.sharing.then_some(palette.accent), if call.sharing { "Stop presenting" } else { "Present" });
-        let camera = button(if video_on { Icon::VideoFillLight } else { Icon::VideoSlashFillLight }, video_on, None, if video_on { "Turn off camera" } else { "Turn on camera" });
-        let audio_on = app.call_view.audio_on;
-        let mic = button(if audio_on { Icon::MicFillLight } else { Icon::MicSlashFillLight }, audio_on, None, if audio_on { "Mute" } else { "Unmute" });
-        let hang_up = button(Icon::PhoneDownFillLight, true, Some(palette.destructive), "Leave call");
-        if present {
-            if call.sharing {
-                app.send(Command::StopSharing);
-            } else {
-                app.share_requested = true;
-                app.send(Command::LoadShareSources);
-            }
-        }
-        if camera {
-            app.call_view.video_on = Some(!video_on);
-            app.send(Command::SetCallVideo(!video_on));
-        }
-        if mic {
-            app.call_view.audio_on = !audio_on;
-            app.send(Command::SetCallAudio(!audio_on));
-        }
-        if hang_up {
-            app.send(Command::HangUp);
-        }
-        let x = header(app, ui, full);
-        crate::calls_tab::in_call_extras(app, ui, full, x);
+        controls(app, ui, &call, conversation.as_ref(), full, video_on);
+        header(app, ui, full);
+        crate::calls_tab::in_call_extras(app, ui, full);
     });
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
 }
@@ -526,4 +477,131 @@ fn header(app: &mut App, ui: &mut Ui, area: Rect) -> f32 {
         app.send(Command::LoadCallDevices);
     }
     x
+}
+
+/// Desktop's `CallingButton` look: regular (gray-60, gray-15 icon),
+/// highlighted (gray-15, gray-90 icon) or disabled (regular at 40%).
+#[derive(Clone, Copy, PartialEq)]
+enum Look {
+    Regular,
+    Highlighted,
+    Disabled,
+}
+
+/// Desktop's `CallControls`: an 80px bar along the bottom, at most 640 wide,
+/// with who and the status at the start, the buttons in the middle and
+/// End (Leave, in a group) at the end.
+fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<&langis_store::Conversation>, full: Rect, video_on: bool) {
+    // `CallControls__OuterSpacer`s: the local preview's width and 16 more.
+    let spacer = 106.67 + 16.;
+    let room = full.width() - 32.;
+    let width = (room - 2. * spacer).min(640.).max(480f32.min(room));
+    let bar = Rect::from_min_size(Pos2::new(full.center().x - width / 2., full.bottom() - 16. - 80.), Vec2::new(width, 80.));
+    let shadow = egui::epaint::Shadow { offset: [0, 4], blur: 14, spread: 0, color: Color32::from_black_alpha(102) };
+    ui.painter().add(shadow.as_shape(bar, CornerRadius::same(18)));
+    ui.painter().rect_filled(bar, CornerRadius::same(18), theme::rgb(0x343434));
+    let inner = bar.shrink2(Vec2::new(24., 22.));
+
+    // The buttons, 36 across and 20 apart, centered.
+    let can_present = app.share_available != Some(false);
+    let raised = call.local_demux_id.is_some_and(|d| call.raised_hands.contains(&d));
+    let audio_on = app.call_view.audio_on;
+    let mut buttons: Vec<(&str, Icon, Look, &str)> = vec![
+        ("video", if video_on { Icon::VideoFillLight } else { Icon::VideoSlashFillLight }, if video_on { Look::Regular } else { Look::Highlighted }, if video_on { "Turn off camera" } else { "Turn on camera" }),
+        ("audio", if audio_on { Icon::MicFillLight } else { Icon::MicSlashFillLight }, if audio_on { Look::Regular } else { Look::Highlighted }, if audio_on { "Mute mic" } else { "Unmute mic" }),
+    ];
+    if call.group {
+        buttons.push(("hand", Icon::RaiseHandFillLight, if raised { Look::Highlighted } else { Look::Regular }, if raised { "Lower hand" } else { "Raise hand" }));
+    }
+    buttons.push((
+        "present",
+        Icon::ShareScreenFillLight,
+        if !can_present { Look::Disabled } else if call.sharing { Look::Highlighted } else { Look::Regular },
+        if call.sharing { "Stop presenting" } else { "Present" },
+    ));
+    if call.group {
+        buttons.push(("react", Icon::HeartPlusFill, if app.panes.reactions_open { Look::Highlighted } else { Look::Regular }, "React"));
+    }
+    let row_w = buttons.len() as f32 * 56.;
+    let mut x = bar.center().x - row_w / 2. + 10.;
+    let mut clicked = None;
+    for (key, icon, look, tip) in buttons {
+        let rect = Rect::from_min_size(Pos2::new(x, bar.center().y - 18.), Vec2::splat(36.));
+        x += 56.;
+        let response = ui.interact(rect, ui.scope_id().with(("call-control", key)), if look == Look::Disabled { Sense::hover() } else { Sense::click() }).on_hover_text(tip);
+        let (fill, color) = match look {
+            Look::Highlighted => (theme::rgb(0xdedede), theme::rgb(0x1b1b1b)),
+            Look::Regular => (theme::rgb(0x5e5e5e), theme::rgb(0xdedede)),
+            Look::Disabled => (theme::rgb(0x5e5e5e).gamma_multiply(0.4), theme::rgb(0xdedede).gamma_multiply(0.4)),
+        };
+        let fill = if response.hovered() && look != Look::Disabled { fill.gamma_multiply(0.85) } else { fill };
+        ui.painter().circle_filled(rect.center(), 18., fill);
+        icon.paint(ui, Rect::from_center_size(rect.center(), Vec2::splat(20.)), 20., color);
+        if response.clicked() {
+            clicked = Some(key);
+        }
+    }
+    let buttons_left = bar.center().x - row_w / 2.;
+
+    // `CallControls__InfoDisplay`: the title over the status.
+    let info_w = (buttons_left - inner.left() - 8.).max(0.);
+    let title = conversation.map(|c| c.title.clone()).unwrap_or_default();
+    let mut job = egui::text::LayoutJob::simple_singleline(title, theme::semibold(14.), theme::rgb(0xdedede));
+    job.wrap = egui::text::TextWrapping::truncate_at_width(info_w);
+    let title = ui.fonts_mut(|f| f.layout_job(job));
+    let status_y = bar.center().y + 1.;
+    ui.painter().galley(Pos2::new(inner.left(), status_y - 2. - title.size().y), title, Color32::WHITE);
+    let gray20 = theme::rgb(0xc6c6c6);
+    if call.group && matches!(call.status, CallStatus::Connected { .. }) {
+        // `CallParticipantCount`: "N people" and a chevron, opening the list.
+        let count = call.participants.len() + 1;
+        let text = if count == 1 { "1 person".to_owned() } else { format!("{count} people") };
+        let galley = ui.painter().layout_no_wrap(text, theme::regular(13.), gray20);
+        let rect = Rect::from_min_size(Pos2::new(inner.left(), status_y), Vec2::new(galley.size().x + 15., 18.));
+        let response = ui.interact(rect, ui.scope_id().with("participant-count"), Sense::click()).on_hover_text("Participants");
+        ui.painter().galley(rect.min, galley, gray20);
+        theme::paint_symbol(ui.painter(), "chevron-right", Pos2::new(rect.right() - 7., rect.center().y), 14., gray20);
+        if response.clicked() {
+            app.panes.participants_open = !app.panes.participants_open;
+        }
+    } else {
+        let mut job = egui::text::LayoutJob::simple_singleline(status_text(call), theme::regular(13.), gray20);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(info_w);
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        ui.painter().galley(Pos2::new(inner.left(), status_y), galley, gray20);
+    }
+
+    // `CallControls__JoinLeaveButton--hangup`: a red pill at the end.
+    let label = if call.group { "Leave" } else { "End" };
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), theme::semibold(12.), Color32::WHITE);
+    let pill = Rect::from_min_size(Pos2::new(inner.right() - galley.size().x - 32., bar.center().y - 15.5), Vec2::new(galley.size().x + 32., 31.));
+    let response = ui.interact(pill, ui.scope_id().with("hang-up"), Sense::click());
+    let red = theme::rgb(0xf44336);
+    ui.painter().rect_filled(pill, CornerRadius::same(40), if response.hovered() { red.gamma_multiply(0.85) } else { red });
+    ui.painter().galley(pill.center() - galley.size() / 2., galley, Color32::WHITE);
+    if response.clicked() {
+        app.send(Command::HangUp);
+    }
+
+    match clicked {
+        Some("video") => {
+            app.call_view.video_on = Some(!video_on);
+            app.send(Command::SetCallVideo(!video_on));
+        }
+        Some("audio") => {
+            app.call_view.audio_on = !audio_on;
+            app.send(Command::SetCallAudio(!audio_on));
+        }
+        Some("hand") => app.send(Command::RaiseHand(!raised)),
+        Some("present") => {
+            if call.sharing {
+                app.send(Command::StopSharing);
+            } else {
+                app.share_requested = true;
+                app.send(Command::LoadShareSources);
+            }
+        }
+        Some("react") => app.panes.reactions_open = !app.panes.reactions_open,
+        _ => {}
+    }
 }

@@ -389,9 +389,9 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
 
 /// The in-call extras: raise hand, reactions, the participants list and
 /// people waiting to join a link's call. Drawn over the call screen.
-/// The group call's extras; its buttons go left of `x`, where the header's
-/// end.
-pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect, x: f32) {
+/// The group call's extras: reactions, raised hands, the reaction picker
+/// and the participants list.
+pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
     let Some(call) = app.call.clone() else { return };
     if !call.group {
         return;
@@ -427,32 +427,11 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect, x: f32) {
         ui.painter().rect_filled(rect, CornerRadius::same(10), egui::Color32::from_white_alpha(30));
         ui.painter().galley(rect.min + Vec2::new(10., 6.), galley, white);
     }
-    // Buttons, top right: participants, raise hand, react.
-    let mut x = x;
-    let mut top_button = |ui: &mut Ui, icon: Icon, on: bool, tip: &str| {
-        let rect = Rect::from_min_size(Pos2::new(x - 40., area.top() + 12.), Vec2::splat(40.));
-        x -= 48.;
-        let response = ui.interact(rect, ui.scope_id().with(("call-top", tip)), Sense::click()).on_hover_text(tip);
-        let fill = if on { egui::Color32::from_white_alpha(70) } else if response.hovered() { egui::Color32::from_white_alpha(40) } else { egui::Color32::from_white_alpha(20) };
-        ui.painter().circle_filled(rect.center(), 20., fill);
-        icon.paint(ui, rect, 20., white);
-        response
-    };
-    let people = top_button(ui, Icon::Group, app.panes.participants_open, "Participants");
-    let raised = call.local_demux_id.is_some_and(|d| call.raised_hands.contains(&d));
-    let hand = top_button(ui, Icon::RaiseHandLight, raised, if raised { "Lower hand" } else { "Raise hand" });
-    let react = top_button(ui, Icon::HeartPlus, app.panes.reactions_open, "React");
-    if people.clicked() {
-        app.panes.participants_open = !app.panes.participants_open;
-    }
-    if hand.clicked() {
-        app.send(Command::RaiseHand(!raised));
-    }
-    if react.clicked() {
-        app.panes.reactions_open = !app.panes.reactions_open;
-    }
     if app.panes.reactions_open {
-        egui::Area::new(egui::Id::unique("call-reactions")).fixed_pos(react.rect.left_bottom() + Vec2::new(-200., 8.)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        // `CallControls__ReactionPickerContainer`: 70 above the bottom,
+        // min(44%, 32vw) in.
+        let at = Pos2::new(area.left() + (area.width() * 0.44).min(area.width() * 0.32), area.bottom() - 16. - 70. - 56.);
+        egui::Area::new(egui::Id::unique("call-reactions")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             egui::Frame::new().fill(egui::Color32::from_gray(40)).corner_radius(CornerRadius::same(20)).inner_margin(8).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for emoji in ["❤️", "👍", "👎", "😂", "😮", "😢"] {
