@@ -118,6 +118,9 @@ enum Action {
     Open(String),
     /// Read more: 3000 more characters of a long message.
     ReadMore(i64),
+    /// Play or pause a message's audio, or (at, 0 to 1) play from a point.
+    Audio { message_id: i64, path: String, duration: f32, at: Option<f32>, voice: bool },
+    AudioRate,
     /// The context menu for a message, at a point.
     Menu { message_id: i64, at: Pos2 },
     /// The reaction bar for a message, at a point.
@@ -127,7 +130,6 @@ enum Action {
     /// Show a photo or video in the viewer.
     Lightbox { message_id: i64, index: usize },
     Vote { message_id: i64, options: Vec<u32> },
-    Played(i64),
     /// A sticker clicked: open its pack.
     StickerPack(i64),
     PollVotes(i64),
@@ -372,6 +374,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::Open(path) => open_externally(&path),
+            Action::Audio { message_id, path, duration, at, voice } => {
+                let starting = app.audio.active(message_id).is_none_or(|p| !p.playing());
+                app.audio.toggle(message_id, &id, &path, duration, at);
+                // A voice message played: viewed, as Desktop marks it.
+                if voice && starting {
+                    app.send(Command::MarkViewed { message_id });
+                }
+            }
+            Action::AudioRate => app.audio.cycle_rate(),
             Action::ReadMore(message_id) => {
                 if let Some(chat) = app.chat.as_mut() {
                     let limit = chat.expanded.entry(message_id).or_insert(READ_MORE_LENGTH);
@@ -390,7 +401,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             Action::ViewOnce(message_id) => app.send(Command::OpenViewOnce { message_id }),
             Action::Vote { message_id, options } => app.send(Command::VotePoll { message_id, options }),
-            Action::Played(message_id) => app.send(Command::MarkViewed { message_id }),
             Action::StickerPack(message_id) => app.send(Command::FindMessageStickerPack { message_id }),
             Action::PollVotes(message) => {
                 if let Some(chat) = app.chat.as_mut() {
@@ -965,8 +975,12 @@ fn message(
     if let Some(n) = &name_galley {
         content_w = content_w.max(n.size().x.min(inner_max));
     }
-    if m.quote.is_some() || m.link_preview.is_some() || !files.is_empty() || poll_view.is_some() {
+    let all_audio = !files.is_empty() && files.iter().all(|(_, a)| is_audio(a));
+    if m.quote.is_some() || m.link_preview.is_some() || (!files.is_empty() && !all_audio) || poll_view.is_some() {
         content_w = content_w.max(inner_max.min(300.));
+    }
+    if all_audio {
+        content_w = content_w.max(AUDIO_W.min(inner_max));
     }
     let bubble_w = if images.is_empty() { (content_w + pad.x * 2.).min(max_bubble).max(if jumbo { 0. } else { 48. }) } else { media_w };
 
@@ -974,7 +988,11 @@ fn message(
     let name_h = name_galley.as_ref().map(|g| g.size().y + 2.).unwrap_or(0.);
     let quote_h = if m.quote.is_some() { 58. } else { 0. };
     let media_h: f32 = images.iter().map(|(_, a)| media_size(a, Some(bubble_w)).y + 2.).sum();
-    let files_h = files.len() as f32 * 48.;
+    // `MessageAudio`'s countdown shares the line with the time when the
+    // audio is all there is.
+    let audio_shares_meta = files.len() == 1 && all_audio && galley.is_none() && m.link_preview.is_none() && poll_view.is_none() && show_meta && !meta_inline;
+    let audio_h = AUDIO_ROW_H + if audio_shares_meta { 0. } else { 20. };
+    let files_h: f32 = files.iter().map(|(_, a)| if is_audio(a) { audio_h } else { 48. }).sum();
     let preview_h = if m.link_preview.is_some() { 84. } else { 0. };
     let poll_h = poll_view.as_ref().map(|p| p.height).unwrap_or(0.);
     // Desktop's line under a long message's start, while the rest isn't here.
@@ -1044,14 +1062,17 @@ fn message(
         y += pad.y - 2.;
     }
     for (index, a) in &files {
+        if is_audio(a) {
+            let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., audio_h));
+            if let Some(action) = audio_row(ui, ctx, m, a, *index, rect, outgoing) {
+                actions.push(action);
+            }
+            y += audio_h;
+            continue;
+        }
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., 44.));
         if file_row(ui, palette, a, rect, in_color, meta_color, ui.scope_id().with(("file", m.id, *index))) {
             match &a.local_path {
-                // A voice message played: viewed, as Desktop marks it.
-                Some(path) if a.voice && !outgoing => {
-                    actions.push(Action::Open(path.clone()));
-                    actions.push(Action::Played(m.id));
-                }
                 Some(path) => actions.push(Action::Open(path.clone())),
                 None => actions.push(Action::Fetch { message_id: m.id, index: *index }),
             }
@@ -1292,23 +1313,114 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
 }
 
 /// A file attachment: Desktop's generic file icon, name and size.
+fn is_audio(a: &langis_store::AttachmentMeta) -> bool {
+    a.voice || a.content_type.starts_with("audio/")
+}
+
+/// `MessageAudio`: the 36px button, 12 apart from the 47-bar waveform.
+const AUDIO_W: f32 = 36. + 12. + crate::audio::BAR_COUNT as f32 * 4. - 2.;
+/// 2 above, the button row and 5 under it; the countdown line follows.
+const AUDIO_ROW_H: f32 = 2. + 36. + 5.;
+
+/// Desktop's `MessageAudio`: play (or download), the waveform to click
+/// into, then the time left and, while playing, the speed.
+fn audio_row(ui: &Ui, ctx: &Ctx<'_>, m: &Message, a: &langis_store::AttachmentMeta, index: usize, rect: Rect, outgoing: bool) -> Option<Action> {
+    let palette = ctx.palette;
+    let dark = palette.dark;
+    let id = ui.scope_id().with(("audio", m.id, index));
+    let peaks = a.local_path.as_deref().and_then(|p| ctx.app.audio.peaks(ui.ctx(), p));
+    let active = ctx.app.audio.active(m.id);
+    let playing = active.is_some_and(|p| p.playing());
+    let mut action = None;
+
+    // `PlaybackButton`, variant message.
+    let button = Rect::from_min_size(rect.min + Vec2::new(0., 2.), Vec2::splat(36.));
+    let response = ui.interact(button, id.with("button"), Sense::click());
+    let (fill, hover, icon_color) = match (outgoing, dark) {
+        (true, _) => (Color32::from_white_alpha(51), Color32::from_white_alpha(77), Color32::WHITE),
+        (false, true) => (Color32::from_white_alpha(51), Color32::from_white_alpha(77), palette.text),
+        (false, false) => (Color32::from_white_alpha(204), Color32::from_white_alpha(153), palette.text),
+    };
+    ui.painter().circle_filled(button.center(), 18., if response.hovered() { hover } else { fill });
+    let icon_rect = Rect::from_center_size(button.center(), Vec2::splat(20.));
+    match (&a.local_path, &peaks) {
+        (None, _) => {
+            Icon::ArrowDown.paint(ui, icon_rect, 20., icon_color);
+            if response.on_hover_text("Download").clicked() {
+                action = Some(Action::Fetch { message_id: m.id, index });
+            }
+        }
+        (Some(_), None) => {
+            egui::Spinner::new().size(16.).color(icon_color).paint_at(ui, Rect::from_center_size(button.center(), Vec2::splat(16.)));
+        }
+        (Some(path), Some(peaks)) => {
+            Icon::paint(if playing { Icon::PauseFill } else { Icon::PlayFill }, ui, icon_rect, 20., icon_color);
+            if response.on_hover_text(if playing { "Pause audio" } else { "Play audio" }).clicked() {
+                action = Some(Action::Audio { message_id: m.id, path: path.clone(), duration: peaks.duration, at: None, voice: a.voice && !outgoing });
+            }
+        }
+    }
+
+    // `Waveform`: 2px bars, 2 apart, 4 to 20 tall (2 until it's here), the
+    // played part brighter and the bar it's at full height.
+    let wave = Rect::from_min_size(Pos2::new(button.right() + 12., button.top() + 8.), Vec2::new(crate::audio::BAR_COUNT as f32 * 4. - 2., 20.));
+    let (bar, bar_active) = match (outgoing, dark) {
+        (true, _) => (Color32::from_white_alpha(102), Color32::from_white_alpha(204)),
+        (false, true) => (Color32::from_white_alpha(102), Color32::from_white_alpha(179)),
+        (false, false) => (Color32::from_black_alpha(102), Color32::from_black_alpha(204)),
+    };
+    let duration = peaks.as_ref().map(|p| p.duration).unwrap_or(0.);
+    let position = active.map(|p| p.position()).unwrap_or(0.);
+    let at_bar = crate::audio::BAR_COUNT as f32 * position / duration.max(1e-6);
+    let min_h = if peaks.is_some() { 4. } else { 2. };
+    for i in 0..crate::audio::BAR_COUNT {
+        let value = peaks.as_ref().and_then(|p| p.bars.get(i).copied()).unwrap_or(0.);
+        let highlight = (i as f32) < at_bar;
+        let h = if highlight && i as f32 + 1. >= at_bar { 20. } else { (20. * value).max(min_h) };
+        let x = wave.left() + i as f32 * 4.;
+        let r = Rect::from_center_size(Pos2::new(x + 1., wave.center().y), Vec2::new(2., h));
+        ui.painter().rect_filled(r, CornerRadius::same(1), if highlight { bar_active } else { bar });
+    }
+    if let (Some(path), Some(peaks)) = (&a.local_path, &peaks) {
+        let response = ui.interact(wave.expand2(Vec2::new(0., 8.)), id.with("wave"), Sense::click());
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if response.clicked()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let at = ((p.x - wave.left()) / wave.width()).clamp(0., 1.);
+            action = Some(Action::Audio { message_id: m.id, path: path.clone(), duration: peaks.duration, at: Some(at), voice: a.voice && !outgoing });
+        }
+    }
+
+    // The countdown, under the button, and the speed beside it.
+    let line = rect.top() + AUDIO_ROW_H + 1.;
+    let count_color = match (outgoing, dark) {
+        (true, _) | (false, true) => Color32::from_white_alpha(204),
+        (false, false) => Color32::from_black_alpha(153),
+    };
+    let count = if a.local_path.is_none() || duration < 1. { crate::format::file_size(a.size) } else { crate::audio::playback_text(duration - position) };
+    ui.painter().text(Pos2::new(button.center().x, line), Align2::CENTER_TOP, count, theme::regular(12.), count_color);
+    if playing && let Some(player) = active {
+        let pill = Rect::from_min_size(Pos2::new(button.right() + 12., line - 1.), Vec2::new(38., 18.));
+        let response = ui.interact(pill, id.with("rate"), Sense::click());
+        let (fill, text) = match (outgoing, dark) {
+            (true, _) => (Color32::from_white_alpha(51), Color32::from_white_alpha(204)),
+            (false, true) => (Color32::from_white_alpha(20), theme::rgb(0xb9b9b9)),
+            (false, false) => (Color32::from_black_alpha(20), theme::rgb(0x5e5e5e)),
+        };
+        ui.painter().rect_filled(pill, CornerRadius::same(4), fill);
+        ui.painter().text(pill.center(), Align2::CENTER_CENTER, crate::audio::rate_label(player.rate), theme::semibold(11.), text);
+        if response.on_hover_text("Playback speed").clicked() {
+            action = Some(Action::AudioRate);
+        }
+    }
+    action
+}
+
 fn file_row(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rect, text: Color32, meta: Color32, id: egui::Id) -> bool {
     let response = ui.interact(rect, id, Sense::click());
-    let audio = a.voice || a.content_type.starts_with("audio/");
-    if audio {
-        // Desktop's audio player: a round play button.
-        let circle = Rect::from_min_size(rect.min + Vec2::new(0., 4.), Vec2::splat(36.));
-        let (fill, mark) = if text == Color32::WHITE { (Color32::WHITE, palette.accent) } else { (palette.accent, Color32::WHITE) };
-        ui.painter().circle_filled(circle.center(), 18., fill);
-        let c = circle.center();
-        let tri = vec![c + Vec2::new(-5., -8.), c + Vec2::new(-5., 8.), c + Vec2::new(9., 0.)];
-        ui.painter().add(egui::Shape::convex_polygon(tri, mark, Stroke::NONE));
-        let name = if a.voice { "Voice message".to_owned() } else { a.file_name.clone().unwrap_or_else(|| "Audio".into()) };
-        ui.painter().text(rect.min + Vec2::new(46., 3.), Align2::LEFT_TOP, name, theme::medium(14.), text);
-        let detail = if a.local_path.is_some() { crate::format::file_size(a.size) } else { format!("{} · Download", crate::format::file_size(a.size)) };
-        ui.painter().text(rect.min + Vec2::new(46., 24.), Align2::LEFT_TOP, detail, theme::regular(12.), meta);
-        return response.clicked();
-    }
     let icon = Rect::from_min_size(rect.min + Vec2::new(0., 4.), Vec2::new(30., 36.));
     ui.painter().rect_filled(icon, CornerRadius::same(4), if text == Color32::WHITE { Color32::from_white_alpha(230) } else { palette.popover });
     let ext = a

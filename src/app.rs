@@ -119,6 +119,8 @@ pub struct App {
     pub typing: HashMap<ConversationId, HashSet<String>>,
     pub call: Option<CallUpdate>,
     pub call_view: crate::call::CallView,
+    /// Voice messages and audio files playing in the chat.
+    pub audio: crate::audio::Audio,
     pub call_devices: CallDevices,
     pub share_sources: Option<Vec<ShareSource>>,
     /// Whether this desktop can share a screen at all (no portal: no
@@ -199,6 +201,7 @@ impl App {
             typing: HashMap::new(),
             call: None,
             call_view: Default::default(),
+            audio: Default::default(),
             call_devices: Default::default(),
             share_sources: None,
             share_available: None,
@@ -748,7 +751,24 @@ impl App {
         self.finish_send(prompt.then);
     }
 
+    /// Desktop's consecutive playback: when a voice message ends, the
+    /// next message plays if it's a voice message too.
+    fn play_next_voice(&mut self, (conversation, message_id): (ConversationId, i64)) {
+        let Some(chat) = self.chat.as_ref().filter(|c| c.id == conversation) else { return };
+        let Some(at) = chat.messages.iter().position(|m| m.id == message_id) else { return };
+        let Some(next) = chat.messages.get(at + 1) else { return };
+        let Some(voice) = next.attachments.iter().find(|a| a.voice) else { return };
+        let Some(path) = voice.local_path.clone() else { return };
+        let Some(peaks) = self.audio.peaks(&self.ctx, &path) else { return };
+        let (next_id, incoming) = (next.id, next.direction == langis_store::Direction::Incoming);
+        self.audio.toggle(next_id, &conversation, &path, peaks.duration, None);
+        if incoming {
+            self.send(Command::MarkViewed { message_id: next_id });
+        }
+    }
+
     pub fn shutdown(&mut self) {
+        self.audio.stop();
         if let Some(chat) = self.chat.take() {
             chat.save_draft(self);
         }
@@ -760,6 +780,9 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(finished) = self.audio.tick(ctx) {
+            self.play_next_voice(finished);
+        }
         self.focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         // Desktop's `requestCloseConfirmation`: closing during a call asks
         // first.
