@@ -1044,6 +1044,19 @@ fn message(
     let left = bubble.left() + pad.x;
 
     if let Some(n) = name_galley {
+        // `ContactName`: clicking opens their `ContactModal`.
+        let rect = Rect::from_min_size(Pos2::new(left, y), n.size());
+        let response = ui.interact(rect, ui.scope_id().with(("author", m.id)), Sense::click());
+        if !ctx.selecting {
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if response.clicked()
+                && let Some(aci) = m.author.clone()
+            {
+                actions.push(Action::Contact(aci));
+            }
+        }
         ui.painter().galley(Pos2::new(left, y), n, palette.text);
         y += name_h;
     }
