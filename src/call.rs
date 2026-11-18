@@ -17,13 +17,31 @@ pub struct CallView {
     textures: HashMap<String, (u64, TextureHandle)>,
     pub audio_on: bool,
     pub video_on: Option<bool>,
+    /// Desktop's `CallingPip`: the call minimized to a small window over
+    /// the app.
+    pub pip: bool,
+    pip_snap: PipSnap,
+    /// Where the pointer took hold of the window, while it's dragged.
+    pip_grab: Option<Vec2>,
 }
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None }
     }
 }
+
+/// `CallingPip`'s `PositionMode`: against an edge, at an offset along it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PipSnap {
+    Left(f32),
+    Right(f32),
+    Top(f32),
+    Bottom(f32),
+}
+
+const PIP_TOP_MARGIN: f32 = 78.;
+const PIP_PADDING: f32 = 15.;
 
 impl CallView {
     /// The slot's latest frame as a texture, uploaded only when it's new.
@@ -265,4 +283,162 @@ fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate
 fn fit_in(size: Vec2, outer: Rect) -> Rect {
     let scale = (outer.width() / size.x.max(1.)).min(outer.height() / size.y.max(1.));
     Rect::from_center_size(outer.center(), size * scale)
+}
+
+/// Fills `rect` with `texture` as `object-fit: cover` does: scaled to fill,
+/// cropped evenly.
+fn paint_cover(ui: &Ui, texture: &TextureHandle, size: Vec2, rect: Rect, radius: CornerRadius) {
+    let (photo, frame) = (size.x / size.y.max(1.), rect.width() / rect.height().max(1.));
+    let uv = if photo > frame {
+        let keep = frame / photo;
+        Rect::from_min_max(Pos2::new((1. - keep) / 2., 0.), Pos2::new((1. + keep) / 2., 1.))
+    } else {
+        let keep = photo / frame;
+        Rect::from_min_max(Pos2::new(0., (1. - keep) / 2.), Pos2::new(1., (1. + keep) / 2.))
+    };
+    egui::Image::new(texture).uv(uv).corner_radius(radius).paint_at(ui, rect);
+}
+
+/// One of `CallingPip`'s 36px round buttons; true when clicked.
+fn pip_button(ui: &Ui, id: egui::Id, center: Pos2, icon: Icon, fill: Color32, color: Color32, tip: &str) -> bool {
+    let rect = Rect::from_center_size(center, Vec2::splat(36.));
+    let response = ui.interact(rect, id, Sense::click()).on_hover_text(tip);
+    let fill = if response.hovered() { fill.gamma_multiply(0.85) } else { fill };
+    ui.painter().circle_filled(center, 18., fill);
+    icon.paint(ui, Rect::from_center_size(center, Vec2::splat(20.)), 20., color);
+    response.clicked()
+}
+
+/// Desktop's `CallingPip`: the minimized call, over the app. Dragged by
+/// the pointer, it snaps to the nearest edge when let go; hovered, it shows
+/// Fullscreen and the video, mute and hang up buttons.
+pub fn pip(app: &mut App, ctx: &egui::Context) {
+    let Some(call) = app.call.clone() else { return };
+    if !app.call_view.pip {
+        return;
+    }
+    let palette = Palette::of(ctx);
+    let video = app.backend.as_ref().map(|b| b.call_video().clone()).unwrap_or_default();
+    let video_on = *app.call_view.video_on.get_or_insert(call.video);
+    let audio_on = app.call_view.audio_on;
+    let screen = ctx.content_rect();
+    let large = screen.width() >= 1200.;
+    let width = if large { 224. } else { 160. };
+    let mut height = if large { 400. } else { 286. };
+    let remote = if call.group {
+        call.participants.iter().find(|p| p.video).map(|p| video.group.slot(p.demux_id)).and_then(|slot| app.call_view.texture(ctx, "pip-remote", &slot))
+    } else {
+        (call.remote_video || call.remote_sharing).then(|| app.call_view.texture(ctx, "remote", &video.remote)).flatten()
+    };
+    // A portrait picture sets the height, within 1.2 to 2 times the width.
+    if let Some((_, size)) = &remote {
+        let ratio = size.y / size.x.max(1.);
+        if (1.2..=2.).contains(&ratio) {
+            height = width * ratio;
+        }
+    }
+    let (min_x, max_x) = (screen.left() + PIP_PADDING, (screen.right() - PIP_PADDING - width).max(screen.left() + PIP_PADDING));
+    let (min_y, max_y) = (screen.top() + PIP_TOP_MARGIN, (screen.bottom() - PIP_PADDING - height).max(screen.top() + PIP_TOP_MARGIN));
+    let snapped = match app.call_view.pip_snap {
+        PipSnap::Left(y) => Pos2::new(min_x, y),
+        PipSnap::Right(y) => Pos2::new(max_x, y),
+        PipSnap::Top(x) => Pos2::new(x, min_y),
+        PipSnap::Bottom(x) => Pos2::new(x, max_y),
+    };
+    let snapped = Pos2::new(snapped.x.clamp(min_x, max_x), snapped.y.clamp(min_y, max_y));
+    let id = egui::Id::unique("calling-pip");
+    let pointer = ctx.pointer_latest_pos();
+    let target = match (app.call_view.pip_grab, pointer) {
+        (Some(grab), Some(pointer)) => pointer - grab,
+        _ => snapped,
+    };
+    // `transform ease-out 300ms`, none while dragged.
+    let time = if app.call_view.pip_grab.is_some() { 0. } else { 0.3 };
+    let pos = Pos2::new(
+        ctx.animate_value_with_time(id.with("x"), target.x, time),
+        ctx.animate_value_with_time(id.with("y"), target.y, time),
+    );
+    let mut toggle_video = false;
+    let mut toggle_audio = false;
+    let mut hang_up = false;
+    let mut full = false;
+    egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click_and_drag());
+        let radius = CornerRadius::same(18);
+        let shadow = egui::epaint::Shadow { offset: [0, 8], blur: 20, spread: 0, color: Color32::from_black_alpha(77) };
+        ui.painter().add(shadow.as_shape(rect, radius));
+        ui.painter().rect_filled(rect, radius, theme::rgb(0x121212));
+        match &remote {
+            Some((texture, size)) => paint_cover(ui, texture, *size, rect, radius),
+            None => {
+                if let Some(c) = app.conversation(&call.conversation).cloned() {
+                    widgets::paint_avatar(ui, Rect::from_center_size(rect.center(), Vec2::splat(if large { 80. } else { 64. })), &widgets::AvatarSpec::of(&c));
+                }
+            }
+        }
+        // Our camera, top left, when there's someone to see besides us.
+        let lonely = call.group && call.participants.is_empty();
+        if video_on && !lonely
+            && let Some((texture, size)) = app.call_view.texture(ctx, "local", &video.local)
+        {
+            let local = Rect::from_min_size(rect.min + Vec2::splat(8.), if large { Vec2::new(120., 90.) } else { Vec2::new(80., 60.) });
+            ui.painter().rect_filled(local, CornerRadius::same(12), theme::rgb(0x2e2e2e));
+            paint_cover(ui, &texture, size, local, CornerRadius::same(12));
+        }
+        // The controls fade in while hovered (`ease-out-local-preview`, 0.5s).
+        let hovered = pointer.is_some_and(|p| rect.contains(p)) || app.call_view.pip_grab.is_some();
+        let shown = ctx.animate_bool_with_time(id.with("controls"), hovered, 0.5);
+        if shown > 0. {
+            ui.scope(|ui| {
+                ui.multiply_opacity(shown);
+                let (gray15, gray60, gray80) = (theme::rgb(0xe9e9e9), theme::rgb(0x5e5e5e), theme::rgb(0x2e2e2e));
+                full = pip_button(ui, id.with("full"), Pos2::new(rect.right() - 16. - 18., rect.top() + 16. + 18.), Icon::PipMaximizeLight, gray80, gray15, "Fullscreen call");
+                // The actions slide up from below into a bar 4 in from the edges.
+                let bottom = rect.bottom() + 60. - (60. + 4.) * shown;
+                let bar = Rect::from_min_max(Pos2::new(rect.left() + 4., bottom - 56.), Pos2::new(rect.right() - 4., bottom));
+                ui.painter().with_clip_rect(rect).rect_filled(bar, CornerRadius::same(18), theme::rgb(0x343434));
+                let y = bar.center().y;
+                let (cam_icon, cam_fill, cam_color) = if video_on { (Icon::VideoFillLight, gray60, gray15) } else { (Icon::VideoSlashFillLight, gray15, theme::rgb(0x1b1b1b)) };
+                let (mic_icon, mic_fill, mic_color) = if audio_on { (Icon::MicFillLight, gray60, gray15) } else { (Icon::MicSlashFillLight, gray15, theme::rgb(0x1b1b1b)) };
+                toggle_video = pip_button(ui, id.with("video"), Pos2::new(bar.center().x - 31. - 18., y), cam_icon, cam_fill, cam_color, if video_on { "Turn off camera" } else { "Turn on camera" });
+                toggle_audio = pip_button(ui, id.with("audio"), Pos2::new(bar.center().x, y), mic_icon, mic_fill, mic_color, if audio_on { "Mute" } else { "Unmute" });
+                hang_up = pip_button(ui, id.with("hangup"), Pos2::new(bar.center().x + 31. + 18., y), Icon::PhoneDownFillLight, palette.destructive, Color32::WHITE, "Leave call");
+            });
+        }
+        if response.drag_started()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            app.call_view.pip_grab = Some(p - rect.min);
+        }
+        response.on_hover_cursor(if app.call_view.pip_grab.is_some() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
+        // Let go: the nearest edge (`handleMouseUp`'s snap candidates).
+        if app.call_view.pip_grab.is_some() && !ctx.input(|i| i.pointer.any_down()) {
+            app.call_view.pip_grab = None;
+            let at = rect.min;
+            let candidates = [
+                (at.x - screen.left(), PipSnap::Left(at.y)),
+                (screen.right() - (at.x + width), PipSnap::Right(at.y)),
+                (at.y - (screen.top() + PIP_TOP_MARGIN), PipSnap::Top(at.x)),
+                (screen.bottom() - (at.y + height), PipSnap::Bottom(at.x)),
+            ];
+            if let Some((_, snap)) = candidates.into_iter().min_by(|a, b| a.0.total_cmp(&b.0)) {
+                app.call_view.pip_snap = snap;
+            }
+        }
+    });
+    if toggle_video {
+        app.call_view.video_on = Some(!video_on);
+        app.send(Command::SetCallVideo(!video_on));
+    }
+    if toggle_audio {
+        app.call_view.audio_on = !audio_on;
+        app.send(Command::SetCallAudio(!audio_on));
+    }
+    if hang_up {
+        app.send(Command::HangUp);
+    }
+    if full {
+        app.call_view.pip = false;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(33));
 }

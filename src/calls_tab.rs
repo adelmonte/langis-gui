@@ -427,6 +427,20 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
     }
     // Buttons, top right: participants, raise hand, react.
     let mut x = area.right() - 16.;
+    // `CallingHeader`'s Minimize call, into `CallingPip`.
+    {
+        let rect = Rect::from_min_size(Pos2::new(x - 40., area.top() + 12.), Vec2::splat(40.));
+        x -= 48.;
+        let response = ui.interact(rect, ui.scope_id().with("call-pip"), Sense::click()).on_hover_text("Minimize call");
+        let fill = if response.hovered() { egui::Color32::from_white_alpha(40) } else { egui::Color32::from_white_alpha(20) };
+        ui.painter().circle_filled(rect.center(), 20., fill);
+        theme::paint_symbol(ui.painter(), "pip", rect.center(), 20., white);
+        if response.clicked() {
+            app.call_view.pip = true;
+            app.panes.participants_open = false;
+            app.panes.reactions_open = false;
+        }
+    }
     let mut top_button = |ui: &mut Ui, icon: Icon, on: bool, tip: &str| {
         let rect = Rect::from_min_size(Pos2::new(x - 40., area.top() + 12.), Vec2::splat(40.));
         x -= 48.;

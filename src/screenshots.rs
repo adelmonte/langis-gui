@@ -117,7 +117,18 @@ fn screenshots() {
     }
     wait(&mut harness, "call", |_| true);
     save(&mut harness, "call");
+    // Minimized: the chats, with the call in a corner, its controls shown.
+    harness.state_mut().call_view.pip = true;
+    for _ in 0..30 {
+        harness.step();
+    }
+    harness.hover_at(egui::pos2(1100., 200.));
+    for _ in 0..40 {
+        harness.step();
+    }
+    save(&mut harness, "call-pip");
     harness.state_mut().call = None;
+    harness.state_mut().call_view = Default::default();
 
     // The link screen, with a made-up provisioning URL.
     let qr = crate::startup::qr_texture(&harness.state().ctx, "sgnl://linkdevice?uuid=demo-only&pub_key=not-a-real-key");
