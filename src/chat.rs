@@ -1,7 +1,7 @@
 //! The open chat: Desktop's conversation header, timeline and composition
 //! area.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -40,6 +40,9 @@ pub struct ChatView {
     pub emoji_open: bool,
     pub emoji: crate::emoji_picker::Picker,
     pub revealed: HashSet<i64>,
+    /// Desktop's `displayLimit`: how much of a long message's text shows,
+    /// raised by Read more.
+    pub expanded: HashMap<i64, usize>,
     /// Content height before older messages were added on top, to keep
     /// the view where it was.
     keep_from_height: Option<f32>,
@@ -113,6 +116,8 @@ enum Action {
     React { message_id: i64, emoji: String, remove: bool },
     Reply(i64),
     Open(String),
+    /// Read more: 3000 more characters of a long message.
+    ReadMore(i64),
     /// The context menu for a message, at a point.
     Menu { message_id: i64, at: Pos2 },
     /// The reaction bar for a message, at a point.
@@ -147,6 +152,7 @@ impl ChatView {
             emoji_open: false,
             emoji: Default::default(),
             revealed: HashSet::new(),
+            expanded: HashMap::new(),
             keep_from_height: None,
             last_height: 0.,
             scroll_to_bottom: 10,
@@ -366,6 +372,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::Open(path) => open_externally(&path),
+            Action::ReadMore(message_id) => {
+                if let Some(chat) = app.chat.as_mut() {
+                    let limit = chat.expanded.entry(message_id).or_insert(READ_MORE_LENGTH);
+                    *limit += 3000;
+                }
+            }
             Action::Menu { message_id, at } => {
                 if let Some(chat) = app.chat.as_mut() {
                     chat.popup = Some(crate::actions::Popup::Menu { message: message_id, at });
@@ -681,7 +693,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             crate::actions::Popup::Menu { message, .. } | crate::actions::Popup::Reactions { message, .. } => *message,
         });
         let selecting = chat.selected.is_some();
-        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting };
+        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting, expanded: &chat.expanded };
         let messages = &chat.messages;
         let mut reached = None;
         for (i, m) in messages.iter().enumerate() {
@@ -783,6 +795,7 @@ struct Ctx<'a> {
     /// In select mode: the bubbles take no input, and incoming ones make
     /// room for the checkbox.
     selecting: bool,
+    expanded: &'a HashMap<i64, usize>,
 }
 
 /// The top of a chat's history: Desktop's `ConversationHero`.
@@ -877,7 +890,8 @@ fn message(
     } else {
         let link_color = if outgoing { Color32::WHITE } else { palette.accent_text };
         let font_size = if jumbo { 32. } else { 14. };
-        Some(rich_text(m, &|sid| ctx.app.name(sid), in_color, link_color, revealed, font_size))
+        let limit = ctx.expanded.get(&m.id).copied().unwrap_or(READ_MORE_LENGTH);
+        Some(rich_text(m, &|sid| ctx.app.name(sid), in_color, link_color, revealed, font_size, limit))
     };
 
     // Desktop's `getWidth`: a photo's bubble is as wide as the photo, and
@@ -1073,7 +1087,7 @@ fn message(
             }
             if text_response.clicked() {
                 if let Some((_, url)) = rich.links.iter().find(|(r, _)| r.contains(&at)) {
-                    actions.push(Action::Open(url.clone()));
+                    actions.push(if url == READ_MORE { Action::ReadMore(m.id) } else { Action::Open(url.clone()) });
                 } else if !revealed && rich.spoilers.iter().any(|r| r.contains(&at)) {
                     revealed_now = Some(true);
                 }
@@ -1452,11 +1466,30 @@ pub struct Rich {
     pub spoilers: Vec<std::ops::Range<usize>>,
 }
 
-pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, link_color: Color32, revealed: bool, size: f32) -> Rich {
+/// Desktop's `MessageBodyReadMore`: text past 800 characters (when there
+/// are over 900) waits behind Read more, cut where no link is split.
+pub const READ_MORE_LENGTH: usize = 800;
+const READ_MORE: &str = "langis:read-more";
+
+/// Where `body` is cut to show `limit` characters, if it is.
+fn read_more_cut(body: &str, links: &[(std::ops::Range<usize>, String)], limit: usize) -> Option<usize> {
+    if body.chars().count() <= limit.saturating_add(100) {
+        return None;
+    }
+    let mut end = body.char_indices().nth(limit).map_or(body.len(), |(i, _)| i);
+    if let Some((r, _)) = links.iter().find(|(r, _)| r.start < end && end < r.end) {
+        end = r.end;
+    }
+    (end < body.len()).then_some(end)
+}
+
+pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, link_color: Color32, revealed: bool, size: f32, limit: usize) -> Rich {
     use langis_store::TextStyle;
     let mention_fill = if color == Color32::WHITE { Color32::from_white_alpha(56) } else { Color32::from_black_alpha(20) };
-    let body = m.long_text.as_ref().map(|_| m.body.as_str()).unwrap_or(&m.body);
-    let links = find_links(body);
+    let full = m.long_text.as_ref().map(|_| m.body.as_str()).unwrap_or(&m.body);
+    let links = find_links(full);
+    let cut = read_more_cut(full, &links, limit);
+    let body = &full[..cut.unwrap_or(full.len())];
     let mut cuts = vec![0, body.len()];
     for s in &m.styles {
         cuts.extend([s.start, s.start + s.len]);
@@ -1522,6 +1555,13 @@ pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, lin
         }
         append_with_emoji(&mut job, &text, format);
         chars += n;
+    }
+    if cut.is_some() {
+        let format = egui::TextFormat { font_id: theme::regular(size), color, line_height: Some(size * 1.43), ..Default::default() };
+        job.append("... ", 0., format.clone());
+        chars += 4;
+        job.append("Read more", 0., egui::TextFormat { font_id: theme::semibold(size), ..format });
+        out_links.push((chars..chars + 9, READ_MORE.to_owned()));
     }
     Rich { job, links: out_links, spoilers }
 }
@@ -1591,7 +1631,19 @@ pub fn expiry_left(m: &Message) -> Option<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::find_links;
+    use super::{find_links, read_more_cut};
+
+    #[test]
+    fn read_more_cuts_long_text_without_splitting_links() {
+        let short = "a".repeat(900);
+        assert_eq!(read_more_cut(&short, &find_links(&short), 800), None);
+        let long = "a".repeat(901);
+        assert_eq!(read_more_cut(&long, &find_links(&long), 800), Some(800));
+        let linked = format!("{} https://example.org/{} {}", "a".repeat(790), "b".repeat(40), "c".repeat(200));
+        let links = find_links(&linked);
+        let end = read_more_cut(&linked, &links, 800).unwrap();
+        assert_eq!(end, links[0].0.end);
+    }
 
     #[test]
     fn only_web_links() {

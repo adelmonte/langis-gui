@@ -271,7 +271,7 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
 
 /// The message's text as a person reads it: mentions by name.
 pub fn plain_text(app: &App, m: &Message) -> String {
-    let rich = crate::chat::rich_text(m, &|sid| app.name(sid), Color32::WHITE, Color32::WHITE, true, 14.);
+    let rich = crate::chat::rich_text(m, &|sid| app.name(sid), Color32::WHITE, Color32::WHITE, true, 14., usize::MAX);
     rich.job.text
 }
 
