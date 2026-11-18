@@ -157,6 +157,8 @@ fn decode(path: &str) -> Option<Vec<f32>> {
 pub struct Player {
     pub message_id: i64,
     pub conversation: langis_store::ConversationId,
+    /// `getVoiceNoteTitle`: who sent it, or "You".
+    pub title: String,
     path: String,
     pub duration: f32,
     pub rate: f32,
@@ -274,7 +276,7 @@ impl Audio {
     }
 
     /// Plays or pauses a message's audio; `at`, from 0 to 1, seeks.
-    pub fn toggle(&mut self, message_id: i64, conversation: &langis_store::ConversationId, path: &str, duration: f32, at: Option<f32>) {
+    pub fn toggle(&mut self, message_id: i64, conversation: &langis_store::ConversationId, title: String, path: &str, duration: f32, at: Option<f32>) {
         match self.player.as_mut().filter(|p| p.message_id == message_id) {
             Some(player) => {
                 if let Some(at) = at {
@@ -295,6 +297,7 @@ impl Audio {
                 let mut player = Player {
                     message_id,
                     conversation: conversation.clone(),
+                    title,
                     path: path.to_owned(),
                     duration,
                     rate,
@@ -344,6 +347,7 @@ impl Audio {
         self.player = Some(Player {
             message_id,
             conversation: conversation.clone(),
+            title: "Maya Chen".into(),
             path: String::new(),
             duration,
             rate,
@@ -356,6 +360,72 @@ impl Audio {
     pub fn stop(&mut self) {
         self.player = None;
     }
+
+    pub fn pause(&mut self) {
+        if let Some(player) = self.player.as_mut() {
+            player.pause();
+        }
+    }
+
+    pub fn resume(&mut self) {
+        if let Some(player) = self.player.as_mut().filter(|p| !p.playing()) {
+            player.start();
+        }
+    }
+}
+
+/// Desktop's `MiniPlayer`: under the chat's header while anything is
+/// playing or paused: play or pause, who it's from and how far in, the
+/// speed and close. True when shown.
+pub fn mini_player(app: &mut crate::app::App, ui: &mut egui::Ui, palette: &crate::theme::Palette) -> bool {
+    use egui::{Align2, CornerRadius, Pos2, Rect, Sense, Vec2};
+    let Some(player) = app.audio.player.as_ref() else { return false };
+    let (playing, rate) = (player.playing(), player.rate);
+    let text = format!("{}  ·  {}", player.title, playback_text(player.position()));
+    let mut toggle = false;
+    let mut cycle = false;
+    let mut close = false;
+    let fill = if palette.dark { crate::theme::rgb(0x3b3b3b) } else { crate::theme::rgb(0xf6f6f6) };
+    egui::Panel::top("mini-player").exact_size(36.).show_separator_line(false).frame(egui::Frame::new().fill(fill)).show(ui, |ui| {
+        let rect = ui.max_rect();
+        let mut x = rect.left() + 16.;
+        let y = rect.center().y;
+        let button = Rect::from_center_size(Pos2::new(x + 7., y), Vec2::splat(16.));
+        let response = ui.interact(button, ui.scope_id().with("mini-play"), Sense::click()).on_hover_text(if playing { "Pause audio" } else { "Play audio" });
+        crate::icons::Icon::paint(if playing { crate::icons::Icon::PauseFill } else { crate::icons::Icon::PlayFill }, ui, button, 16., palette.text);
+        toggle = response.clicked();
+        x += 14. + 18.;
+        let close_rect = Rect::from_center_size(Pos2::new(rect.right() - 16. - 8., y), Vec2::splat(16.));
+        let response = ui.interact(close_rect, ui.scope_id().with("mini-close"), Sense::click()).on_hover_text("Close");
+        if response.hovered() {
+            ui.painter().rect_filled(close_rect, CornerRadius::same(4), if palette.dark { crate::theme::rgb(0x2e2e2e) } else { crate::theme::rgb(0xe9e9e9) });
+        }
+        crate::icons::Icon::X.paint(ui, close_rect, 16., if palette.dark { crate::theme::rgb(0xdedede) } else { crate::theme::rgb(0x3b3b3b) });
+        close = response.clicked();
+        let mut right = close_rect.left() - 18.;
+        if playing {
+            let pill = Rect::from_min_size(Pos2::new(right - 38., y - 9.), Vec2::new(38., 18.));
+            let (pill_fill, pill_text) = if palette.dark { (egui::Color32::from_white_alpha(20), crate::theme::rgb(0xb9b9b9)) } else { (egui::Color32::from_black_alpha(20), crate::theme::rgb(0x5e5e5e)) };
+            ui.painter().rect_filled(pill, CornerRadius::same(4), pill_fill);
+            ui.painter().text(pill.center(), Align2::CENTER_CENTER, rate_label(rate), crate::theme::semibold(11.), pill_text);
+            cycle = ui.interact(pill, ui.scope_id().with("mini-rate"), Sense::click()).on_hover_text("Playback speed").clicked();
+            right = pill.left() - 18.;
+        }
+        let mut job = egui::text::LayoutJob::simple_singleline(text, crate::theme::regular(14.), palette.text);
+        job.wrap = egui::text::TextWrapping::truncate_at_width((right - x).max(0.));
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        ui.painter().galley(Pos2::new(x, y - galley.size().y / 2.), galley, palette.text);
+    });
+    if toggle {
+        if playing { app.audio.pause() } else { app.audio.resume() }
+    }
+    if cycle {
+        app.audio.cycle_rate();
+    }
+    if close {
+        app.audio.stop();
+    }
+    true
 }
 
 #[cfg(test)]

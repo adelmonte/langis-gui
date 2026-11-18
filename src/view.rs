@@ -29,6 +29,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     } else if app.chat.is_some() {
                         crate::chat::show(app, ui);
                     } else {
+                        crate::audio::mini_player(app, ui, &palette);
                         empty_chat(ui, &palette);
                     }
                 });

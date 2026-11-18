@@ -761,7 +761,8 @@ impl App {
         let Some(path) = voice.local_path.clone() else { return };
         let Some(peaks) = self.audio.peaks(&self.ctx, &path) else { return };
         let (next_id, incoming) = (next.id, next.direction == langis_store::Direction::Incoming);
-        self.audio.toggle(next_id, &conversation, &path, peaks.duration, None);
+        let title = if incoming { next.author.as_deref().map(|a| self.name(a)).unwrap_or_default() } else { "You".to_owned() };
+        self.audio.toggle(next_id, &conversation, title, &path, peaks.duration, None);
         if incoming {
             self.send(Command::MarkViewed { message_id: next_id });
         }

@@ -119,7 +119,7 @@ enum Action {
     /// Read more: 3000 more characters of a long message.
     ReadMore(i64),
     /// Play or pause a message's audio, or (at, 0 to 1) play from a point.
-    Audio { message_id: i64, path: String, duration: f32, at: Option<f32>, voice: bool },
+    Audio { message_id: i64, title: String, path: String, duration: f32, at: Option<f32>, voice: bool },
     AudioRate,
     /// The context menu for a message, at a point.
     Menu { message_id: i64, at: Pos2 },
@@ -330,7 +330,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         chat.selected = None;
     }
     crate::search::find_bar(app, ui, &palette, &mut chat);
-    pinned_bar(app, ui, &palette, &mut chat);
+    // Desktop's header shows the mini player, while there is one, in
+    // place of the pinned messages.
+    if !crate::audio::mini_player(app, ui, &palette) {
+        pinned_bar(app, ui, &palette, &mut chat);
+    }
     if chat.selected.is_some() {
         select_bar(app, ui, &palette, &mut chat);
     } else if !crate::panes::message_request_bar(app, ui, &palette, &conversation) {
@@ -374,9 +378,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::Open(path) => open_externally(&path),
-            Action::Audio { message_id, path, duration, at, voice } => {
+            Action::Audio { message_id, title, path, duration, at, voice } => {
                 let starting = app.audio.active(message_id).is_none_or(|p| !p.playing());
-                app.audio.toggle(message_id, &id, &path, duration, at);
+                app.audio.toggle(message_id, &id, title, &path, duration, at);
                 // A voice message played: viewed, as Desktop marks it.
                 if voice && starting {
                     app.send(Command::MarkViewed { message_id });
@@ -1331,6 +1335,7 @@ fn audio_row(ui: &Ui, ctx: &Ctx<'_>, m: &Message, a: &langis_store::AttachmentMe
     let peaks = a.local_path.as_deref().and_then(|p| ctx.app.audio.peaks(ui.ctx(), p));
     let active = ctx.app.audio.active(m.id);
     let playing = active.is_some_and(|p| p.playing());
+    let title = if outgoing { "You".to_owned() } else { m.author.as_deref().map(|a| ctx.app.name(a)).unwrap_or_default() };
     let mut action = None;
 
     // `PlaybackButton`, variant message.
@@ -1356,7 +1361,7 @@ fn audio_row(ui: &Ui, ctx: &Ctx<'_>, m: &Message, a: &langis_store::AttachmentMe
         (Some(path), Some(peaks)) => {
             Icon::paint(if playing { Icon::PauseFill } else { Icon::PlayFill }, ui, icon_rect, 20., icon_color);
             if response.on_hover_text(if playing { "Pause audio" } else { "Play audio" }).clicked() {
-                action = Some(Action::Audio { message_id: m.id, path: path.clone(), duration: peaks.duration, at: None, voice: a.voice && !outgoing });
+                action = Some(Action::Audio { message_id: m.id, title: title.clone(), path: path.clone(), duration: peaks.duration, at: None, voice: a.voice && !outgoing });
             }
         }
     }
@@ -1390,7 +1395,7 @@ fn audio_row(ui: &Ui, ctx: &Ctx<'_>, m: &Message, a: &langis_store::AttachmentMe
             && let Some(p) = response.interact_pointer_pos()
         {
             let at = ((p.x - wave.left()) / wave.width()).clamp(0., 1.);
-            action = Some(Action::Audio { message_id: m.id, path: path.clone(), duration: peaks.duration, at: Some(at), voice: a.voice && !outgoing });
+            action = Some(Action::Audio { message_id: m.id, title, path: path.clone(), duration: peaks.duration, at: Some(at), voice: a.voice && !outgoing });
         }
     }
 
