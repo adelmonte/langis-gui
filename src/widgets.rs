@@ -43,7 +43,9 @@ pub fn avatar(ui: &mut Ui, spec: &AvatarSpec<'_>, size: f32) -> Response {
 pub fn paint_avatar(ui: &Ui, rect: Rect, spec: &AvatarSpec<'_>) {
     let size = rect.width();
     if let Some(path) = spec.photo {
-        egui::Image::new(format!("file://{path}")).corner_radius(CornerRadius::same((size / 2.) as u8)).paint_at(ui, rect);
+        if ui.is_rect_visible(rect) {
+            egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).corner_radius(CornerRadius::same((size / 2.) as u8)).paint_at(ui, rect);
+        }
         return;
     }
     let (bg, fg) = theme::avatar_colors(if spec.note_to_self { 0 } else { spec.color });

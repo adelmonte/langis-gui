@@ -121,6 +121,9 @@ pub struct App {
     pub call_view: crate::call::CallView,
     /// Voice messages and audio files playing in the chat.
     pub audio: crate::audio::Audio,
+    /// Photos at the size they're shown, let go when they're not.
+    thumbs: std::sync::Arc<crate::thumbs::Thumbs>,
+    last_evict: Instant,
     pub call_devices: CallDevices,
     pub share_sources: Option<Vec<ShareSource>>,
     /// Whether this desktop can share a screen at all (no portal: no
@@ -166,6 +169,7 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, args: crate::Args) -> Self {
         let ctx = cc.egui_ctx.clone();
         egui_extras::install_image_loaders(&ctx);
+        let thumbs = crate::thumbs::Thumbs::install(&ctx);
         crate::theme::install(&ctx);
         let (loaded_tx, loaded) = channel();
         let (data_dir, scratch) = if args.demo {
@@ -202,6 +206,8 @@ impl App {
             call: None,
             call_view: Default::default(),
             audio: Default::default(),
+            thumbs,
+            last_evict: Instant::now(),
             call_devices: Default::default(),
             share_sources: None,
             share_available: None,
@@ -793,6 +799,11 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Photos not drawn for 30 seconds are let go.
+        if self.last_evict.elapsed() > Duration::from_secs(5) {
+            self.last_evict = Instant::now();
+            self.thumbs.evict(ctx, Duration::from_secs(30));
+        }
         if let Some(finished) = self.audio.tick(ctx) {
             self.play_next_voice(finished);
         }

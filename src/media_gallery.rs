@@ -211,7 +211,9 @@ fn media_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width:
                 }
                 _ => Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.)),
             };
-            egui::Image::new(format!("file://{path}")).uv(uv).corner_radius(radius).paint_at(ui, rect);
+            if ui.is_rect_visible(rect) {
+                egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).uv(uv).corner_radius(radius).paint_at(ui, rect);
+            }
         }
         if video {
             ui.painter().circle_filled(rect.center(), 22., egui::Color32::from_black_alpha(140));
@@ -280,7 +282,9 @@ fn list_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: 
                 let image = m.link_preview.as_ref().and_then(|p| p.image.as_ref()).and_then(|i| i.local_path.clone());
                 match image {
                     Some(path) => {
-                        egui::Image::new(format!("file://{path}")).corner_radius(radius).paint_at(ui, thumb);
+                        if ui.is_rect_visible(thumb) {
+                            egui::Image::new(crate::thumbs::uri(ui.ctx(), &path, thumb.size())).corner_radius(radius).paint_at(ui, thumb);
+                        }
                     }
                     None => {
                         ui.painter().rect_filled(thumb, radius, palette.fill_secondary);

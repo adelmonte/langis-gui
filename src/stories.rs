@@ -245,7 +245,8 @@ fn paint_story(ui: &Ui, s: &Story, rect: Rect) {
                 Some(path) if attachment.content_type.starts_with("image/") => {
                     let size = Vec2::new(attachment.width.unwrap_or(9) as f32, attachment.height.unwrap_or(16) as f32);
                     let scale = (rect.width() / size.x).min(rect.height() / size.y);
-                    egui::Image::new(format!("file://{path}")).corner_radius(CornerRadius::same(12)).paint_at(ui, Rect::from_center_size(rect.center(), size * scale));
+                    let shown = Rect::from_center_size(rect.center(), size * scale);
+                    egui::Image::new(crate::thumbs::uri(ui.ctx(), path, shown.size())).corner_radius(CornerRadius::same(12)).paint_at(ui, shown);
                 }
                 Some(path) => {
                     // A video: Desktop plays it; here it opens in the player.

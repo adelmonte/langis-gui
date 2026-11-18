@@ -3,6 +3,7 @@
 
 mod actions;
 mod app;
+mod thumbs;
 mod shortcuts;
 mod contact_modal;
 mod audio;

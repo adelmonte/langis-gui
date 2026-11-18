@@ -986,7 +986,9 @@ fn message(
         let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, size.y + 18.), Sense::hover());
         let x = if outgoing { row.right() - side - size.x } else { row.left() + lead + avatar_col };
         let rect = Rect::from_min_size(Pos2::new(x, row.top()), size);
-        if let Some(path) = s.local_path.as_deref().or(s.thumbnail_path.as_deref()) {
+        if let Some(path) = s.local_path.as_deref().or(s.thumbnail_path.as_deref())
+            && crate::thumbs::visible(ui, rect)
+        {
             egui::Image::new(format!("file://{path}")).maintain_aspect_ratio(true).paint_at(ui, rect);
         }
         let r = ui.interact(rect, ui.scope_id().with(("sticker", m.id)), Sense::click());
@@ -1368,7 +1370,9 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
                     uv = Rect::from_min_max(Pos2::new(0., (1. - keep) / 2.), Pos2::new(1., (1. + keep) / 2.));
                 }
             }
-            egui::Image::new(format!("file://{path}")).corner_radius(radius).uv(uv).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+            if crate::thumbs::visible(ui, rect) {
+                egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).corner_radius(radius).uv(uv).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+            }
         }
         None => {
             ui.painter().rect_filled(rect, radius, if palette.dark { Color32::from_gray(40) } else { Color32::from_gray(200) });
@@ -1540,7 +1544,9 @@ fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, re
     if let Some(path) = &q.thumbnail {
         thumb_w = 52.;
         let at = Rect::from_min_size(Pos2::new(rect.right() - 52., rect.top()), Vec2::splat(52.));
-        egui::Image::new(format!("file://{path}")).corner_radius(CornerRadius { ne: 8, se: 8, nw: 0, sw: 0 }).paint_at(ui, at);
+        if crate::thumbs::visible(ui, at) {
+            egui::Image::new(crate::thumbs::uri(ui.ctx(), path, at.size())).corner_radius(CornerRadius { ne: 8, se: 8, nw: 0, sw: 0 }).paint_at(ui, at);
+        }
     }
     let inner = rect.shrink2(Vec2::new(10., 6.));
     ui.painter().text(Pos2::new(inner.left() + 2., inner.top()), Align2::LEFT_TOP, author, theme::semibold(13.), text_color);
@@ -1558,7 +1564,9 @@ fn link_preview(ui: &Ui, palette: &Palette, outgoing: bool, p: &langis_store::Li
     let mut left = rect.left() + 10.;
     if let Some(path) = p.image.as_ref().and_then(|i| i.local_path.as_deref()) {
         let at = Rect::from_min_size(rect.min, Vec2::new(78., rect.height()));
-        egui::Image::new(format!("file://{path}")).corner_radius(CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }).fit_to_exact_size(at.size()).paint_at(ui, at);
+        if crate::thumbs::visible(ui, at) {
+            egui::Image::new(crate::thumbs::uri(ui.ctx(), path, at.size())).corner_radius(CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }).fit_to_exact_size(at.size()).paint_at(ui, at);
+        }
         left = at.right() + 10.;
     }
     let width = rect.right() - 10. - left;

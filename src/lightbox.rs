@@ -115,6 +115,12 @@ impl App {
 
     pub fn close_lightbox(&mut self) {
         let Some(lightbox) = self.lightbox.take() else { return };
+        // Full size only while it's open.
+        for item in &lightbox.items {
+            if let Some(path) = &item.path {
+                self.ctx.forget_image(&format!("file://{path}"));
+            }
+        }
         if let Some(path) = lightbox.view_once {
             self.ctx.forget_image(&format!("file://{}", path.display()));
             if let Err(error) = std::fs::remove_file(&path) {
@@ -331,7 +337,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 let r = Rect::from_min_size(Pos2::new(tx, ty), Vec2::splat(size));
                 match it.thumbnail.as_deref().or(it.path.as_deref().filter(|_| it.content_type.starts_with("image/"))) {
                     Some(path) => {
-                        egui::Image::new(format!("file://{path}")).corner_radius(CornerRadius::same(6)).fit_to_exact_size(r.size()).paint_at(ui, r);
+                        egui::Image::new(crate::thumbs::uri(ui.ctx(), path, r.size())).corner_radius(CornerRadius::same(6)).fit_to_exact_size(r.size()).paint_at(ui, r);
                     }
                     None => {
                         ui.painter().rect_filled(r, CornerRadius::same(6), Color32::from_gray(50));
