@@ -76,6 +76,9 @@ pub struct ChatView {
     /// still has to scroll to it.
     pub unread_at_open: u32,
     pub unread_marker: Option<(i64, u32)>,
+    /// `TimelineFloatingHeader`: the last scroll offset, and when it moved.
+    last_offset: f32,
+    scrolled_at: Option<Instant>,
     scroll_to_unread: bool,
     highlight: Option<(i64, Instant)>,
     /// Scrolled up from the bottom (for the jump-down button).
@@ -174,6 +177,8 @@ impl ChatView {
             scroll_target: None,
             unread_at_open: 0,
             unread_marker: None,
+            last_offset: 0.,
+            scrolled_at: None,
             scroll_to_unread: false,
             highlight: None,
             scrolled_up: false,
@@ -713,6 +718,8 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting, expanded: &chat.expanded };
         let messages = &chat.messages;
         let mut reached = None;
+        let view_top = ui.clip_rect().top();
+        let mut oldest_visible: Option<(i64, i64)> = None;
         for (i, m) in messages.iter().enumerate() {
             let prev = i.checked_sub(1).map(|p| &messages[p]);
             let next = messages.get(i + 1);
@@ -736,6 +743,9 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 }
             }
             let area = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+            if oldest_visible.is_none() && area.bottom() > view_top {
+                oldest_visible = Some((m.id, m.sent_at));
+            }
             if let Some(selected) = chat.selected.as_mut()
                 && m.notice.is_none()
             {
@@ -769,7 +779,9 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         }
         ui.add_space(16.);
         ui.allocate_response(Vec2::new(1., 1.), Sense::hover());
+        oldest_visible
     });
+    let oldest_visible = output.inner;
     chat.last_height = output.content_size.y;
     if let Some(before) = chat.keep_from_height.take() {
         chat.pending_offset = Some(output.state.clamped_offset().y + (output.content_size.y - before).max(0.));
@@ -783,6 +795,38 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         chat.want_newer = true;
     }
     chat.scrolled_up = from_bottom > 400. || !chat.at_end;
+    // `TimelineFloatingHeader`: the oldest visible message's date, in a
+    // pill 10 from the top, for 3 seconds after scrolling (not while the
+    // chat's very first message shows).
+    let offset = output.state.clamped_offset().y;
+    if (offset - chat.last_offset).abs() > 0.5 && chat.loaded {
+        if chat.last_offset != 0. || offset != 0. {
+            chat.scrolled_at = Some(Instant::now());
+        }
+        chat.last_offset = offset;
+    }
+    let recent = chat.scrolled_at.is_some_and(|t| t.elapsed().as_secs_f32() < 3.);
+    let first_shown = chat.at_start && oldest_visible.map(|(id, _)| id) == chat.messages.first().map(|m| m.id);
+    let shown = ui.ctx().animate_bool_with_time(ui.scope_id().with("floating-header"), recent && !first_shown && chat.scroll_to_bottom == 0, 0.25);
+    if recent {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+    }
+    if shown > 0.
+        && let Some((_, at)) = oldest_visible
+    {
+        let text = crate::format::day_label(at);
+        let galley = ui.painter().layout_no_wrap(text, theme::regular(13.), palette.text_secondary);
+        let pill = Rect::from_center_size(
+            Pos2::new(output.inner_rect.center().x - 7., output.inner_rect.top() + 10. + (galley.size().y + 12.) / 2.),
+            galley.size() + Vec2::new(20., 12.),
+        );
+        let painter = ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Middle, ui.scope_id().with("floating-header")));
+        let shadow = egui::epaint::Shadow { offset: [0, 1], blur: 4, spread: 0, color: Color32::from_black_alpha((51. * shown) as u8) };
+        painter.add(shadow.as_shape(pill, CornerRadius::same(255)));
+        let fill = if palette.dark { theme::rgb(0x2e2e2e) } else { Color32::WHITE };
+        painter.rect_filled(pill, CornerRadius::same(255), fill.gamma_multiply(shown));
+        painter.galley(pill.center() - galley.size() / 2., galley, palette.text_secondary.gamma_multiply(shown));
+    }
     // Desktop's "scroll to bottom" button.
     if chat.scrolled_up {
         let rect = Rect::from_min_size(output.inner_rect.right_bottom() - Vec2::new(56., 56.), Vec2::splat(40.));
@@ -832,12 +876,13 @@ fn chat_intro(ui: &mut Ui, palette: &Palette, c: &langis_store::Conversation) {
     });
 }
 
+/// Desktop's `TimelineDateHeader`: the day, 13px, with 20 around it.
 fn date_header(ui: &mut Ui, palette: &Palette, at: i64) {
-    ui.add_space(12.);
+    ui.add_space(20.);
     ui.vertical_centered(|ui| {
-        ui.label(RichText::new(crate::format::day_label(at)).font(theme::medium(12.)).color(palette.text_secondary));
+        ui.label(RichText::new(crate::format::day_label(at)).font(theme::regular(13.)).color(palette.text_secondary));
     });
-    ui.add_space(8.);
+    ui.add_space(20.);
 }
 
 /// One timeline item. Returns `Some(true)` when a spoiler was clicked.
