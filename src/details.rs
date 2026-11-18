@@ -41,6 +41,8 @@ pub struct Details {
     /// The chat's media, for All media and whether to offer it.
     pub media: Option<Vec<langis_store::Message>>,
     pub media_tab: crate::media_gallery::Tab,
+    /// Opened for the nickname dialog, shown once their details arrive.
+    pub nickname_on_load: bool,
 }
 
 impl Details {
@@ -57,6 +59,7 @@ impl Details {
             label: None,
             media: None,
             media_tab: Default::default(),
+            nickname_on_load: false,
         }
     }
 }
@@ -73,6 +76,21 @@ pub fn open(app: &mut App, id: ConversationId) {
     app.panes.details = Some(Details::new(id));
 }
 
+/// A person's safety number (from `ContactModal`).
+pub fn open_safety(app: &mut App, id: ConversationId) {
+    open(app, id.clone());
+    app.send(Command::LoadSafetyNumber { conversation: id });
+    set_page(app, Page::Safety);
+}
+
+/// A person's nickname and note (from `ContactModal`).
+pub fn open_nickname(app: &mut App, id: ConversationId) {
+    open(app, id);
+    if let Some(d) = app.panes.details.as_mut() {
+        d.nickname_on_load = true;
+    }
+}
+
 /// Desktop's All media, from the header menu.
 pub fn open_media(app: &mut App, id: ConversationId) {
     open(app, id);
@@ -84,6 +102,9 @@ fn load_contact(app: &App, sid: String) {
         let details = langis_core::contact_details(&db, &sid).await;
         Some(Loaded::Apply(Box::new(move |app: &mut App| {
             if let Some(d) = app.panes.details.as_mut() {
+                if std::mem::take(&mut d.nickname_on_load) {
+                    d.nickname = Some(details.nickname.clone().unwrap_or_default());
+                }
                 d.contact = Some(details);
             }
         })))
@@ -310,6 +331,9 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 let label = c.member_labels.get(&m).map(|l| format!("{} {}", l.emoji.clone().unwrap_or_default(), l.text).trim().to_owned());
                 let color = m.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
                 let row = member_row(ui, palette, &name, label.as_deref(), color, is_admin.then_some("Admin"));
+                if !you && row.clicked() {
+                    crate::contact_modal::open(app, Some(c.id.clone()), m.clone());
+                }
                 if !you {
                     crate::menu::context(ui, &row, egui::Id::unique("details-member").with(&m), |menu| {
                         if menu.item(Some("message"), "Message") {

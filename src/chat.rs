@@ -116,6 +116,8 @@ enum Action {
     React { message_id: i64, emoji: String, remove: bool },
     Reply(i64),
     Open(String),
+    /// A person's `ContactModal`.
+    Contact(String),
     /// Read more: 3000 more characters of a long message.
     ReadMore(i64),
     /// Play or pause a message's audio, or (at, 0 to 1) play from a point.
@@ -387,6 +389,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::AudioRate => app.audio.cycle_rate(),
+            Action::Contact(aci) => crate::contact_modal::open(app, Some(id.clone()), aci),
             Action::ReadMore(message_id) => {
                 if let Some(chat) = app.chat.as_mut() {
                     let limit = chat.expanded.entry(message_id).or_insert(READ_MORE_LENGTH);
@@ -961,7 +964,9 @@ fn message(
         let at = Pos2::new(if outgoing { rect.right() - meta_w } else { rect.left() }, rect.bottom() + 2.);
         ui.painter().galley(at, meta, palette.text_secondary);
         if show_avatar && !collapsed_below {
-            avatar_for(ui, ctx, m, Pos2::new(row.left() + lead, rect.bottom() - 28.));
+            if let Some(action) = avatar_for(ui, ctx, m, Pos2::new(row.left() + lead, rect.bottom() - 28.)) {
+                actions.push(action);
+            }
         }
         return None;
     }
@@ -1170,7 +1175,9 @@ fn message(
         }
     }
     if show_avatar && !collapsed_below {
-        avatar_for(ui, ctx, m, Pos2::new(row.left() + lead, bubble.bottom() - 28.));
+        if let Some(action) = avatar_for(ui, ctx, m, Pos2::new(row.left() + lead, bubble.bottom() - 28.)) {
+            actions.push(action);
+        }
     }
 
     // Desktop's hover bar: react, reply and more, beside the bubble; and
@@ -1241,7 +1248,9 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
         crate::sidebar::status_icon(m.status).paint(ui, at, 12., meta_color);
     }
     if show_avatar {
-        avatar_for(ui, ctx, m, Pos2::new(row.left() + 16., bubble.bottom() - 28.));
+        if let Some(action) = avatar_for(ui, ctx, m, Pos2::new(row.left() + 16., bubble.bottom() - 28.)) {
+            actions.push(action);
+        }
     }
     let r = ui.interact(bubble, ui.scope_id().with(("view-once", m.id)), Sense::click());
     if ready {
@@ -1257,12 +1266,20 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     }
 }
 
-fn avatar_for(ui: &Ui, ctx: &Ctx<'_>, m: &Message, at: Pos2) {
+/// The author's avatar beside a group message; clicking opens their
+/// `ContactModal`.
+fn avatar_for(ui: &Ui, ctx: &Ctx<'_>, m: &Message, at: Pos2) -> Option<Action> {
     let name = m.author.as_deref().map(|a| ctx.app.name(a)).unwrap_or_default();
     let color = m.author.as_deref().map(|a| a.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b))).unwrap_or(0);
     let photo = m.author.as_deref().and_then(|a| ctx.app.conversation(&ConversationId::direct(a))).and_then(|c| c.avatar_path.clone());
     let spec = widgets::AvatarSpec { name: &name, color, photo: photo.as_deref(), group: false, note_to_self: false };
-    widgets::paint_avatar(ui, Rect::from_min_size(at, Vec2::splat(28.)), &spec);
+    let rect = Rect::from_min_size(at, Vec2::splat(28.));
+    widgets::paint_avatar(ui, rect, &spec);
+    let response = ui.interact(rect, ui.scope_id().with(("avatar", m.id)), Sense::click());
+    if response.hovered() && !ctx.selecting {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    (response.clicked() && !ctx.selecting).then(|| m.author.clone().map(Action::Contact)).flatten()
 }
 
 /// Desktop's `getImageDimensionsForTimeline`: the photo's own width within

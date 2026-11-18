@@ -3,6 +3,7 @@
 
 mod actions;
 mod app;
+mod contact_modal;
 mod audio;
 mod axo_list;
 mod media_gallery;

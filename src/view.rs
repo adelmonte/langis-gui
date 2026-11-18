@@ -42,6 +42,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     }
     crate::call::pip(app, ui.ctx());
     crate::call::settings_dialog(app, ui.ctx());
+    crate::contact_modal::show(app, ui.ctx());
     crate::panes::overlays(app, ui);
     safety_dialog(app, ui);
     share_picker(app, ui);
