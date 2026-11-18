@@ -16,6 +16,8 @@ use crate::widgets;
 
 #[derive(Default)]
 pub struct Panes {
+    /// Desktop's `ShortcutGuideModal`.
+    pub shortcuts: bool,
     /// Desktop's `ContactModal`.
     pub contact: Option<crate::contact_modal::Contact>,
     // The Calls tab.

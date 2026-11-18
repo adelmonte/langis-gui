@@ -13,6 +13,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         crate::startup::show(app, ui);
         return;
     }
+    crate::shortcuts::handle(app, ui.ctx());
     let full_call = !app.call_view.pip && app.call.as_ref().is_some_and(|c| !(c.incoming && c.status == langis_core::CallStatus::Ringing));
     if full_call {
         crate::call::show(app, ui);
@@ -43,6 +44,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     crate::call::pip(app, ui.ctx());
     crate::call::settings_dialog(app, ui.ctx());
     crate::contact_modal::show(app, ui.ctx());
+    crate::shortcuts::guide(app, ui.ctx());
     crate::panes::overlays(app, ui);
     safety_dialog(app, ui);
     share_picker(app, ui);

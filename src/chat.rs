@@ -326,8 +326,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     };
     header(app, ui, &palette, &conversation);
-    let ctrl_f = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F));
-    if std::mem::take(&mut app.find_requested) || ctrl_f {
+    if std::mem::take(&mut app.find_requested) {
         chat.find = Some(crate::search::Find::open());
     }
     if std::mem::take(&mut app.select_requested) {

@@ -227,6 +227,11 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
 }
 
 /// Desktop's search input: a magnifier and a hint on a rounded fill.
+/// The chat list's search field, for Ctrl+F.
+pub fn search_id() -> egui::Id {
+    egui::Id::unique("chat-list-search")
+}
+
 fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String) {
     let width = ui.available_width() - 16.;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::hover());
@@ -234,7 +239,7 @@ fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String) {
     Icon::SearchCompactLight.paint(ui, Rect::from_min_size(rect.min, Vec2::new(32., 32.)), 16., palette.text_secondary);
     let field = Rect::from_min_max(rect.min + Vec2::new(30., 7.), rect.max - Vec2::new(8., 5.));
     ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
-        ui.add(egui::TextEdit::singleline(text).hint_text("Search").frame(egui::Frame::NONE).desired_width(field.width()));
+        ui.add(egui::TextEdit::singleline(text).hint_text("Search").frame(egui::Frame::NONE).desired_width(field.width()).id(search_id()));
     });
 }
 

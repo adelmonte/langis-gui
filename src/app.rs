@@ -680,6 +680,18 @@ impl App {
         self.send(Command::MarkRead { conversation: id });
     }
 
+    /// Closes the open chat (Desktop's Ctrl+Shift+C), keeping its draft.
+    pub fn close_chat(&mut self) {
+        if let Some(chat) = self.chat.take() {
+            chat.save_draft(self);
+            if chat.typing_sent {
+                self.send(Command::Typing { conversation: chat.id.clone(), started: false });
+            }
+        }
+        self.selected = None;
+        self.panes.details = None;
+    }
+
     /// Opens a chat at one of its messages (a search result, a pin, a
     /// quote): the messages around it, scrolled to and flashed.
     pub fn open_at(&mut self, conversation: ConversationId, message_id: i64) {

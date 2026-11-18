@@ -3,6 +3,7 @@
 
 mod actions;
 mod app;
+mod shortcuts;
 mod contact_modal;
 mod audio;
 mod axo_list;
