@@ -416,25 +416,42 @@ fn edit_bar(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
     ui.add_space(6.);
 }
 
+/// Desktop's `Quote` in the composer (`quote--compose`): the chat's color
+/// with its bar, the author, up to 2 lines and the thumbnail, and a close
+/// button.
 fn reply_bar(app: &App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
-    let Some(q) = chat.quote.and_then(|id| chat.messages.iter().find(|m| m.id == id)) else { return };
+    let Some(q) = chat.quote.and_then(|id| chat.messages.iter().find(|m| m.id == id)).cloned() else { return };
     let who = match &q.author {
         None => "You".to_owned(),
         Some(a) => app.name(a),
     };
     let text = if q.body.is_empty() { q.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { crate::format::one_line(&q.body) };
-    let mut close = false;
-    egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new(format!("Replying to {who}")).font(theme::semibold(13.)));
-                ui.add(egui::Label::new(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary)).truncate());
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close = widgets::icon_button(ui, Icon::XCompact, 16., "Cancel reply").clicked();
-            });
-        });
-    });
+    let thumb = q.attachments.iter().find(|a| !a.sticker && (a.content_type.starts_with("image/") || a.content_type.starts_with("video/")))
+        .and_then(|a| if a.content_type.starts_with("image/") { a.local_path.clone() } else { a.thumbnail_path.clone() });
+    let color = crate::chat_colors::for_chat(app, &chat.id);
+    let text_color = if palette.dark { theme::rgb(0xe9e9e9) } else { theme::rgb(0x1b1b1b) };
+    let width = ui.available_width();
+    let side = if thumb.is_some() { 54. + 4. } else { 0. };
+    let mut job = egui::text::LayoutJob::simple(text, theme::regular(13.), text_color, (width - 24. - 32. - side).max(40.));
+    job.wrap.max_rows = 2;
+    job.wrap.overflow_character = Some('…');
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let height = (6. + 19. + galley.size().y + 7.).max(if thumb.is_some() { 54. } else { 0. });
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let radius = CornerRadius::same(8);
+    crate::chat_colors::paint(ui.painter(), rect, radius, crate::chat_colors::quote_fill(color, palette.dark), ui.ctx().content_rect());
+    let bar_color = match color {
+        crate::chat_colors::Bubble::Solid(c) | crate::chat_colors::Bubble::Gradient(_, c, _) => c,
+    };
+    ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(4., rect.height())), CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, bar_color);
+    ui.painter().text(Pos2::new(rect.left() + 12., rect.top() + 6.), egui::Align2::LEFT_TOP, who, theme::semibold(13.), text_color);
+    ui.painter().galley(Pos2::new(rect.left() + 12., rect.top() + 25.), galley, text_color);
+    let close_at = Pos2::new(rect.right() - 16. - side, rect.top() + 16.);
+    if let Some(path) = &thumb {
+        let at = Rect::from_min_size(Pos2::new(rect.right() - 54., rect.top()), Vec2::splat(54.).min(Vec2::new(54., rect.height())));
+        crate::chat::cover_image(ui, path, at, CornerRadius { ne: 8, se: 8, nw: 0, sw: 0 });
+    }
+    let close = ui.put(Rect::from_center_size(close_at, Vec2::splat(24.)), |ui: &mut Ui| widgets::icon_button(ui, Icon::XCompact, 16., "Cancel reply")).clicked();
     if close {
         chat.quote = None;
     }
