@@ -141,6 +141,8 @@ pub struct App {
     pub notify: (bool, String),
     /// Sounds, call notifications and the taskbar flash.
     pub sound: crate::sounds::Prefs,
+    /// When the last frame ran, by the wall clock, to notice a sleep.
+    last_tick: Option<std::time::SystemTime>,
     /// The composer's settings (Settings, Chats, Text input).
     pub input: InputPrefs,
     /// Desktop's collapsed nav tabs: the toggle moves into the list header.
@@ -259,6 +261,7 @@ impl App {
             recent_emoji: Vec::new(),
             unread_mentions: Default::default(),
             sound: Default::default(),
+            last_tick: None,
             input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None },
             unread_only: false,
             fun: Default::default(),
@@ -944,7 +947,24 @@ impl eframe::App for App {
         if let Some(finished) = self.audio.tick(ctx) {
             self.play_next_voice(finished);
         }
-        self.focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        // Desktop refreshes the remote config when the window becomes active
+        // (`maybeRefreshRemoteConfig`; langis waits two hours between).
+        if focused && !self.focused && self.backend.is_some() {
+            self.send(Command::RefreshRemoteConfig);
+        }
+        self.focused = focused;
+        // The app redraws at least every 30 seconds; a much longer gap on
+        // the wall clock means the machine slept. Desktop checks its
+        // connections on resume (`powerMonitorResume`).
+        let now = std::time::SystemTime::now();
+        if let Some(last) = self.last_tick
+            && now.duration_since(last).is_ok_and(|gap| gap > Duration::from_secs(90))
+            && self.backend.is_some()
+        {
+            self.send(Command::Resumed);
+        }
+        self.last_tick = Some(now);
         // Desktop's `requestCloseConfirmation`: closing during a call asks
         // first.
         let closing = self.closing.load(std::sync::atomic::Ordering::Relaxed);
