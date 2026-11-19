@@ -74,9 +74,15 @@ fn empty_chat(ui: &mut Ui, palette: &Palette) {
 /// Desktop's `SafetyNumberChangeDialog`.
 fn safety_dialog(app: &mut App, ui: &mut Ui) {
     let Some(prompt) = &app.safety else { return };
+    // While someone's safety number is open from here, the prompt waits
+    // under it, its send kept.
+    if app.panes.details.as_ref().is_some_and(|d| d.page == crate::details::Page::Safety) {
+        return;
+    }
     let palette = Palette::of(ui.ctx());
     let people = prompt.people.clone();
     let mut answer = None;
+    let mut view: Option<String> = None;
     let modal = egui::Modal::new(egui::Id::unique("safety-number-change"))
         .frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24))
         .show(ui.ctx(), |ui| {
@@ -95,6 +101,12 @@ fn safety_dialog(app: &mut App, ui: &mut Ui) {
                     let color = sid.bytes().fold(0u8, |a, b| a.wrapping_add(b));
                     widgets::avatar(ui, &widgets::AvatarSpec::person(name, color), 36.);
                     ui.label(RichText::new(name).font(theme::medium(14.)));
+                    // Desktop's per-person View: their safety number, to verify.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if widgets::pill_button(ui, "View", false).clicked() {
+                            view = Some(sid.clone());
+                        }
+                    });
                 });
             }
             ui.add_space(16.);
@@ -107,8 +119,12 @@ fn safety_dialog(app: &mut App, ui: &mut Ui) {
                 }
             });
         });
-    if modal.should_close() && answer.is_none() {
+    if modal.should_close() && answer.is_none() && view.is_none() {
         answer = Some(false);
+    }
+    if let Some(sid) = view {
+        crate::details::open_safety(app, langis_store::ConversationId::direct(&sid));
+        return;
     }
     match answer {
         Some(true) => app.send_anyway(),
