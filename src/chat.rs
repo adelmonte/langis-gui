@@ -1171,7 +1171,10 @@ fn message(
     let pad = Vec2::new(12., 8.);
     let text_w = galley.as_ref().map(|g| g.size().x).unwrap_or(0.);
     let last_row_w = galley.as_ref().and_then(|g| g.rows.last()).map(|r| r.rect().width()).unwrap_or(0.);
-    let meta_inline = show_meta && galley.is_some() && last_row_w + meta_w + 8. <= inner_max;
+    // A release note's button (Desktop's `MessageCta`, only "donate").
+    let cta = m.cta.as_ref().filter(|c| c.id == "donate" && !m.deleted);
+    let cta_h = if cta.is_some() { 8. + 32. + 4. } else { 0. };
+    let meta_inline = show_meta && galley.is_some() && cta.is_none() && last_row_w + meta_w + 8. <= inner_max;
     let name_galley = author_name.as_ref().map(|n| {
         let color = m.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.text);
         ui.painter().layout_no_wrap(n.clone(), theme::semibold(13.), color)
@@ -1225,7 +1228,7 @@ fn message(
     let meta_h = if show_meta && !meta_inline { 16. } else { 0. };
     let media_only = !images.is_empty() && galley.is_none() && m.quote.is_none() && name_galley.is_none() && files.is_empty();
     let top_pad = if media_only || (images.first().is_some() && name_galley.is_none() && m.quote.is_none()) || (preview_card.is_some() && preview_first) { 0. } else { pad.y };
-    let text_block = name_h + quote_h + files_h + preview_h + poll_h + content_h + text_h + meta_h;
+    let text_block = name_h + quote_h + files_h + preview_h + poll_h + content_h + text_h + cta_h + meta_h;
     let bubble_h = top_pad + media_h + if media_only && meta_h > 0. { 0. } else if text_block > 0. { text_block + pad.y + if media_h > 0. { pad.y } else { 0. } } else { 0. };
     let bubble_h = bubble_h.max(if media_only { media_h } else { 36. });
 
@@ -1388,6 +1391,17 @@ fn message(
             }
         }
         y += text_h;
+    }
+    if let Some(cta) = cta {
+        let button = Rect::from_min_size(Pos2::new(left, y + 8.), Vec2::new(bubble_w - pad.x * 2., 32.));
+        let r = ui.interact(button, ui.scope_id().with(("cta", m.id)), Sense::click());
+        let fill = if outgoing { Color32::from_white_alpha(if r.hovered() { 70 } else { 50 }) } else if r.hovered() { palette.fill_pressed } else { palette.fill };
+        ui.painter().rect_filled(button, CornerRadius::same(16), fill);
+        ui.painter().text(button.center(), Align2::CENTER_CENTER, cta.text.clone().unwrap_or_else(|| "Donate".into()), theme::semibold(14.), in_color);
+        if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            actions.push(Action::Open("https://signal.org/donate/".into()));
+        }
+        y += cta_h;
     }
     if show_meta {
         let meta_y = if meta_inline { bubble.bottom() - pad.y - 14. } else { y + 2. };
