@@ -140,6 +140,8 @@ enum Action {
     JumpToQuote { author: Option<String>, sent_at: i64 },
     /// Scrolls to a message by id.
     Jump(i64),
+    /// Opens a message's Info (its recipients' send states).
+    Info(i64),
     /// Show a photo or video in the viewer.
     Lightbox { message_id: i64, index: usize },
     Vote { message_id: i64, options: Vec<u32> },
@@ -431,6 +433,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             Action::FetchLongText(message_id) => app.send(Command::FetchLongText { message_id }),
             Action::Jump(message_id) => app.open_at(id.clone(), message_id),
+            Action::Info(message_id) => {
+                crate::actions::load_details(app, message_id);
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.dialog = Some(crate::actions::Dialog::Info { message: message_id, details: None });
+                }
+            }
             Action::JumpToQuote { author, sent_at } => {
                 let here = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.sent_at == sent_at && m.author == author).map(|m| m.id));
                 match here {
@@ -1143,7 +1151,8 @@ fn message(
 
     let reactions = !m.reactions.is_empty();
     let reactions_h = if reactions { 18. } else { 0. };
-    let failed_h = if m.status == DeliveryStatus::Failed { 18. } else { 0. };
+    let status_line = status_line(m);
+    let failed_h = if status_line.is_some() { 18. } else { 0. };
     let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, bubble_h + reactions_h + failed_h), Sense::hover());
     let x = if outgoing { row.right() - side - bubble_w } else { row.left() + lead + avatar_col };
     let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(bubble_w, bubble_h));
@@ -1328,13 +1337,17 @@ fn message(
     if reactions {
         reaction_pills(ui, ctx, m, bubble, outgoing, actions);
     }
-    if m.status == DeliveryStatus::Failed {
+    if let Some((text, then)) = status_line {
         let at = Pos2::new(bubble.right(), bubble.bottom() + reactions_h + 2.);
-        let label = ui.painter().layout_no_wrap("Send failed. Click to retry.".into(), theme::regular(12.), palette.destructive);
+        let color = if m.status == DeliveryStatus::Paused { palette.text_secondary } else { palette.destructive };
+        let label = ui.painter().layout_no_wrap(text.into(), theme::regular(12.), color);
         let rect = Rect::from_min_size(Pos2::new(at.x - label.size().x, at.y), label.size());
-        ui.painter().galley(rect.min, label, palette.destructive);
-        if ui.interact(rect, ui.scope_id().with(("retry", m.id)), Sense::click()).clicked() {
-            actions.push(Action::Retry(m.id));
+        ui.painter().galley(rect.min, label, color);
+        let response = ui.interact(rect, ui.scope_id().with(("retry", m.id)), Sense::click());
+        if let Some(then) = then
+            && response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        {
+            actions.push(then);
         }
     }
     if show_avatar && !collapsed_below {
@@ -1998,6 +2011,23 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
 }
 
 /// Desktop's typing bubble: three dots pulsing in an incoming bubble.
+/// The line under an outgoing bubble that didn't fully go, in Desktop's
+/// words (`MessageMetadata`), and what clicking it does.
+fn status_line(m: &Message) -> Option<(&'static str, Option<Action>)> {
+    if m.direction != langis_store::Direction::Outgoing {
+        return None;
+    }
+    match m.status {
+        DeliveryStatus::Failed if m.deleted => Some(("Delete failed, click for details", Some(Action::Info(m.id)))),
+        DeliveryStatus::Failed if m.edited => Some(("Edit failed, click for details", Some(Action::Info(m.id)))),
+        DeliveryStatus::Failed => Some(("Send failed. Click to retry.", Some(Action::Retry(m.id)))),
+        DeliveryStatus::PartialSent if m.deleted => Some(("Partially deleted, click for details", Some(Action::Info(m.id)))),
+        DeliveryStatus::PartialSent => Some(("Partially sent, click for details", Some(Action::Info(m.id)))),
+        DeliveryStatus::Paused => Some(("Send paused", None)),
+        _ => None,
+    }
+}
+
 fn typing_bubble(ui: &mut Ui, ctx: &Ctx<'_>, authors: &[String]) {
     let palette = ctx.palette;
     ui.add_space(10.);
