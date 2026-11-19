@@ -49,6 +49,11 @@ pub struct Details {
     /// The group link's Share: chats chosen and the search, or its QR code.
     pub share_link: Option<(Vec<ConversationId>, String)>,
     pub link_qr: bool,
+    /// The member label's emoji, and its picker while open.
+    pub label_emoji: String,
+    pub label_picker: Option<crate::emoji_picker::Picker>,
+    /// A join request waiting on Approve or Deny's confirmation.
+    pub answer_request: Option<(String, bool)>,
 }
 
 impl Details {
@@ -70,6 +75,9 @@ impl Details {
             all_members: false,
             share_link: None,
             link_qr: false,
+            label_emoji: String::new(),
+            label_picker: None,
+            answer_request: None,
         }
     }
 }
@@ -486,10 +494,12 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
             if !c.left && c.can_label {
                 let mine = c.member_labels.get(&me).map(|l| l.text.clone()).unwrap_or_default();
+                let emoji = c.member_labels.get(&me).and_then(|l| l.emoji.clone()).unwrap_or_default();
                 if axo_list::item(ui, Item::new("Member label").symbol("label"), End::Arrow(None)).clicked()
                     && let Some(d) = app.panes.details.as_mut()
                 {
                     d.label = Some(mine);
+                    d.label_emoji = emoji;
                 }
             }
             let waiting = state.invites.len() + state.requests.len();
@@ -855,36 +865,88 @@ fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             if admin {
                 ui.horizontal(|ui| {
                     ui.add_space(56.);
-                    if widgets::pill_button(ui, "Approve", true).clicked() {
-                        app.send(Command::AnswerJoinRequest { conversation: c.id.clone(), member: r.aci.clone(), approve: true });
+                    // Desktop asks before either (`PendingRequests` confirmations).
+                    if widgets::pill_button(ui, "Approve", true).clicked()
+                        && let Some(d) = app.panes.details.as_mut()
+                    {
+                        d.answer_request = Some((r.aci.clone(), true));
                     }
-                    if widgets::pill_button(ui, "Deny", false).clicked() {
-                        app.send(Command::AnswerJoinRequest { conversation: c.id.clone(), member: r.aci.clone(), approve: false });
+                    if widgets::pill_button(ui, "Deny", false).clicked()
+                        && let Some(d) = app.panes.details.as_mut()
+                    {
+                        d.answer_request = Some((r.aci.clone(), false));
                     }
                 });
             }
         }
     });
-    ui.label(RichText::new("Invites").font(theme::semibold(14.)));
+    if let Some((aci, approve)) = app.panes.details.as_ref().and_then(|d| d.answer_request.clone()) {
+        use crate::dialog::{Answer, Variant};
+        let name = app.name(&aci);
+        let (title, action, variant) = if approve {
+            (format!("Add \u{201c}{name}\u{201d} to the group?"), "Add to group", Variant::StrongPrimary)
+        } else {
+            (format!("Deny the request from \u{201c}{name}\u{201d}?"), "Deny request", Variant::StrongDestructive)
+        };
+        let body_text = if approve { "" } else { "They won't be able to ask to join with the group link again." };
+        match crate::dialog::show(ui.ctx(), egui::Id::unique("answer-join-request"), &title, body_text, Some("Cancel"), &[(action, variant)]) {
+            Some(Answer::Action(_)) => {
+                app.send(Command::AnswerJoinRequest { conversation: c.id.clone(), member: aci, approve });
+                if let Some(d) = app.panes.details.as_mut() {
+                    d.answer_request = None;
+                }
+            }
+            Some(Answer::Cancel) => {
+                if let Some(d) = app.panes.details.as_mut() {
+                    d.answer_request = None;
+                }
+            }
+            None => {}
+        }
+    }
+    // Desktop's `PendingInvites`: ours one by one, others' by who invited.
+    let (ours, theirs): (Vec<_>, Vec<_>) = state.invites.iter().partition(|i| i.by == app.aci);
+    ui.label(RichText::new("Invited by you").font(theme::semibold(14.)));
     ui.add_space(6.);
     section(ui, palette, |ui| {
-        if state.invites.is_empty() {
-            body(ui, palette, "No pending invites.");
+        if ours.is_empty() {
+            body(ui, palette, "No one invited by you.");
         }
-        for invite in &state.invites {
+        for invite in &ours {
             let name = app.name(&invite.service_id);
-            let by = format!("Invited by {}", if invite.by == app.aci { "you".to_owned() } else { app.name(&invite.by) });
-            let response = crate::panes::contact_row(ui, palette, &name, Some(&by), 5, None);
-            if admin || invite.by == app.aci {
-                crate::menu::context(ui, &response, egui::Id::unique("invite-menu").with(&invite.service_id), |m| {
-                    if m.item(Some("x-circle"), "Revoke invite") {
-                        app.send(Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: vec![invite.service_id.clone()] });
+            let response = crate::panes::contact_row(ui, palette, &name, None, 5, None);
+            crate::menu::context(ui, &response, egui::Id::unique("invite-menu").with(&invite.service_id), |m| {
+                if m.item(Some("x-circle"), "Revoke invite") {
+                    app.send(Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: vec![invite.service_id.clone()] });
+                }
+            });
+        }
+    });
+    ui.label(RichText::new("Invited by other members").font(theme::semibold(14.)));
+    ui.add_space(6.);
+    section(ui, palette, |ui| {
+        if theirs.is_empty() {
+            body(ui, palette, "No one invited by others.");
+        }
+        let mut inviters: Vec<&str> = theirs.iter().map(|i| i.by.as_str()).collect();
+        inviters.sort_unstable();
+        inviters.dedup();
+        for by in inviters {
+            let invitees: Vec<String> = theirs.iter().filter(|i| i.by == by).map(|i| i.service_id.clone()).collect();
+            let who = app.name(by);
+            let count = if invitees.len() == 1 { "1 invite".to_owned() } else { format!("{} invites", invitees.len()) };
+            let response = crate::panes::contact_row(ui, palette, &who, Some(&count), 5, None);
+            if admin {
+                crate::menu::context(ui, &response, egui::Id::unique("invites-by-menu").with(by), |m| {
+                    let label = if invitees.len() == 1 { "Revoke invite".to_owned() } else { format!("Revoke {} invites", invitees.len()) };
+                    if m.item(Some("x-circle"), &label) {
+                        app.send(Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: invitees.clone() });
                     }
                 });
             }
         }
     });
-    body(ui, palette, "People on this list are not able to see messages in the group until they join.");
+    body(ui, palette, "Details of people invited to this group aren't shown until they join. Invitees will only see messages after they join the group.");
 }
 
 fn permissions(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
@@ -986,11 +1048,34 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             title(ui, "Your member label");
             body(ui, palette, "A label shown next to your name in this group.");
             ui.add_space(8.);
-            widgets::text_field(ui, &mut text, "Label", false);
+            // Desktop's `GroupMemberLabelEditor`: an emoji, then the text.
+            ui.horizontal(|ui| {
+                let face = if d.label_emoji.is_empty() { "🙂".to_owned() } else { d.label_emoji.clone() };
+                let mut job = egui::text::LayoutJob::default();
+                crate::chat::append_with_emoji(&mut job, &face, egui::TextFormat { font_id: theme::emoji(18.), color: palette.text, ..Default::default() });
+                if ui.add(egui::Button::new(job).corner_radius(CornerRadius::same(8))).on_hover_text("Choose an emoji").clicked() {
+                    d.label_picker = if d.label_picker.is_some() { None } else { Some(Default::default()) };
+                }
+                widgets::text_field(ui, &mut text, "Label", false);
+            });
+            if !d.label_emoji.is_empty() && ui.link("Remove emoji").clicked() {
+                d.label_emoji.clear();
+            }
+            if let Some(picker) = d.label_picker.as_mut() {
+                ui.add_space(6.);
+                if let Some(e) = picker.body(ui, &app.recent_emoji) {
+                    d.label_emoji = e.to_owned();
+                    d.label_picker = None;
+                }
+            }
             answer = buttons(ui, &["Save", "Cancel"]);
         });
+        let emoji = Some(d.label_emoji.clone()).filter(|e| !e.is_empty());
         match answer {
-            Some(0) => app.send(Command::SetMemberLabel { conversation: c.id.clone(), emoji: None, text }),
+            Some(0) => {
+                d.label_picker = None;
+                app.send(Command::SetMemberLabel { conversation: c.id.clone(), emoji, text });
+            }
             Some(_) => {}
             None if closed => {}
             None => d.label = Some(text),
