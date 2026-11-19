@@ -163,6 +163,10 @@ pub struct App {
     pub link_previews: bool,
     /// Missed calls not looked at yet: the Calls tab's badge.
     pub unseen_calls: u32,
+    /// Unread messages mentioning us, by chat: the chat list's @ badge.
+    pub unread_mentions: std::collections::HashMap<ConversationId, u32>,
+    /// The chat list shows only unread chats (Desktop's search filter).
+    pub unread_only: bool,
     /// Emoji most recently used, newest first: the pickers' Recents.
     pub recent_emoji: Vec<String>,
     /// Stickers, GIFs and the sticker manager.
@@ -236,6 +240,8 @@ impl App {
             link_previews: true,
             unseen_calls: 0,
             recent_emoji: Vec::new(),
+            unread_mentions: Default::default(),
+            unread_only: false,
             fun: Default::default(),
         };
         let dir = &app.data_dir;
@@ -688,6 +694,18 @@ impl App {
 
     pub fn reload_conversations(&self) {
         self.load(|db| async move { db.conversations().await.ok().map(Loaded::Conversations) });
+        // The @ badge: unread mentions in each chat with unread messages.
+        let me = self.aci.clone();
+        self.load(move |db| async move {
+            let mut counts = std::collections::HashMap::new();
+            for c in db.conversations().await.ok()?.into_iter().filter(|c| c.unread_count > 0) {
+                let n = db.unread_mentions(&c.id, &me).await.map(|m| m.len()).unwrap_or(0);
+                if n > 0 {
+                    counts.insert(c.id, n as u32);
+                }
+            }
+            Some(Loaded::Apply(Box::new(move |app: &mut App| app.unread_mentions = counts)))
+        });
         // Calls are messages: whatever changes the chat list may change this.
         self.load(|db| async move {
             let n = db.unseen_calls().await.ok()?;

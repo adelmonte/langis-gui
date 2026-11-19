@@ -1,7 +1,7 @@
 //! Desktop's nav tabs (the 80px column) and chat list (`NavSidebar` with
 //! `AxoChatItem` rows).
 
-use egui::{CornerRadius, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
 use langis_core::ConnectionState;
 use langis_store::{Conversation, DeliveryStatus};
 
@@ -164,32 +164,67 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             ui.add_space(6.);
             ui.horizontal(|ui| {
                 ui.add_space(16.);
-                search_field(ui, &palette, &mut app.search);
+                search_field(ui, &palette, &mut app.search, &mut app.unread_only);
                 ui.add_space(16.);
             });
             ui.add_space(6.);
             status_banner(app, ui, &palette);
+            // Desktop's archive helper: what archived chats are.
+            if app.panes.archived {
+                ui.horizontal(|ui| {
+                    ui.add_space(24.);
+                    ui.add(egui::Label::new(RichText::new("These chats are archived and will only appear in the inbox if new messages are received.").font(theme::regular(13.)).color(palette.text_secondary)).wrap());
+                });
+                ui.add_space(6.);
+            }
             crate::panes::list_notices(app, ui, &palette);
             if !app.panes.archived {
                 crate::panes::folder_tabs(app, ui, &palette);
             }
 
             let query = app.search.trim().to_lowercase();
+            // Searching looks through every chat, archived ones too, by name
+            // or number (Desktop's `LeftPaneSearchHelper`).
+            let digits: String = query.chars().filter(|c| c.is_ascii_digit()).collect();
+            let matches = |c: &Conversation| {
+                c.title.to_lowercase().contains(&query)
+                    || (digits.len() >= 3 && c.phone.as_deref().is_some_and(|p| p.chars().filter(|c| c.is_ascii_digit()).collect::<String>().contains(&digits)))
+            };
             let rows: Vec<Conversation> = app
                 .conversations
                 .iter()
-                .filter(|c| crate::panes::visible(app, c) && (query.is_empty() || c.title.to_lowercase().contains(&query)))
+                .filter(|c| if query.is_empty() { crate::panes::visible(app, c) } else { matches(c) })
+                .filter(|c| !app.unread_only || c.unread_count > 0 || c.marked_unread)
                 .cloned()
                 .collect();
+            let pinned_header = query.is_empty() && !app.panes.archived && rows.iter().any(|c| c.pinned) && rows.iter().any(|c| !c.pinned);
             let mut open = None;
             let mut open_at = None;
             crate::search::follow_global(app, ui.ctx());
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 ui.add_space(4.);
-                for c in &rows {
+                let heading = |ui: &mut Ui, text: &str| {
+                    ui.add_space(4.);
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.);
+                        ui.label(RichText::new(text).font(theme::semibold(13.)).color(palette.text_secondary));
+                    });
+                    ui.add_space(2.);
+                };
+                if !query.is_empty() && !rows.is_empty() {
+                    heading(ui, "Chats");
+                }
+                for (i, c) in rows.iter().enumerate() {
+                    // Desktop's Pinned and Chats headers, when both are there.
+                    if pinned_header && i == 0 {
+                        heading(ui, "Pinned");
+                    } else if pinned_header && !c.pinned && rows[i - 1].pinned {
+                        heading(ui, "Chats");
+                    }
                     let typing = app.typing.get(&c.id).is_some_and(|t| !t.is_empty());
                     let selected = app.selected.as_ref() == Some(&c.id);
-                    let row = chat_row(ui, &palette, c, selected, typing);
+                    let mentions = app.unread_mentions.get(&c.id).copied().unwrap_or(0);
+                    let row = chat_row(ui, &palette, c, selected, typing, mentions);
                     if row.clicked() {
                         open = Some(c.id.clone());
                     }
@@ -208,6 +243,19 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                 }
                 if !query.is_empty() {
                     open_at = crate::search::message_results(app, ui, &palette);
+                }
+                if rows.is_empty() && query.is_empty() {
+                    ui.add_space(24.);
+                    ui.vertical_centered(|ui| {
+                        let text = if app.panes.archived {
+                            "No archived chats."
+                        } else if app.unread_only {
+                            "No unread chats"
+                        } else {
+                            ""
+                        };
+                        ui.label(RichText::new(text).color(palette.text_secondary));
+                    });
                 }
                 if rows.is_empty() && app.message_search.hits.is_empty() && !query.is_empty() {
                     ui.add_space(24.);
@@ -232,19 +280,41 @@ pub fn search_id() -> egui::Id {
     egui::Id::unique("chat-list-search")
 }
 
-fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String) {
+fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String, unread_only: &mut bool) {
     let width = ui.available_width() - 16.;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
     Icon::SearchCompactLight.paint(ui, Rect::from_min_size(rect.min, Vec2::new(32., 32.)), 16., palette.text_secondary);
-    let field = Rect::from_min_max(rect.min + Vec2::new(30., 7.), rect.max - Vec2::new(8., 5.));
+    // Desktop's unread filter, then (while there's text) its clear button.
+    let filter = Rect::from_center_size(Pos2::new(rect.right() - 16., rect.center().y), Vec2::splat(24.));
+    let fr = ui.interact(filter, ui.scope_id().with("unread-filter"), Sense::click());
+    if *unread_only {
+        ui.painter().rect_filled(filter, CornerRadius::same(6), palette.accent);
+    } else if fr.hovered() {
+        ui.painter().rect_filled(filter, CornerRadius::same(6), palette.fill_pressed);
+    }
+    theme::paint_symbol(ui.painter(), "filter", filter.center(), 16., if *unread_only { Color32::WHITE } else { palette.text_secondary });
+    if fr.on_hover_text(if *unread_only { "Show all chats" } else { "Show only unread chats" }).clicked() {
+        *unread_only = !*unread_only;
+    }
+    let mut end = filter.left() - 2.;
+    if !text.is_empty() {
+        let clear = Rect::from_center_size(Pos2::new(filter.left() - 14., rect.center().y), Vec2::splat(22.));
+        let cr = ui.interact(clear, ui.scope_id().with("clear-search"), Sense::click());
+        theme::paint_symbol(ui.painter(), "x", clear.center(), 14., palette.text_secondary);
+        if cr.on_hover_text("Clear search").clicked() {
+            text.clear();
+        }
+        end = clear.left() - 2.;
+    }
+    let field = Rect::from_min_max(rect.min + Vec2::new(30., 7.), Pos2::new(end, rect.bottom() - 5.));
     ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
         ui.add(egui::TextEdit::singleline(text).hint_text("Search").frame(egui::Frame::NONE).desired_width(field.width()).id(search_id()));
     });
 }
 
 /// Connection and history transfer, as Desktop's left pane dialogs.
-fn status_banner(app: &App, ui: &mut Ui, palette: &Palette) {
+fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
     use langis_core::HistoryProgress as H;
     let text = match (&app.connection, &app.history) {
         (_, Some(H::Waiting)) => Some("Waiting for your phone to send your message history…".to_owned()),
@@ -260,6 +330,9 @@ fn status_banner(app: &App, ui: &mut Ui, palette: &Palette) {
         _ => None,
     };
     let Some(text) = text else { return };
+    // While the phone sends history, Desktop offers to skip it.
+    let skippable = matches!(app.history, Some(H::Waiting | H::Downloading { .. }));
+    let mut skip = false;
     ui.horizontal(|ui| {
         ui.add_space(16.);
         egui::Frame::new()
@@ -269,13 +342,19 @@ fn status_banner(app: &App, ui: &mut Ui, palette: &Palette) {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width() - 16.);
                 ui.label(RichText::new(text).font(theme::regular(13.)));
+                if skippable && ui.link("Skip").on_hover_text("Use this device without your message history").clicked() {
+                    skip = true;
+                }
             });
     });
+    if skip {
+        app.send(langis_core::Command::SkipHistory);
+    }
     ui.add_space(6.);
 }
 
 /// One chat: 68px, avatar 48, title and time over two lines of preview.
-fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, typing: bool) -> egui::Response {
+fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, typing: bool, mentions: u32) -> egui::Response {
     let width = ui.available_width();
     let (outer, response) = ui.allocate_exact_size(Vec2::new(width, 72.), Sense::click());
     let rect = Rect::from_min_max(outer.min + Vec2::new(10., 2.), outer.max - Vec2::new(10., 2.));
@@ -310,6 +389,13 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     if unread > 0 {
         let badge = widgets::count_badge(ui, Pos2::new(right, inner.top() + 30.), c.unread_count.max(1), c.muted);
         preview_right = badge.left() - 10.;
+        // Desktop's @ badge before the count, for unread mentions.
+        if mentions > 0 {
+            let at = Rect::from_center_size(Pos2::new(badge.left() - 13., badge.center().y), Vec2::splat(18.));
+            ui.painter().circle_filled(at.center(), 9., palette.badge);
+            theme::paint_symbol(ui.painter(), "at", at.center(), 12., Color32::WHITE);
+            preview_right = at.left() - 8.;
+        }
     } else if let Some(status) = c.last_outgoing_status.filter(|_| c.draft.as_deref().is_none_or(str::is_empty) && !typing) {
         let icon = status_icon(status);
         let color = if status == DeliveryStatus::Failed { palette.destructive } else { palette.text_secondary };
@@ -321,6 +407,11 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     let body = |color| egui::TextFormat { font_id: theme::regular(13.), color, line_height: Some(18.), ..Default::default() };
     if typing {
         job.append("typing…", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
+    } else if c.blocked {
+        // Desktop's `ConversationListItem--blocked` and `--message-request`.
+        job.append("Blocked", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
+    } else if !c.accepted {
+        job.append("Message request", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
     } else if let Some(draft) = c.draft.as_deref().filter(|d| !d.is_empty()) {
         job.append("Draft: ", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
         crate::chat::append_with_emoji(&mut job, &crate::format::one_line(draft), body(palette.text_secondary));
