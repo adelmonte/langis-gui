@@ -70,7 +70,8 @@ impl App {
         self.lightbox = Some(Lightbox { conversation: Some(m.conversation_id.clone()), items, index: at, view_once: None, zoomed: false, player: None });
         let (conversation, message_id) = (m.conversation_id.clone(), m.id);
         self.load(move |db| async move {
-            let mut messages = db.media_messages(&conversation, 500).await.ok()?;
+            // Every page of the chat's media, not only the newest.
+            let mut messages = crate::media_gallery::all_media(&db, &conversation).await?;
             messages.reverse();
             let items: Vec<Item> = messages.iter().flat_map(items_of).collect();
             Some(Loaded::Lightbox { conversation, message_id, index, items })

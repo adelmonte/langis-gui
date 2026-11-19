@@ -35,13 +35,28 @@ impl Tab {
 /// Reads a chat's media into its open details.
 pub fn load(app: &App, conversation: ConversationId) {
     app.load(move |db| async move {
-        let messages = db.media_messages(&conversation, 1000).await.ok()?;
+        let messages = all_media(&db, &conversation).await?;
         Some(Loaded::Apply(Box::new(move |app: &mut App| {
             if let Some(d) = app.panes.details.as_mut().filter(|d| d.conversation == conversation) {
                 d.media = Some(messages);
             }
         })))
     });
+}
+
+/// A chat's media, newest first, page by page (langis's
+/// `media_messages_before`), up to 20000 messages.
+pub async fn all_media(db: &langis_store::AppDb, conversation: &ConversationId) -> Option<Vec<langis_store::Message>> {
+    const PAGE: u32 = 1000;
+    let mut all = db.media_messages(conversation, PAGE).await.ok()?;
+    let mut last = all.len();
+    while last == PAGE as usize && all.len() < 20_000 {
+        let Some(oldest) = all.last().map(|m| m.id) else { break };
+        let page = db.media_messages_before(conversation, oldest, PAGE).await.ok()?;
+        last = page.len();
+        all.extend(page);
+    }
+    Some(all)
 }
 
 fn is_media(a: &AttachmentMeta) -> bool {
