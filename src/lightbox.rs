@@ -36,6 +36,8 @@ pub struct Lightbox {
     pub view_once: Option<PathBuf>,
     /// Desktop's click to zoom: the photo at 3 times, panned by the pointer.
     pub zoomed: bool,
+    /// The video shown, playing in the viewer (Desktop's `<video>`).
+    pub player: Option<crate::video::Player>,
 }
 
 /// Photos and videos of a message, as viewer items.
@@ -65,7 +67,7 @@ impl App {
     pub fn open_lightbox(&mut self, m: &Message, index: usize) {
         let items = items_of(m);
         let at = items.iter().position(|i| i.index == index).unwrap_or(0);
-        self.lightbox = Some(Lightbox { conversation: Some(m.conversation_id.clone()), items, index: at, view_once: None, zoomed: false });
+        self.lightbox = Some(Lightbox { conversation: Some(m.conversation_id.clone()), items, index: at, view_once: None, zoomed: false, player: None });
         let (conversation, message_id) = (m.conversation_id.clone(), m.id);
         self.load(move |db| async move {
             let mut messages = db.media_messages(&conversation, 500).await.ok()?;
@@ -110,7 +112,7 @@ impl App {
             caption: String::new(),
             size: opened.size,
         };
-        self.lightbox = Some(Lightbox { conversation: None, items: vec![item], index: 0, view_once: Some(opened.path), zoomed: false });
+        self.lightbox = Some(Lightbox { conversation: None, items: vec![item], index: 0, view_once: Some(opened.path), zoomed: false, player: None });
     }
 
     pub fn close_lightbox(&mut self) {
@@ -202,7 +204,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let mut save = false;
     let mut forward = false;
     let mut fetch = false;
-    let mut play = None;
     let neighbors: Vec<(usize, Item)> = lightbox
         .items
         .iter()
@@ -211,6 +212,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         .take(21)
         .map(|(i, it)| (i, it.clone()))
         .collect();
+    // The video's player, when the item is a downloaded video: started
+    // when it's shown (Desktop autoplays in the viewer), kept across frames.
+    let video = !item.content_type.starts_with("image/") && item.path.is_some();
+    let mut player = app.lightbox.as_mut().and_then(|l| l.player.take()).filter(|p| video && Some(p.path()) == item.path.as_deref());
+    if video && player.is_none()
+        && let Some(path) = item.path.as_deref()
+    {
+        let ppp = ctx.pixels_per_point();
+        let max = ((screen.width() * ppp) as u32, (screen.height() * ppp) as u32);
+        player = Some(crate::video::Player::new(path, max, false, false));
+    }
     egui::Area::new(egui::Id::unique("lightbox")).order(egui::Order::Foreground).fixed_pos(screen.min).show(&ctx, |ui| {
         let (rect, backdrop) = ui.allocate_exact_size(screen.size(), Sense::click());
         ui.painter().rect_filled(rect, 0, Color32::from_black_alpha(242));
@@ -307,12 +319,20 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             if ui.interact(center, ui.scope_id().with("lightbox-fetch"), Sense::click()).on_hover_text("Download").clicked() {
                 fetch = true;
             }
-        } else if !image {
-            ui.painter().circle_filled(center.center(), 32., Color32::from_black_alpha(160));
-            Icon::PlayFill.paint(ui, center, 30., Color32::WHITE);
-            if ui.interact(media, ui.scope_id().with("lightbox-play"), Sense::click()).on_hover_text("Play").clicked() {
-                play = item.path.clone();
+        } else if let Some(player) = player.as_mut() {
+            // The video over its poster, then Desktop's controls on it.
+            if let Some(texture) = player.texture(&ctx) {
+                egui::Image::new((texture.id(), media.size())).paint_at(ui, media);
             }
+            let r = ui.interact(media, ui.scope_id().with("lightbox-play"), Sense::click());
+            if r.clicked() {
+                player.toggle();
+            }
+            if !player.playing() {
+                ui.painter().circle_filled(center.center(), 32., Color32::from_black_alpha(160));
+                Icon::PlayFill.paint(ui, center, 30., Color32::WHITE);
+            }
+            video_controls(ui, player, media, view_once);
         }
 
         ui.multiply_opacity(chrome);
@@ -382,8 +402,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             go = Some(index + 1);
         }
     });
-    if let Some(path) = play {
-        crate::chat::open_externally(&path);
+    // A view-once video closes when it ends, as Desktop's does.
+    if view_once && player.as_ref().is_some_and(|p| p.ended()) {
+        close = true;
+    }
+    if let Some(lightbox) = app.lightbox.as_mut()
+        && go.is_none()
+    {
+        lightbox.player = player;
     }
     if fetch {
         app.send(Command::FetchAttachment { message_id: item.message_id, index: item.index });
@@ -419,6 +445,44 @@ fn forward_target(app: &App, item: &Item) -> Option<ConversationId> {
     let view = app.chat.as_ref()?;
     let m = view.messages.iter().find(|m| m.id == item.message_id)?;
     (m.conversation_id == chat && crate::actions::can_forward(m)).then_some(chat)
+}
+
+/// Play or pause, the time, a bar to seek on, and mute, along the video's
+/// bottom (a view-once video can't be sought).
+fn video_controls(ui: &Ui, player: &mut crate::video::Player, media: Rect, view_once: bool) {
+    let bar = Rect::from_min_max(Pos2::new(media.left(), media.bottom() - 40.), media.max);
+    ui.painter().rect_filled(bar, CornerRadius::ZERO, Color32::from_black_alpha(110));
+    let play = Rect::from_center_size(Pos2::new(bar.left() + 22., bar.center().y), Vec2::splat(28.));
+    if ui.interact(play, ui.scope_id().with("video-play"), Sense::click()).on_hover_text(if player.playing() { "Pause" } else { "Play" }).clicked() {
+        player.toggle();
+    }
+    theme::paint_symbol(ui.painter(), if player.playing() { "pause-fill" } else { "play-fill" }, play.center(), 18., Color32::WHITE);
+    let (at, total) = (player.position(), player.duration());
+    let time = format!("{} / {}", crate::audio::playback_text(at), crate::audio::playback_text(total));
+    let tg = ui.painter().layout_no_wrap(time, theme::regular(12.), Color32::WHITE);
+    let mute = Rect::from_center_size(Pos2::new(bar.right() - 22., bar.center().y), Vec2::splat(28.));
+    if ui.interact(mute, ui.scope_id().with("video-mute"), Sense::click()).on_hover_text(if player.muted { "Unmute" } else { "Mute" }).clicked() {
+        let muted = !player.muted;
+        player.set_muted(muted);
+    }
+    theme::paint_symbol(ui.painter(), if player.muted { "speaker-slash" } else { "speaker" }, mute.center(), 18., Color32::WHITE);
+    let time_x = mute.left() - 8. - tg.size().x;
+    ui.painter().galley(Pos2::new(time_x, bar.center().y - tg.size().y / 2.), tg, Color32::WHITE);
+    let track = Rect::from_min_max(Pos2::new(play.right() + 10., bar.center().y - 2.), Pos2::new(time_x - 12., bar.center().y + 2.));
+    ui.painter().rect_filled(track, CornerRadius::same(2), Color32::from_white_alpha(70));
+    let done = if total > 0. { (at / total).clamp(0., 1.) } else { 0. };
+    let filled = Rect::from_min_max(track.min, Pos2::new(track.left() + track.width() * done, track.bottom()));
+    ui.painter().rect_filled(filled, CornerRadius::same(2), Color32::WHITE);
+    if !view_once {
+        let hit = track.expand2(Vec2::new(0., 8.));
+        let r = ui.interact(hit, ui.scope_id().with("video-seek"), Sense::click_and_drag());
+        if (r.clicked() || r.drag_stopped())
+            && let Some(p) = r.interact_pointer_pos()
+            && total > 0.
+        {
+            player.seek(((p.x - track.left()) / track.width()).clamp(0., 1.) * total);
+        }
+    }
 }
 
 fn save_item(app: &mut App, item: &Item) {
