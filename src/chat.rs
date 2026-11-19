@@ -1000,7 +1000,17 @@ fn message(
         let link_color = if outgoing { Color32::WHITE } else { palette.accent_text };
         let font_size = if jumbo { 32. } else { 14. };
         let limit = ctx.expanded.get(&m.id).copied().unwrap_or(READ_MORE_LENGTH);
-        Some(rich_text(m, &|sid| ctx.app.name(sid), in_color, link_color, revealed, font_size, limit))
+        // Desktop's `areLinksEnabled`: no links in a message request not
+        // accepted yet; they read as plain text.
+        let links_on = ctx.app.conversation(ctx.chat_id).is_none_or(|c| c.accepted);
+        let mut rich = rich_text(m, &|sid| ctx.app.name(sid), in_color, if links_on { link_color } else { in_color }, revealed, font_size, limit);
+        if !links_on {
+            rich.links.retain(|(_, url)| url == READ_MORE);
+            for section in &mut rich.job.sections {
+                section.format.underline = Stroke::NONE;
+            }
+        }
+        Some(rich)
     };
 
     // Desktop's `getWidth`: a photo's bubble is as wide as the photo, and
