@@ -227,7 +227,7 @@ pub fn find_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatVi
                         Some(aci) => format!("From {}", app.name(aci)),
                         None => "From anyone".to_owned(),
                     };
-                    let menu = ui.id().with("search-from");
+                    let menu = ui.scope_id().with("search-from");
                     let r = ui.add(egui::Button::new(RichText::new(label).font(theme::regular(13.))).corner_radius(CornerRadius::same(12)));
                     if r.clicked() {
                         crate::menu::open_at(ui.ctx(), menu, Pos2::new(r.rect.left(), r.rect.bottom() + 4.));

@@ -488,7 +488,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                             job.wrap.overflow_character = Some('…');
                             ui.label(job);
                         });
-                        let r = ui.interact(response.response.rect, ui.id().with(("pinned", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let r = ui.interact(response.response.rect, ui.scope_id().with(("pinned", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
                         if r.clicked() {
                             out.push(Do::Close);
                             out.push(Do::Jump(m.id));
