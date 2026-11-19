@@ -947,7 +947,17 @@ fn message(
 
     let rich = if m.deleted {
         let mut job = egui::text::LayoutJob::default();
-        job.append("This message was deleted.", 0., egui::TextFormat { font_id: theme::italic(14.), color: in_color, line_height: Some(20.), ..Default::default() });
+        // Desktop's `Message` names who deleted it: the admin, else its author.
+        let text = match &m.deleted_by_admin {
+            Some(langis_store::DeletedByAdmin { by: Some(admin) }) => format!("Admin {} deleted this message", ctx.app.name(admin)),
+            Some(_) => "You deleted this message".to_owned(),
+            None if outgoing => "You deleted this message".to_owned(),
+            None => {
+                let name = m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into());
+                format!("{name} deleted this message")
+            }
+        };
+        job.append(&text, 0., egui::TextFormat { font_id: theme::italic(14.), color: in_color, line_height: Some(20.), ..Default::default() });
         Some(Rich { job, links: Vec::new(), spoilers: Vec::new() })
     } else if body_text.is_empty() {
         None
