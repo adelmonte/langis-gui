@@ -332,6 +332,23 @@ fn screenshots_composer() {
     save(&mut harness, "composer-reply");
     harness.state_mut().chat.as_mut().unwrap().quote = None;
 
+    // Files waiting to go: a photo and a document.
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_fn(200, 150, |x, y| image::Rgb([x as u8, y as u8, 160])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    {
+        let chat = harness.state_mut().chat.as_mut().unwrap();
+        chat.staged.push(crate::composer::Staged::new(png.into_inner(), "ridge.png".into()));
+        chat.staged.push(crate::composer::Staged::new(b"%PDF-1.4".to_vec(), "trail-map.pdf".into()));
+        chat.composer = "Map and a photo".into();
+    }
+    wait(&mut harness, "staged", |_| true);
+    save(&mut harness, "composer-staged");
+    {
+        let chat = harness.state_mut().chat.as_mut().unwrap();
+        chat.staged.clear();
+        chat.composer.clear();
+    }
+
     harness.state_mut().chat.as_mut().unwrap().composer = "Who has the map? @".into();
     wait(&mut harness, "composer", |_| true);
     crate::composer::set_cursor(&ctx, id, 18);
