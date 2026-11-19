@@ -77,7 +77,7 @@ fn screenshots_panes() {
         save(&mut harness, "story-viewer");
         harness.state_mut().panes.stories.viewer = None;
     }
-    harness.state_mut().panes.stories.composer = Some(crate::stories::Composer { text: "Trail run at 7?".into(), background: 2, media: None, targets: vec![langis_core::StoryTarget::MyStory] });
+    harness.state_mut().panes.stories.composer = Some(crate::stories::Composer { text: "Trail run at 7?".into(), background: 2, media: None, targets: vec![langis_core::StoryTarget::MyStory] , font: langis_store::StoryFont::Bold, text_style: 0, preview: None, preview_for: None, new_group: None });
     wait(&mut harness, "story composer", |_| true);
     save(&mut harness, "story-composer");
     harness.state_mut().panes.stories.composer = None;
