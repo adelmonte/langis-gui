@@ -458,7 +458,7 @@ pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
     use langis_core::ChatChange;
     let id = c.id.clone();
     let unread = c.unread_count > 0 || c.marked_unread;
-    if c.unread_count > 0 && m.item(Some("message-check"), "Mark read") {
+    if unread && m.item(Some("message-check"), "Mark read") {
         app.send(Command::MarkRead { conversation: id.clone() });
         if c.marked_unread {
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(false) });
