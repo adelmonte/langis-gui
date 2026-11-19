@@ -43,6 +43,8 @@ pub struct ChatView {
     /// The message picked with the keyboard (Desktop's selected message,
     /// from Ctrl+J), which the message shortcuts act on.
     pub kb_selected: Option<i64>,
+    /// Runs of group updates opened, by their first notice.
+    pub unfolded: std::collections::HashSet<i64>,
     pub emoji: crate::emoji_picker::Picker,
     pub revealed: HashSet<i64>,
     /// Desktop's `displayLimit`: how much of a long message's text shows,
@@ -186,6 +188,7 @@ impl ChatView {
             last_typed: None,
             emoji_open: false,
             kb_selected: None,
+            unfolded: Default::default(),
             emoji: Default::default(),
             revealed: HashSet::new(),
             expanded: HashMap::new(),
@@ -833,6 +836,25 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 if chat.scroll_to_unread {
                     chat.scroll_to_unread = false;
                     ui.scroll_to_rect_animation(rect, Some(egui::Align::Min), egui::style::ScrollAnimation::none());
+                }
+            }
+            // Desktop's `CollapseSet`: a run of group updates folds into one
+            // line ("4 group updates") until it's opened.
+            let foldable = |o: &Message| matches!(o.notice, Some(langis_store::Notice::Group { .. } | langis_store::Notice::Timer { .. })) && crate::format::same_day(o.sent_at, m.sent_at);
+            if foldable(m) {
+                let first = (0..=i).rev().take_while(|&k| foldable(&messages[k])).last().unwrap_or(i);
+                let run = messages[first..].iter().take_while(|o| foldable(o)).count();
+                if run >= 2 && !chat.unfolded.contains(&messages[first].id) {
+                    if i == first {
+                        ui.add_space(10.);
+                        let label = format!("{run} group updates");
+                        let r = ui.vertical_centered(|ui| ui.add(egui::Button::new(RichText::new(label).font(theme::regular(13.)).color(palette.text_secondary)).frame(false))).inner;
+                        if r.on_hover_text("Show them").clicked() {
+                            chat.unfolded.insert(m.id);
+                        }
+                        ui.add_space(10.);
+                    }
+                    continue;
                 }
             }
             let revealed = chat.revealed.contains(&m.id);
