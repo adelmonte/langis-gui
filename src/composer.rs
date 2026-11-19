@@ -363,6 +363,24 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 });
                 return;
             }
+            // Desktop's `AnnouncementsOnlyGroupBanner`: only admins may send,
+            // and "admins" opens the group's details, where they're listed.
+            if c.group_state.announcements_only && !c.admins.iter().any(|a| *a == app.aci) {
+                ui.vertical_centered(|ui| {
+                    ui.horizontal(|ui| {
+                        let line = ui.painter().layout_no_wrap("Only admins can send messages".into(), theme::regular(14.), palette.text_secondary).size().x;
+                        ui.add_space(((ui.available_width() - line) / 2.).max(0.));
+                        ui.spacing_mut().item_spacing.x = 0.;
+                        ui.label(RichText::new("Only ").font(theme::regular(14.)).color(palette.text_secondary));
+                        let admins = ui.add(egui::Label::new(RichText::new("admins").font(theme::semibold(14.)).color(palette.text_secondary).underline()).sense(Sense::click()));
+                        ui.label(RichText::new(" can send messages").font(theme::regular(14.)).color(palette.text_secondary));
+                        if admins.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            crate::details::open(app, c.id.clone());
+                        }
+                    });
+                });
+                return;
+            }
             if chat.recording.is_some() {
                 crate::voice::recording_bar(app, ui, palette, chat, c);
                 return;
