@@ -954,12 +954,25 @@ fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
 }
 
 fn permissions(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
+    let ask = egui::Id::unique("confirm-label-access");
+    if ui.ctx().data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
+        let body_text = "Members who aren't admins will lose their member labels, and only admins will be able to set them.";
+        match crate::dialog::confirm(ui.ctx(), ask.with("dialog"), "Only admins can set labels?", body_text, "Change", crate::dialog::Variant::StrongPrimary) {
+            Some(crate::dialog::Choice::Action) => {
+                app.send(Command::SetGroupPermission { conversation: c.id.clone(), permission: Permission::SetMemberLabels { admins_only: true } });
+                ui.ctx().data_mut(|d| d.remove::<bool>(ask));
+            }
+            Some(crate::dialog::Choice::Cancel) => ui.ctx().data_mut(|d| d.remove::<bool>(ask)),
+            None => {}
+        }
+    }
     let state = &c.group_state;
     section(ui, palette, |ui| {
-        let choices: [(&str, bool, fn(bool) -> Permission); 3] = [
+        let choices: [(&str, bool, fn(bool) -> Permission); 4] = [
             ("Add members", state.members_admins_only, |a| Permission::AddMembers { admins_only: a }),
             ("Edit group info", state.info_admins_only, |a| Permission::EditInfo { admins_only: a }),
             ("Send messages", state.announcements_only, |a| Permission::SendMessages { admins_only: a }),
+            ("Set member labels", state.labels_admins_only, |a| Permission::SetMemberLabels { admins_only: a }),
         ];
         for (label, admins_only, make) in choices {
             ui.horizontal(|ui| {
@@ -972,7 +985,14 @@ fn permissions(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) 
                         ui.selectable_value(&mut value, true, "Only admins");
                     });
                     if value != admins_only {
-                        app.send(Command::SetGroupPermission { conversation: c.id.clone(), permission: make(value) });
+                        // Desktop warns that admins-only labels takes away
+                        // the labels non-admins have.
+                        let labelled = c.member_labels.keys().any(|m| !c.admins.contains(m));
+                        if label == "Set member labels" && value && labelled {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("confirm-label-access"), true));
+                        } else {
+                            app.send(Command::SetGroupPermission { conversation: c.id.clone(), permission: make(value) });
+                        }
                     }
                 });
             });

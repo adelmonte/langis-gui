@@ -142,6 +142,9 @@ fn group_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -> Str
         GroupNotice::MemberAccess { admins_only: only } => {
             format!("{} changed who can edit group membership to \"{}\"", actor(), admins_only(*only))
         }
+        GroupNotice::LabelAccess { admins_only: only } => {
+            format!("{} changed who can set member labels to \"{}\"", actor(), admins_only(*only))
+        }
         GroupNotice::AnnouncementsOnly { on: true } => {
             format!("{} changed the group settings to only allow admins to send messages.", actor())
         }
