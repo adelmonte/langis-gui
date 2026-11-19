@@ -441,9 +441,12 @@ impl App {
                     })))
                 });
                 self.load(|db| async move {
-                    let saved = db.setting("ui.recent_gifs").await.ok().flatten()?;
-                    let gifs = crate::fun::parse_recent_gifs(&saved);
-                    Some(Loaded::Apply(Box::new(move |app: &mut App| app.fun.recent_gifs = gifs)))
+                    let gifs = db.setting("ui.recent_gifs").await.ok().flatten().map(|s| crate::fun::parse_recent_gifs(&s)).unwrap_or_default();
+                    let stickers = db.setting("ui.recent_stickers").await.ok().flatten().map(|s| crate::fun::parse_recent_stickers(&s)).unwrap_or_default();
+                    Some(Loaded::Apply(Box::new(move |app: &mut App| {
+                        app.fun.recent_gifs = gifs;
+                        app.fun.recent_stickers = stickers;
+                    })))
                 });
                 self.send(Command::LoadCallDevices);
                 crate::panes::on_ready(self);

@@ -49,6 +49,11 @@ pub struct Fun {
     gif_next: Option<u32>,
     gif_error: Option<String>,
     gif_loading: bool,
+    /// Stickers sent lately, newest first (Desktop's Recents), by pack id
+    /// and sticker id, kept in the `ui.recent_stickers` setting.
+    pub recent_stickers: Vec<(Vec<u8>, u32)>,
+    /// Showing the sticker Recents.
+    sticker_recents: bool,
     /// GIFs sent lately, newest first (Desktop's Recents), kept in the
     /// `ui.recent_gifs` setting.
     pub recent_gifs: Vec<(Gif, PathBuf)>,
@@ -157,7 +162,10 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
     if let Some(what) = send {
         let quote = chat.quote.take();
         let command = match what {
-            Send::Sticker(pack, sticker) => Command::SendSticker { conversation: c.id.clone(), pack, sticker, quote },
+            Send::Sticker(pack, sticker) => {
+                remember_sticker(app, &pack.id, sticker.id);
+                Command::SendSticker { conversation: c.id.clone(), pack, sticker, quote }
+            }
             Send::Gif(gif) => {
                 remember_gif(app, &gif);
                 Command::SendGif { conversation: c.id.clone(), gif, quote }
@@ -183,6 +191,34 @@ const GIF_CATEGORIES: [(&str, &str); 7] = [
     ("Sad", "sad"),
     ("Angry", "angry"),
 ];
+
+/// Most stickers kept in Recents.
+const RECENT_STICKERS: usize = 24;
+
+/// Puts a sent sticker first in Recents and saves the list.
+fn remember_sticker(app: &mut App, pack: &[u8], sticker: u32) {
+    let list = &mut app.fun.recent_stickers;
+    list.retain(|(p, s)| !(p == pack && *s == sticker));
+    list.insert(0, (pack.to_vec(), sticker));
+    list.truncate(RECENT_STICKERS);
+    let saved = serde_json::Value::Array(list.iter().map(|(p, s)| serde_json::json!({ "pack": p.iter().map(|b| format!("{b:02x}")).collect::<String>(), "sticker": s })).collect()).to_string();
+    app.load(move |db| async move {
+        let _ = db.set_setting("ui.recent_stickers", &saved).await;
+        None
+    });
+}
+
+pub fn parse_recent_stickers(text: &str) -> Vec<(Vec<u8>, u32)> {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(text) else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|v| {
+            let hex = v["pack"].as_str()?;
+            let pack: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect::<Option<_>>()?;
+            Some((pack, v["sticker"].as_u64()? as u32))
+        })
+        .collect()
+}
 
 /// Most GIFs kept in Recents.
 const RECENT_GIFS: usize = 30;
@@ -302,20 +338,34 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
     // The packs along the top: favorites, each installed pack, then "+".
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.;
+        // Desktop's Recents first, when there are any.
+        if !fun.recent_stickers.is_empty() {
+            let (rect, r) = ui.allocate_exact_size(Vec2::splat(34.), Sense::click());
+            if fun.sticker_recents || r.hovered() {
+                ui.painter().rect_filled(rect, CornerRadius::same(8), if fun.sticker_recents { palette.fill_pressed } else { palette.fill });
+            }
+            theme::paint_symbol(ui.painter(), "recent", rect.center(), 18., palette.text);
+            if r.on_hover_text("Recents").clicked() {
+                fun.sticker_recents = true;
+                fun.chose_pack = true;
+            }
+        }
         let (rect, r) = ui.allocate_exact_size(Vec2::splat(34.), Sense::click());
-        if fun.pack.is_none() || r.hovered() {
-            ui.painter().rect_filled(rect, CornerRadius::same(8), if fun.pack.is_none() { palette.fill_pressed } else { palette.fill });
+        let favorites_on = fun.pack.is_none() && !fun.sticker_recents;
+        if favorites_on || r.hovered() {
+            ui.painter().rect_filled(rect, CornerRadius::same(8), if favorites_on { palette.fill_pressed } else { palette.fill });
         }
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, "★", theme::regular(18.), palette.text);
         if r.on_hover_text("Favorites").clicked() {
             fun.pack = None;
+            fun.sticker_recents = false;
             fun.chose_pack = true;
         }
         egui::ScrollArea::horizontal().max_width(ui.available_width() - 40.).show(ui, |ui| {
             ui.horizontal(|ui| {
                 for pack in &fun.packs {
                     let (rect, r) = ui.allocate_exact_size(Vec2::splat(34.), Sense::click());
-                    let on = fun.pack.as_ref() == Some(&pack.id);
+                    let on = !fun.sticker_recents && fun.pack.as_ref() == Some(&pack.id);
                     if on || r.hovered() {
                         ui.painter().rect_filled(rect, CornerRadius::same(8), if on { palette.fill_pressed } else { palette.fill });
                     }
@@ -324,6 +374,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                     }
                     if r.on_hover_text(&pack.title).clicked() {
                         fun.pack = Some(pack.id.clone());
+                        fun.sticker_recents = false;
                     }
                 }
             });
@@ -335,6 +386,15 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
     });
     ui.add_space(6.);
     let shown: Vec<(Arc<StickerPackView>, StickerView)> = match &fun.pack {
+        // Recents: those still in an installed pack.
+        _ if fun.sticker_recents => fun
+            .recent_stickers
+            .iter()
+            .filter_map(|(pack, sticker)| {
+                let p = fun.packs.iter().find(|p| &p.id == pack)?;
+                Some((p.clone(), p.stickers.iter().find(|s| s.id == *sticker)?.clone()))
+            })
+            .collect(),
         Some(id) => fun.packs.iter().find(|p| &p.id == id).map(|p| p.stickers.iter().map(|s| (p.clone(), s.clone())).collect()).unwrap_or_default(),
         None => fun
             .favorites
@@ -348,6 +408,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
             .collect(),
     };
     let title = match &fun.pack {
+        _ if fun.sticker_recents => "Recents".to_owned(),
         Some(id) => fun.packs.iter().find(|p| &p.id == id).map(|p| p.title.clone()).unwrap_or_default(),
         None => "Favorites".to_owned(),
     };
@@ -598,9 +659,18 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                 if packs.is_empty() {
                     ui.label(RichText::new(empty).font(theme::regular(13.)).color(palette.text_secondary));
                 }
-                for pack in packs {
-                    if let Some(action) = pack_row(ui, &palette, pack, title) {
+                let installed_list = std::ptr::eq(packs, &manager.installed);
+                for (i, pack) in packs.iter().enumerate() {
+                    // Desktop drags installed packs into order; here they
+                    // move a step from their row.
+                    let moves = if installed_list { (i > 0, i + 1 < packs.len()) } else { (false, false) };
+                    if let Some(action) = pack_row(ui, &palette, pack, title, moves) {
                         match action {
+                            PackAction::Move(up) => {
+                                let mut ids: Vec<Vec<u8>> = packs.iter().map(|p| p.id.clone()).collect();
+                                ids.swap(i, if up { i - 1 } else { i + 1 });
+                                app.send(Command::OrderStickerPacks(ids));
+                            }
                             PackAction::Open => open = Some((pack.id.clone(), pack.key.clone())),
                             PackAction::Install => app.send(Command::InstallStickerPack { id: pack.id.clone(), key: pack.key.clone() }),
                             PackAction::Uninstall => app.send(Command::UninstallStickerPack { id: pack.id.clone(), key: pack.key.clone() }),
@@ -626,12 +696,13 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
 }
 
 enum PackAction {
+    Move(bool),
     Open,
     Install,
     Uninstall,
 }
 
-fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: &str) -> Option<PackAction> {
+fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: &str, moves: (bool, bool)) -> Option<PackAction> {
     let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.), Sense::click());
     if r.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
@@ -655,6 +726,23 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
     ui.painter().galley(button.center() - g.size() / 2., g, palette.text);
     if br.clicked() {
         return Some(if pack.installed { PackAction::Uninstall } else { PackAction::Install });
+    }
+    // Up and down, before the button, for installed packs.
+    let mut x = button.left() - 8.;
+    for (show, up, symbol) in [(moves.1, false, "arrow-down"), (moves.0, true, "arrow-up")] {
+        let at = Rect::from_center_size(Pos2::new(x - 14., rect.center().y), Vec2::splat(28.));
+        x -= 32.;
+        if !show {
+            continue;
+        }
+        let mr = ui.interact(at, ui.scope_id().with(("pack-move", up, &pack.id)), Sense::click());
+        if mr.hovered() {
+            ui.painter().rect_filled(at, CornerRadius::same(14), palette.fill_pressed);
+        }
+        theme::paint_symbol(ui.painter(), symbol, at.center(), 16., palette.text_secondary);
+        if mr.on_hover_text(if up { "Move up" } else { "Move down" }).clicked() {
+            return Some(PackAction::Move(up));
+        }
     }
     r.clicked().then_some(PackAction::Open)
 }
