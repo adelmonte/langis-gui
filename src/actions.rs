@@ -34,6 +34,9 @@ pub enum Dialog {
     PollVotes { message: i64 },
     /// Desktop's `EditHistoryMessagesModal`: every version, newest first.
     EditHistory { message: i64, details: Option<Details> },
+    /// Desktop's `CustomizingPreferredReactionsModal`: the reaction bar's
+    /// six, one picked to change from the emoji picker.
+    Reactions { slots: Vec<String>, selected: Option<usize>, picker: crate::emoji_picker::Picker },
 }
 
 /// Desktop's `MessageDetail`: each recipient's state and the edits.
@@ -240,11 +243,26 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
             };
             if *full {
                 let mut open = true;
-                if let Some(picked) = picker.show(ctx, *at + Vec2::new(0., 420.), &mut open, &app.recent_emoji) {
+                let anchor = *at + Vec2::new(0., 420.);
+                // Desktop's reaction picker ends with Customize.
+                let palette = Palette::of(ctx);
+                let mut customize = false;
+                egui::Area::new(egui::Id::unique("customize-reactions"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(Pos2::new(anchor.x, anchor.y - 4.))
+                    .show(ctx, |ui| {
+                        egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(12)).stroke(egui::Stroke::new(1., palette.border)).inner_margin(6).show(ui, |ui| {
+                            customize = widgets::pill_button(ui, "Customize reactions", false).clicked();
+                        });
+                    });
+                if customize {
+                    out.push(Do::Close);
+                    out.push(Do::Open(Dialog::Reactions { slots: app.reactions.clone(), selected: Some(0), picker: Default::default() }));
+                } else if let Some(picked) = picker.show(ctx, anchor, &mut open, &app.recent_emoji) {
                     app.use_emoji(picked);
                     out.push(Do::Command(react(picked)));
                     out.push(Do::Close);
-                } else if !open {
+                } else if !open && !ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.y > anchor.y - 8.) {
                     out.push(Do::Close);
                 }
             } else {
@@ -417,6 +435,55 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         Dialog::Poll(poll) => {
             let modal = egui::Modal::new(egui::Id::unique("new-poll")).frame(frame).show(ui.ctx(), |ui| {
                 crate::polls::dialog(ui, &palette, poll, &c.id, &mut out);
+            });
+            if modal.should_close() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::Reactions { slots, selected, picker } => {
+            let modal = egui::Modal::new(egui::Id::unique("customize-reactions-dialog")).frame(frame).show(ui.ctx(), |ui| {
+                ui.set_width(360.);
+                ui.label(RichText::new("Customize reactions").font(theme::semibold(18.)));
+                ui.add_space(4.);
+                ui.label(RichText::new("Choose a reaction, then pick its replacement.").font(theme::regular(13.)).color(palette.text_secondary));
+                ui.add_space(12.);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.;
+                    for (i, emoji) in slots.iter().enumerate() {
+                        let (rect, r) = ui.allocate_exact_size(Vec2::splat(44.), Sense::click());
+                        let on = *selected == Some(i);
+                        ui.painter().circle_filled(rect.center(), 22., if on { palette.fill_pressed } else if r.hovered() { palette.fill } else { palette.popover });
+                        if on {
+                            ui.painter().circle_stroke(rect.center(), 22., egui::Stroke::new(2., palette.accent));
+                        }
+                        ui.painter().text(rect.center(), Align2::CENTER_CENTER, emoji, theme::emoji(26.), palette.text);
+                        if r.clicked() {
+                            *selected = Some(i);
+                        }
+                    }
+                });
+                ui.add_space(12.);
+                if let Some(picked) = picker.body(ui, &app.recent_emoji)
+                    && let Some(i) = *selected
+                {
+                    slots[i] = picked.to_owned();
+                    *selected = Some((i + 1) % slots.len());
+                }
+                ui.add_space(12.);
+                ui.horizontal(|ui| {
+                    if widgets::pill_button(ui, "Reset", false).clicked() {
+                        *slots = DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect();
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if widgets::pill_button(ui, "Save", true).clicked() {
+                            out.push(Do::Command(Command::SetPreferredReactions(slots.clone())));
+                            out.push(Do::Close);
+                        }
+                        if widgets::pill_button(ui, "Cancel", false).clicked() {
+                            out.push(Do::Close);
+                        }
+                    });
+                });
             });
             if modal.should_close() {
                 out.push(Do::Close);
