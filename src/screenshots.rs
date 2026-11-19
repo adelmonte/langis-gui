@@ -286,6 +286,16 @@ fn screenshots_media() {
     harness.state_mut().close_lightbox();
     wait(&mut harness, "viewed", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == once && m.view_once == Some(langis_store::ViewOnce::Viewed))));
     save(&mut harness, "view-once-viewed");
+
+    // A shared contact, a payment and a gift badge.
+    let ids: Vec<_> = harness.state().conversations.iter().map(|c| c.id.clone()).collect();
+    let (with, card) = ids
+        .into_iter()
+        .find_map(|id| all_messages(&harness, &id).into_iter().find(|m| matches!(m.content, Some(langis_store::MessageContent::Contact(_)))).map(|m| (id, m.id)))
+        .expect("a message with content");
+    harness.state_mut().open_at(with, card);
+    wait(&mut harness, "contact card", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == card)));
+    save(&mut harness, "message-content");
     finish(harness);
 }
 
