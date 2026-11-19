@@ -63,6 +63,10 @@ pub struct Panes {
     /// A chat waiting on "Delete chat?", and whether we're still in it.
     pub delete_chat: Option<(ConversationId, bool)>,
     pub menu_for: Option<ConversationId>,
+    /// A message request answer waiting on its confirmation.
+    pub confirm_answer: Option<(ConversationId, MessageRequestResponse)>,
+    /// "Cancel request" to join a group, waiting on its confirmation.
+    pub confirm_cancel_join: Option<ConversationId>,
     /// Who's in each group's call, from its last peek (empty: no call).
     pub active_calls: std::collections::HashMap<ConversationId, Vec<String>>,
 
@@ -730,6 +734,23 @@ pub fn list_menu(app: &mut App, m: &mut crate::menu::Menu) {
 /// was shown.
 pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) -> bool {
     let blocked = c.blocked;
+    message_request_confirms(app, ui.ctx(), c);
+    // Desktop's `GroupV2PendingApprovalActions`: waiting on an admin.
+    if matches!(c.group_state.membership, langis_store::Membership::Requesting { .. }) && !c.left && !c.ended {
+        egui::Panel::bottom("join-requested")
+            .show_separator_line(false)
+            .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin::symmetric(24, 16)))
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("Your request to join has been sent to the group admin. You'll be notified when they take action.").font(theme::regular(13.)).color(palette.text_secondary));
+                    ui.add_space(10.);
+                    if widgets::pill_button(ui, "Cancel request", false).clicked() {
+                        app.panes.confirm_cancel_join = Some(c.id.clone());
+                    }
+                });
+            });
+        return true;
+    }
     if c.accepted && !blocked && !c.left && !c.ended {
         return false;
     }
@@ -746,6 +767,8 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                 } else if blocked {
                     if group { "You have blocked this group. Unblock it to send messages." } else { "You have blocked this person. Unblock them to send messages." }
                         .to_owned()
+                } else if let langis_store::Membership::Invited { by: Some(by) } = &c.group_state.membership {
+                    format!("{} invited you to join this group. Do you want to join? They won't know you've seen their messages until you accept.", app.name(by))
                 } else if group {
                     "Do you want to join this group? They won't know you've seen their messages until you accept.".to_owned()
                 } else {
@@ -776,13 +799,73 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                     for (label, response) in labels {
                         let primary = *response == MessageRequestResponse::Accept;
                         if widgets::pill_button(ui, label, primary).clicked() {
-                            app.send(answer(*response));
+                            // Desktop asks before blocking, deleting or reporting.
+                            if primary {
+                                app.send(answer(*response));
+                            } else {
+                                app.panes.confirm_answer = Some((c.id.clone(), *response));
+                            }
                         }
                     }
                 });
             });
         });
     true
+}
+
+/// Desktop's message request confirmations (`MessageRequestActionsConfirmation`,
+/// `ReportAndMaybeBlockModal`) and its cancel-join one.
+fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation) {
+    use crate::dialog::{Answer, Variant};
+    if app.panes.confirm_cancel_join.as_ref() == Some(&c.id) {
+        match crate::dialog::show(ctx, egui::Id::unique("cancel-join"), "Cancel your request to join this group?", "If you cancel, you can ask to join again with the group link.", Some("Not now"), &[("Cancel request", Variant::StrongDestructive)]) {
+            Some(Answer::Action(_)) => {
+                app.panes.confirm_cancel_join = None;
+                app.send(Command::CancelJoinRequest { conversation: c.id.clone() });
+            }
+            Some(Answer::Cancel) => app.panes.confirm_cancel_join = None,
+            None => {}
+        }
+    }
+    let Some((id, answer)) = app.panes.confirm_answer.clone().filter(|(id, _)| *id == c.id) else { return };
+    let group = c.kind == ConversationKind::Group;
+    let who = c.title.clone();
+    let (title, body, actions): (String, String, Vec<(&str, Variant, MessageRequestResponse)>) = match answer {
+        MessageRequestResponse::Block => (
+            format!("Block {who}?"),
+            if group { "You will leave this group and no longer receive its messages or updates.".into() } else { "Blocked people won't be able to call you or send you messages.".into() },
+            vec![("Block", Variant::StrongDestructive, MessageRequestResponse::Block)],
+        ),
+        MessageRequestResponse::Delete if !c.blocked => (
+            if group { "Delete and leave group?".into() } else { "Delete chat?".into() },
+            if group { "You will leave this group, and its messages will be deleted from all your devices.".into() } else { "This chat will be deleted from all your devices.".into() },
+            vec![("Delete", Variant::StrongDestructive, MessageRequestResponse::Delete)],
+        ),
+        MessageRequestResponse::Delete => (
+            "Delete chat?".into(),
+            "This chat will be deleted from all your devices.".into(),
+            vec![("Delete", Variant::StrongDestructive, MessageRequestResponse::Delete)],
+        ),
+        MessageRequestResponse::Spam => (
+            "Report spam?".into(),
+            "Signal will be told this may be spam. Signal can't see the content of any chat.".into(),
+            vec![("Report", Variant::SubtleDestructive, MessageRequestResponse::Spam), ("Report and block", Variant::StrongDestructive, MessageRequestResponse::BlockAndSpam)],
+        ),
+        other => {
+            app.panes.confirm_answer = None;
+            app.send(Command::AnswerMessageRequest { conversation: id, answer: other });
+            return;
+        }
+    };
+    let buttons: Vec<(&str, Variant)> = actions.iter().map(|(l, v, _)| (*l, *v)).collect();
+    match crate::dialog::show(ctx, egui::Id::unique("message-request-confirm"), &title, &body, Some("Cancel"), &buttons) {
+        Some(Answer::Action(i)) => {
+            app.panes.confirm_answer = None;
+            app.send(Command::AnswerMessageRequest { conversation: id, answer: actions[i].2 });
+        }
+        Some(Answer::Cancel) => app.panes.confirm_answer = None,
+        None => {}
+    }
 }
 
 /// Desktop's `isProbablyAUsername`.
