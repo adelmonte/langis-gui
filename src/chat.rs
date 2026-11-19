@@ -142,6 +142,8 @@ enum Action {
     Jump(i64),
     /// Opens a message's Info (its recipients' send states).
     Info(i64),
+    /// Opens a message's edit history.
+    EditHistory(i64),
     /// Show a photo or video in the viewer.
     Lightbox { message_id: i64, index: usize },
     Vote { message_id: i64, options: Vec<u32> },
@@ -213,7 +215,7 @@ impl ChatView {
     pub fn on_loaded(&mut self, loaded: ChatLoaded) {
         match loaded {
             ChatLoaded::Details { message, details } => {
-                if let Some(crate::actions::Dialog::Info { message: open, details: slot }) = self.dialog.as_mut()
+                if let Some(crate::actions::Dialog::Info { message: open, details: slot } | crate::actions::Dialog::EditHistory { message: open, details: slot }) = self.dialog.as_mut()
                     && *open == message
                 {
                     *slot = Some(details);
@@ -433,6 +435,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             Action::FetchLongText(message_id) => app.send(Command::FetchLongText { message_id }),
             Action::Jump(message_id) => app.open_at(id.clone(), message_id),
+            Action::EditHistory(message_id) => {
+                crate::actions::load_details(app, message_id);
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.dialog = Some(crate::actions::Dialog::EditHistory { message: message_id, details: None });
+                }
+            }
             Action::Info(message_id) => {
                 crate::actions::load_details(app, message_id);
                 if let Some(chat) = app.chat.as_mut() {
@@ -737,7 +745,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             crate::actions::Popup::Menu { message, .. } | crate::actions::Popup::Reactions { message, .. } => *message,
         });
         let selecting = chat.selected.is_some();
-        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting, expanded: &chat.expanded };
+        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting, expanded: &chat.expanded, pinned: chat.pinned.iter().map(|m| m.id).collect() };
         let messages = &chat.messages;
         let mut reached = None;
         let view_top = ui.clip_rect().top();
@@ -905,6 +913,8 @@ struct Ctx<'a> {
     /// room for the checkbox.
     selecting: bool,
     expanded: &'a HashMap<i64, usize>,
+    /// Pinned messages' ids: their time gets Desktop's pin mark.
+    pinned: Vec<i64>,
 }
 
 /// The top of a chat's history: Desktop's `ConversationHero`.
@@ -1047,7 +1057,10 @@ fn message(
     }
     // Desktop's status icon: 12px tall (18 wide when delivered or read), 6px after the time.
     let status_w = if outgoing { 6. + 12. * crate::sidebar::status_icon(m.status).aspect() } else { 0. } + if timer.is_some() { 16. } else { 0. };
-    let meta_w = meta.size().x + status_w;
+    // `MessageMetadata__pinned`: a pin before the time.
+    let pinned = ctx.pinned.contains(&m.id);
+    let pin_w = if pinned { 14. } else { 0. };
+    let meta_w = meta.size().x + status_w + pin_w;
     let show_meta = !collapsed_below || m.status == DeliveryStatus::Failed || next.is_some_and(|n| n.status != m.status);
 
     // Sticker: large, no bubble.
@@ -1319,7 +1332,18 @@ fn message(
             let shade = Rect::from_min_max(Pos2::new(meta_x - 6., meta_y - 2.), Pos2::new(right + 6., meta_y + 16.));
             ui.painter().rect_filled(shade, CornerRadius::same(9), Color32::from_black_alpha(100));
         }
+        if pinned {
+            theme::paint_symbol(ui.painter(), "pin", Pos2::new(meta_x + 6., meta_y + 8.), 12., color);
+        }
+        let meta_x = meta_x + pin_w;
         let meta_end = meta_x + meta.size().x;
+        // "Edited" opens the edit history (Desktop's `MessageMetadata__edited`).
+        if m.edited && !ctx.selecting {
+            let r = ui.interact(Rect::from_min_size(Pos2::new(meta_x, meta_y), meta.size() + Vec2::new(0., 2.)), ui.scope_id().with(("edited", m.id)), Sense::click());
+            if r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Edit history").clicked() {
+                actions.push(Action::EditHistory(m.id));
+            }
+        }
         ui.painter().galley(Pos2::new(meta_x, meta_y + 1.), meta, color);
         if let Some(left) = timer {
             let at = Rect::from_min_size(Pos2::new(meta_end + 2., meta_y + 1.), Vec2::splat(14.));

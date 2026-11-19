@@ -32,6 +32,8 @@ pub enum Dialog {
     Info { message: i64, details: Option<Details> },
     Poll(crate::polls::NewPoll),
     PollVotes { message: i64 },
+    /// Desktop's `EditHistoryMessagesModal`: every version, newest first.
+    EditHistory { message: i64, details: Option<Details> },
 }
 
 /// Desktop's `MessageDetail`: each recipient's state and the edits.
@@ -415,6 +417,49 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         Dialog::Poll(poll) => {
             let modal = egui::Modal::new(egui::Id::unique("new-poll")).frame(frame).show(ui.ctx(), |ui| {
                 crate::polls::dialog(ui, &palette, poll, &c.id, &mut out);
+            });
+            if modal.should_close() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::EditHistory { message, details } => {
+            let id = *message;
+            let Some(m) = chat.iter().find(|m| m.id == id) else { return vec![Do::Close] };
+            let modal = egui::Modal::new(egui::Id::unique("edit-history")).frame(frame).show(ui.ctx(), |ui| {
+                ui.set_width(400.);
+                ui.label(RichText::new("Edit history").font(theme::semibold(18.)));
+                ui.add_space(12.);
+                egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
+                    // The current text, then the older versions.
+                    let mut versions: Vec<(String, i64)> = vec![(m.body.clone(), m.sent_at)];
+                    if let Some(details) = details {
+                        let mut older: Vec<_> = details.edits.iter().map(|e| (e.body.clone(), e.sent_at)).collect();
+                        older.sort_by(|a, b| b.1.cmp(&a.1));
+                        let current_at = versions[0].1;
+                        versions.extend(older.into_iter().filter(|(body, at)| !(body == &m.body && *at == current_at)));
+                    } else {
+                        ui.spinner();
+                    }
+                    let outgoing = m.direction == Direction::Outgoing;
+                    for (body, at) in versions {
+                        ui.with_layout(egui::Layout::top_down(if outgoing { egui::Align::Max } else { egui::Align::Min }), |ui| {
+                            let fill = if outgoing { palette.accent } else { palette.bubble_in };
+                            let color = if outgoing { egui::Color32::WHITE } else { palette.text };
+                            egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                                ui.set_max_width(300.);
+                                ui.label(RichText::new(body).font(theme::regular(14.)).color(color));
+                                ui.label(RichText::new(crate::format::message_time(at)).font(theme::regular(11.)).color(color.gamma_multiply(0.8)));
+                            });
+                        });
+                        ui.add_space(8.);
+                    }
+                });
+                ui.add_space(12.);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::pill_button(ui, "Done", true).clicked() {
+                        out.push(Do::Close);
+                    }
+                });
             });
             if modal.should_close() {
                 out.push(Do::Close);
