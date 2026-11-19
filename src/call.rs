@@ -26,11 +26,15 @@ pub struct CallView {
     pip_snap: PipSnap,
     /// Where the pointer took hold of the window, while it's dragged.
     pip_grab: Option<Vec2>,
+    /// The grid's page, and how far down the overflow column is scrolled
+    /// (Desktop's `GroupCallOverflowArea` and paginated grid).
+    grid_page: usize,
+    overflow_from: usize,
 }
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0 }
     }
 }
 
@@ -262,6 +266,9 @@ fn grid_rects(n: usize, area: Rect) -> Vec<Rect> {
     (0..n).map(|i| Rect::from_min_size(area.min + Vec2::new((i % columns) as f32 * (tile.x + gap), (i / columns) as f32 * (tile.y + gap)), tile)).collect()
 }
 
+/// The smallest a grid tile gets before the grid pages.
+const MIN_GRID_TILE_H: f32 = 140.;
+
 fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate, video: &langis_core::CallVideo, stage: Rect) {
     if call.participants.is_empty() {
         ui.painter().text(stage.center(), Align2::CENTER_CENTER, "No one else is here", theme::regular(15.), Color32::from_white_alpha(200));
@@ -273,6 +280,18 @@ fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate
     let layout = if people.len() < 2 { Layout::Grid } else { app.call_view.layout };
     let gap = 8.;
     let main_area = Rect::from_min_max(stage.min, Pos2::new(stage.right() - OVERFLOW_W - gap, stage.bottom()));
+    // The grid pages once tiles would be under 140 high.
+    let per_page = {
+        let rows = ((stage.height() + gap) / (MIN_GRID_TILE_H + gap)).floor().max(1.) as usize;
+        let columns = ((stage.width() + gap) / (MIN_GRID_TILE_H * 4. / 3. + gap)).floor().max(1.) as usize;
+        (rows * columns).max(1)
+    };
+    let pages = people.len().div_ceil(per_page);
+    if layout == Layout::Grid && pages > 1 {
+        app.call_view.grid_page = app.call_view.grid_page.min(pages - 1);
+        let from = app.call_view.grid_page * per_page;
+        people = people[from..(from + per_page).min(people.len())].to_vec();
+    }
     let (large, overflow): (usize, bool) = match layout {
         Layout::Grid => (people.len(), false),
         Layout::Speaker => (1, true),
@@ -291,18 +310,53 @@ fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate
         visible.push(p.demux_id);
     }
     if overflow {
-        // `GroupCallOverflowArea`: the rest, 107 wide, top to bottom.
+        // `GroupCallOverflowArea`: the rest, 107 wide, top to bottom,
+        // scrolled with its arrows when they don't all fit.
         let tile_h = OVERFLOW_W * 3. / 4.;
-        let mut y = stage.top();
-        for p in &people[large..] {
-            if y + tile_h > stage.bottom() {
-                break;
-            }
+        let rest = &people[large..];
+        let fits = (((stage.height() - 2. * 28.) + gap) / (tile_h + gap)).floor().max(1.) as usize;
+        let scrolls = rest.len() > ((stage.height() + gap) / (tile_h + gap)).floor() as usize;
+        let shown = if scrolls { fits } else { rest.len() };
+        let from = if scrolls { app.call_view.overflow_from.min(rest.len().saturating_sub(shown)) } else { 0 };
+        app.call_view.overflow_from = from;
+        let mut y = stage.top() + if scrolls { 28. } else { 0. };
+        for p in rest.iter().skip(from).take(shown) {
             let rect = Rect::from_min_size(Pos2::new(stage.right() - OVERFLOW_W, y), Vec2::new(OVERFLOW_W, tile_h));
             paint_tile(app, ui, ctx, p, video, rect, true);
             visible.push(p.demux_id);
             y += tile_h + gap;
         }
+        if scrolls {
+            let column = Rect::from_min_max(Pos2::new(stage.right() - OVERFLOW_W, stage.top()), stage.max);
+            let up = Rect::from_center_size(Pos2::new(column.center().x, column.top() + 12.), Vec2::new(OVERFLOW_W, 24.));
+            let down = Rect::from_center_size(Pos2::new(column.center().x, stage.top() + 28. + shown as f32 * (tile_h + gap) + 12.), Vec2::new(OVERFLOW_W, 24.));
+            for (r, symbol, step, enabled) in [(up, "chevron-up", -1isize, from > 0), (down, "chevron-down", 1, from + shown < rest.len())] {
+                let hit = ui.interact(r, ui.scope_id().with(("overflow", symbol)), Sense::click());
+                ui.painter().rect_filled(r, CornerRadius::same(8), Color32::from_white_alpha(if hit.hovered() && enabled { 40 } else { 20 }));
+                theme::paint_symbol(ui.painter(), symbol, r.center(), 16., Color32::from_white_alpha(if enabled { 230 } else { 80 }));
+                if enabled && hit.clicked() {
+                    app.call_view.overflow_from = (from as isize + step * shown as isize).max(0) as usize;
+                }
+            }
+        }
+    }
+    // The grid's pages: arrows either side, and which page.
+    if layout == Layout::Grid && pages > 1 {
+        let page = app.call_view.grid_page;
+        for (x, symbol, step, enabled) in [(stage.left() + 24., "chevron-[start]", -1isize, page > 0), (stage.right() - 24., "chevron-[end]", 1, page + 1 < pages)] {
+            let r = Rect::from_center_size(Pos2::new(x, stage.center().y), Vec2::splat(40.));
+            let hit = ui.interact(r, ui.scope_id().with(("grid-page", symbol)), Sense::click());
+            if !enabled {
+                continue;
+            }
+            ui.painter().circle_filled(r.center(), 20., Color32::from_black_alpha(if hit.hovered() { 200 } else { 140 }));
+            theme::paint_symbol(ui.painter(), symbol, r.center(), 20., Color32::WHITE);
+            if hit.clicked() {
+                app.call_view.grid_page = (page as isize + step) as usize;
+            }
+        }
+        let label = format!("{} of {}", page + 1, pages);
+        ui.painter().text(Pos2::new(stage.center().x, stage.bottom() - 10.), Align2::CENTER_BOTTOM, label, theme::regular(12.), Color32::from_white_alpha(200));
     }
     // Ask for video only of who's shown, as Desktop does.
     let main = match layout {
