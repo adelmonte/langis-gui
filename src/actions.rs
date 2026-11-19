@@ -609,6 +609,27 @@ pub fn check_circle(ui: &Ui, center: Pos2, on: bool, palette: &Palette) {
 }
 
 fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Option<&Details>) {
+    // Desktop's `MessageDetail` opens with the message itself.
+    let outgoing = m.direction == Direction::Outgoing;
+    let preview = if m.deleted {
+        "This message was deleted".to_owned()
+    } else if !m.body.is_empty() {
+        m.body.clone()
+    } else {
+        m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default()
+    };
+    ui.with_layout(egui::Layout::top_down(if outgoing { egui::Align::Max } else { egui::Align::Min }), |ui| {
+        let fill = if outgoing { palette.accent } else { palette.bubble_in };
+        let color = if outgoing { Color32::WHITE } else { palette.text };
+        egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+            ui.set_max_width(300.);
+            let mut job = egui::text::LayoutJob::simple(preview, theme::regular(14.), color, 300.);
+            job.wrap.max_rows = 6;
+            job.wrap.overflow_character = Some('…');
+            ui.label(job);
+        });
+    });
+    ui.add_space(12.);
     let when = |label: &str, at: i64| {
         let time = chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%A, %B %-d, %Y at %-I:%M %p").to_string()).unwrap_or_default();
         (label.to_owned(), time)
@@ -664,11 +685,27 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
                     let color = state.recipient.bytes().fold(0u8, |a, b| a.wrapping_add(b));
                     widgets::avatar(ui, &widgets::AvatarSpec::person(&name, color), 28.);
                     ui.label(RichText::new(name).font(theme::regular(14.)));
-                    if let Some(at) = state.updated_at {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Each person's status icon, as Desktop's contact rows have.
+                        let status = match state.status {
+                            SendStatus::Failed => Some(langis_store::DeliveryStatus::Failed),
+                            SendStatus::Pending => Some(langis_store::DeliveryStatus::Sending),
+                            SendStatus::Sent => Some(langis_store::DeliveryStatus::Sent),
+                            SendStatus::Delivered => Some(langis_store::DeliveryStatus::Delivered),
+                            SendStatus::Read => Some(langis_store::DeliveryStatus::Read),
+                            SendStatus::Viewed => Some(langis_store::DeliveryStatus::Viewed),
+                            SendStatus::Skipped => None,
+                        };
+                        if let Some(status) = status {
+                            let icon = crate::sidebar::status_icon(status);
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(18., 16.), Sense::hover());
+                            let tint = if status == langis_store::DeliveryStatus::Failed { palette.destructive } else { palette.text_secondary };
+                            icon.paint(ui, rect, 12., tint);
+                        }
+                        if let Some(at) = state.updated_at {
                             ui.label(RichText::new(crate::format::short_timestamp(at)).font(theme::regular(12.)).color(palette.text_secondary));
-                        });
-                    }
+                        }
+                    });
                 });
             }
         }
