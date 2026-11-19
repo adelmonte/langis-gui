@@ -665,7 +665,7 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
         let rect = Rect::from_min_size(Pos2::new(inner.left(), status_y), Vec2::new(galley.size().x + 15., 18.));
         let response = ui.interact(rect, ui.scope_id().with("participant-count"), Sense::click()).on_hover_text("Participants");
         ui.painter().galley(rect.min, galley, gray20);
-        theme::paint_symbol(ui.painter(), "chevron-right", Pos2::new(rect.right() - 7., rect.center().y), 14., gray20);
+        theme::paint_symbol(ui.painter(), "chevron-[end]", Pos2::new(rect.right() - 7., rect.center().y), 14., gray20);
         if response.clicked() {
             app.panes.participants_open = !app.panes.participants_open;
         }
