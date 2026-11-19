@@ -387,7 +387,12 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             }
             edit_bar(ui, palette, chat);
             reply_bar(app, ui, palette, chat);
-            preview_card(ui, palette, chat);
+            take_dropped_and_pasted(app, ui, chat);
+            if chat.staged.is_empty() {
+                preview_card(ui, palette, chat);
+            } else {
+                staged_list(ui, palette, chat, c);
+            }
             input_row(app, ui, palette, chat, c);
         });
 }
@@ -635,7 +640,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let editing = chat.editing.is_some();
-        let dirty = !chat.composer.is_empty();
+        let dirty = !chat.composer.is_empty() || !chat.staged.is_empty();
         let right_w = if editing { 4. + 28. + 16. + 28. + 4. + 4. + 32. } else if dirty { 4. + 32. } else { 4. + 32. + 8. + 32. } ;
         let width = (ui.available_width() - (4. + 32. + 4.) - 12. - right_w).max(100.);
         ui.add_space(4.);
@@ -905,7 +910,7 @@ fn insert_at_cursor(ctx: &egui::Context, id: egui::Id, chat: &mut ChatView, text
 
 /// Desktop's + menu: photos and videos, a file, a poll. View-once media is
 /// ours here until drafts can carry Desktop's view-once toggle.
-fn attach_menu(app: &mut App, ui: &Ui, plus: &egui::Response, chat: &mut ChatView, c: &langis_store::Conversation) {
+fn attach_menu(app: &mut App, ui: &Ui, plus: &egui::Response, chat: &mut ChatView, _c: &langis_store::Conversation) {
     let mut choice = None;
     crate::menu::dropdown(ui, plus, egui::Id::unique("composer-add-menu"), |m| {
         if m.item(Some("photo"), "Photos & videos") {
@@ -917,20 +922,20 @@ fn attach_menu(app: &mut App, ui: &Ui, plus: &egui::Response, chat: &mut ChatVie
         if m.item(Some("poll"), "Poll") {
             choice = Some(1);
         }
-        if c.kind != ConversationKind::NoteToSelf && m.item(Some("viewonce"), "View-once photo or video") {
-            choice = Some(2);
-        }
     });
     match choice {
-        Some(0) => attach(app, chat, c, true),
-        Some(3) => attach(app, chat, c, false),
+        Some(0) => attach(app, chat, true),
+        Some(3) => attach(app, chat, false),
         Some(1) => chat.dialog = Some(crate::actions::Dialog::Poll(crate::polls::NewPoll::default())),
-        Some(2) => attach_view_once(app, c),
         _ => {}
     }
 }
 
 pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation) {
+    if !chat.staged.is_empty() && chat.editing.is_none() {
+        send_staged(app, chat, c);
+        return;
+    }
     if chat.composer.trim().is_empty() {
         return;
     }
@@ -966,69 +971,228 @@ pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversat
     }
 }
 
-/// Picks files to send: images go optimized as photos, the rest as files,
-/// with the composer's text as the caption.
-fn attach(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation, media: bool) {
+/// A file waiting in the composer (Desktop's `AttachmentDraftType`).
+pub struct Staged {
+    pub bytes: std::sync::Arc<Vec<u8>>,
+    pub name: String,
+    pub kind: StagedKind,
+    /// Its thumbnail's image uri, for photos.
+    id: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StagedKind {
+    /// Sent optimized, as a photo.
+    Image,
+    Video,
+    /// GIFs and everything else go as they are.
+    File,
+}
+
+impl Staged {
+    pub fn new(bytes: Vec<u8>, name: String) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let ext = std::path::Path::new(&name).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let kind = match ext.as_str() {
+            "jpg" | "jpeg" | "png" | "webp" | "heic" | "avif" => StagedKind::Image,
+            "mp4" | "mov" | "m4v" | "webm" | "mkv" => StagedKind::Video,
+            _ => StagedKind::File,
+        };
+        Self { bytes: std::sync::Arc::new(bytes), name, kind, id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
+    }
+
+    fn uri(&self) -> String {
+        format!("bytes://staged/{}/{}", self.id, self.name)
+    }
+}
+
+/// Desktop's limit on attachments in one message.
+const MAX_STAGED: usize = 32;
+
+/// Picks files to add to the message.
+fn attach(app: &mut App, chat: &mut ChatView, media: bool) {
     let mut dialog = rfd::FileDialog::new().set_title("Add attachment");
     if media {
         dialog = dialog.add_filter("Photos & videos", &["jpg", "jpeg", "png", "gif", "webp", "heic", "avif", "mp4", "mov", "webm", "mkv", "m4v"]);
     }
     let Some(paths) = dialog.pick_files() else { return };
+    for path in paths {
+        stage_path(app, chat, &path);
+    }
+}
+
+fn stage_path(app: &mut App, chat: &mut ChatView, path: &std::path::Path) {
+    if chat.staged.len() >= MAX_STAGED {
+        app.toast(format!("You can add up to {MAX_STAGED} attachments to a message."));
+        return;
+    }
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
+            chat.staged.push(Staged::new(bytes, name));
+        }
+        Err(error) => app.toast(format!("Couldn't read {}: {error}", path.display())),
+    }
+}
+
+/// Files dropped on the window, and an image pasted with Ctrl+V, go to
+/// the list (Desktop's drop zone and paste handler).
+fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
+    let dropped = ui.input(|i| i.raw.dropped_files.clone());
+    for file in dropped {
+        let path = file.path();
+        if path.exists() {
+            stage_path(app, chat, path);
+        } else if let Ok(bytes) = file.bytes() {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
+            chat.staged.push(Staged::new(bytes, name));
+        }
+    }
+    // egui turns a paste into text; when the clipboard holds an image and
+    // no text, the paste comes as an empty one (or none at all).
+    let pasted = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(t) if t.is_empty())) || (i.modifiers.command && i.key_pressed(egui::Key::V)));
+    if pasted
+        && let Ok(mut clipboard) = arboard::Clipboard::new()
+        && clipboard.get_text().map(|t| t.is_empty()).unwrap_or(true)
+        && let Ok(image) = clipboard.get_image()
+    {
+        let rgba = image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.into_owned());
+        let mut png = std::io::Cursor::new(Vec::new());
+        if let Some(rgba) = rgba
+            && rgba.write_to(&mut png, image::ImageFormat::Png).is_ok()
+        {
+            let name = format!("signal-{}.png", chrono::Local::now().format("%Y-%m-%d-%H%M%S"));
+            chat.staged.push(Staged::new(png.into_inner(), name));
+        }
+    }
+}
+
+/// Desktop's `AttachmentList` above the input: each file's tile with a
+/// remove button, a tile to add more, and the view-once toggle when it's
+/// one photo or video.
+fn staged_list(ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_store::Conversation) {
+    let tile = 64.;
+    let mut remove = None;
+    let mut add = false;
+    egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            egui::ScrollArea::horizontal().id_salt("staged-attachments").max_width(ui.available_width() - 48.).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.;
+                    for (i, s) in chat.staged.iter().enumerate() {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(tile), Sense::hover());
+                        ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                        match s.kind {
+                            StagedKind::Image => {
+                                egui::Image::new(egui::ImageSource::Bytes { uri: s.uri().into(), bytes: s.bytes.to_vec().into() })
+                                    .corner_radius(CornerRadius::same(8))
+                                    .fit_to_exact_size(rect.size())
+                                    .paint_at(ui, rect);
+                            }
+                            kind => {
+                                let symbol = if kind == StagedKind::Video { "videocamera" } else { "file" };
+                                theme::paint_symbol(ui.painter(), symbol, Pos2::new(rect.center().x, rect.top() + 24.), 22., palette.text_secondary);
+                                let mut job = egui::text::LayoutJob::simple_singleline(s.name.clone(), theme::regular(10.), palette.text_secondary);
+                                job.wrap = egui::text::TextWrapping::truncate_at_width(tile - 8.);
+                                let g = ui.fonts_mut(|f| f.layout_job(job));
+                                ui.painter().galley(Pos2::new(rect.center().x - g.size().x / 2., rect.bottom() - 18.), g, palette.text_secondary);
+                            }
+                        }
+                        let x = Rect::from_center_size(rect.right_top() + Vec2::new(-10., 10.), Vec2::splat(18.));
+                        let xr = ui.interact(x, ui.scope_id().with(("unstage", s.id)), Sense::click());
+                        ui.painter().circle_filled(x.center(), 9., Color32::from_black_alpha(if xr.hovered() { 200 } else { 150 }));
+                        theme::paint_symbol(ui.painter(), "x", x.center(), 12., Color32::WHITE);
+                        if xr.on_hover_text("Remove attachment").clicked() {
+                            remove = Some(i);
+                        }
+                    }
+                    // Desktop's add-more tile.
+                    let (rect, r) = ui.allocate_exact_size(Vec2::splat(tile), Sense::click());
+                    ui.painter().rect_stroke(rect, CornerRadius::same(8), Stroke::new(1., palette.border), egui::StrokeKind::Inside);
+                    theme::paint_symbol(ui.painter(), "plus", rect.center(), 22., palette.text_secondary);
+                    if r.on_hover_text("Add attachment").clicked() {
+                        add = true;
+                    }
+                });
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // View once: for one photo or video, not to ourselves.
+                let one_media = chat.staged.len() == 1 && chat.staged[0].kind != StagedKind::File;
+                if one_media && c.kind != ConversationKind::NoteToSelf {
+                    let (rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
+                    if chat.view_once {
+                        ui.painter().circle_filled(rect.center(), 16., palette.accent);
+                    } else if r.hovered() {
+                        ui.painter().circle_filled(rect.center(), 16., palette.fill_pressed);
+                    }
+                    theme::paint_symbol(ui.painter(), "viewonce", rect.center(), 20., if chat.view_once { Color32::WHITE } else { palette.text });
+                    if r.on_hover_text(if chat.view_once { "View once: on" } else { "View once: off" }).clicked() {
+                        chat.view_once = !chat.view_once;
+                    }
+                } else {
+                    chat.view_once = false;
+                }
+            });
+        });
+    });
+    if let Some(i) = remove {
+        chat.staged.remove(i);
+    }
+    if add {
+        let Some(paths) = rfd::FileDialog::new().set_title("Add attachment").pick_files() else { return };
+        for path in paths {
+            if chat.staged.len() < MAX_STAGED
+                && let Ok(bytes) = std::fs::read(&path)
+            {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
+                chat.staged.push(Staged::new(bytes, name));
+            }
+        }
+    }
+    ui.add_space(6.);
+}
+
+/// Sends what's staged with the composer's text as its caption: photos
+/// together, other files each in their own message (the caption with the
+/// first), or one view-once photo or video.
+fn send_staged(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation) {
+    let staged = std::mem::take(&mut chat.staged);
+    let view_once = std::mem::take(&mut chat.view_once);
     let (caption, mentions, styles) = chat.spans.to_send(&chat.composer);
     chat.composer.clear();
     chat.spans.clear();
     chat.preview.reset();
+    chat.composer_large = false;
+    chat.scroll_to_bottom = 10;
     let quote = chat.quote.take();
-    let mut images = Vec::new();
-    let mut first = true;
-    for path in paths {
-        let Ok(bytes) = std::fs::read(&path) else {
-            app.toast(format!("Couldn't read {}", path.display()));
-            continue;
+    if view_once && staged.len() == 1 {
+        let s = staged.into_iter().next().expect("one staged file");
+        let media = match s.kind {
+            StagedKind::Video => langis_core::OutgoingViewOnce::Video(langis_core::OutgoingFile { bytes: s.bytes, file_name: s.name, voice: false }),
+            _ => langis_core::OutgoingViewOnce::Image(langis_core::OutgoingImage { bytes: s.bytes, file_name: Some(s.name) }),
         };
-        let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "heic") {
-            images.push(langis_core::OutgoingImage { bytes: std::sync::Arc::new(bytes), file_name });
-        } else {
-            // The caption goes with the first file only.
-            let (caption, mentions, styles) = if first && images.is_empty() { (caption.clone(), mentions.clone(), styles.clone()) } else { Default::default() };
-            first = false;
-            let command = Command::SendFile {
-                conversation: c.id.clone(),
-                file: langis_core::OutgoingFile { bytes: std::sync::Arc::new(bytes), file_name: file_name.unwrap_or_else(|| "file".into()), voice: false },
-                caption,
-                quote,
-                mentions,
-                styles,
-            };
-            app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
-        }
+        app.send_checked(c.id.clone(), PendingSend::Command(Box::new(Command::SendViewOnce { conversation: c.id.clone(), media })));
+        return;
     }
+    let (images, files): (Vec<Staged>, Vec<Staged>) = staged.into_iter().partition(|s| s.kind == StagedKind::Image);
+    let mut caption_left = Some((caption, mentions, styles));
     if !images.is_empty() {
-        let (caption, mentions, styles) = if first { (caption, mentions, styles) } else { Default::default() };
-        let command = Command::SendImages { conversation: c.id.clone(), images, caption, quote, mentions, styles };
+        let (caption, mentions, styles) = caption_left.take().unwrap_or_default();
+        let images = images.into_iter().map(|s| langis_core::OutgoingImage { bytes: s.bytes, file_name: Some(s.name) }).collect();
+        app.send_checked(c.id.clone(), PendingSend::Command(Box::new(Command::SendImages { conversation: c.id.clone(), images, caption, quote, mentions, styles })));
+    }
+    for s in files {
+        let (caption, mentions, styles) = caption_left.take().unwrap_or_default();
+        let command = Command::SendFile {
+            conversation: c.id.clone(),
+            file: langis_core::OutgoingFile { bytes: s.bytes, file_name: s.name, voice: false },
+            caption,
+            quote,
+            mentions,
+            styles,
+        };
         app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
     }
-    chat.scroll_to_bottom = 10;
-}
-
-/// Desktop's view-once toggle: one photo or video, seen once.
-fn attach_view_once(app: &mut App, c: &langis_store::Conversation) {
-    let Some(path) = rfd::FileDialog::new().set_title("View-once photo or video").add_filter("Photos and videos", &["jpg", "jpeg", "png", "webp", "mp4", "mov", "m4v"]).pick_file() else { return };
-    let Ok(bytes) = std::fs::read(&path) else {
-        app.toast(format!("Couldn't read {}", path.display()));
-        return;
-    };
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let media = if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
-        langis_core::OutgoingViewOnce::Video(langis_core::OutgoingFile { bytes: std::sync::Arc::new(bytes), file_name: file_name.unwrap_or_else(|| "video.mp4".into()), voice: false })
-    } else {
-        langis_core::OutgoingViewOnce::Image(langis_core::OutgoingImage { bytes: std::sync::Arc::new(bytes), file_name })
-    };
-    let command = Command::SendViewOnce { conversation: c.id.clone(), media };
-    app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
 }
 
 /// The text, styles and mentions of a message, for editing it.

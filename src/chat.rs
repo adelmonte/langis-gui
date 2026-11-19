@@ -99,6 +99,10 @@ pub struct ChatView {
     pub mention_index: usize,
     /// Desktop's large composer (`CompositionArea__toggle-large`).
     pub composer_large: bool,
+    /// Files picked, pasted or dropped, waiting to go with the next send
+    /// (Desktop's `AttachmentList`), and its view-once toggle.
+    pub staged: Vec<crate::composer::Staged>,
+    pub view_once: bool,
     pub attach_menu: bool,
     /// A voice message being recorded.
     pub recording: Option<crate::voice::Recording>,
@@ -208,6 +212,8 @@ impl ChatView {
             preview: Default::default(),
             mention_index: 0,
             composer_large: false,
+            staged: Vec::new(),
+            view_once: false,
             attach_menu: false,
             recording: None,
             find: None,

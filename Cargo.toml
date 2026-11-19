@@ -29,6 +29,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 notify-rust = "4"
 signal-hook = "0.3"
 libc = "0.2"
+# Images pasted into the composer (eframe builds it already, for text).
+arboard = { version = "3.7", default-features = false, features = ["image-data", "wayland-data-control"] }
 linkify = "0.10"
 
 [dev-dependencies]
