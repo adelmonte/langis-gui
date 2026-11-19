@@ -194,13 +194,20 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Some((_, s)) => crate::format::short_timestamp(s.last().map(|s| s.sent_at).unwrap_or_default()),
                     None => "Tap to add".into(),
                 };
-                if story_row(app, ui, &palette, "My Stories", &subtitle, None, mine.is_some(), false) {
+                if story_row(app, ui, &palette, "My Stories", &subtitle, None, mine.and_then(|(_, s)| s.last()), false).clicked() {
                     match mine {
-                        Some(_) => app.panes.stories.viewer = Some(("me".into(), 0, Instant::now())),
+                        // Desktop's `MyStories` page lists them.
+                        Some(_) => {
+                            app.panes.stories.my_stories = true;
+                            app.panes.stories.viewer = None;
+                            app.panes.stories.player = None;
+                        }
                         None => new_composer(app),
                     }
                 }
-                let (unread, read): (Vec<_>, Vec<_>) = all.iter().filter(|(k, _)| k != "me").partition(|(_, s)| s.iter().any(|s| !s.read));
+                let hidden = app.panes.stories.hidden.clone();
+                let is_hidden = |stories: &[Story]| stories.first().and_then(|s| s.group.clone().or_else(|| s.author.as_deref().map(ConversationId::direct))).is_some_and(|c| hidden.contains(&c));
+                let (unread, read): (Vec<_>, Vec<_>) = all.iter().filter(|(k, s)| k != "me" && !is_hidden(s)).partition(|(_, s)| s.iter().any(|s| !s.read));
                 for (heading, section) in [("", unread), ("Viewed", read)] {
                     if section.is_empty() {
                         continue;
@@ -213,14 +220,23 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         });
                     }
                     for (k, stories) in section {
-                        let name = who(app, k, stories);
-                        let last = stories.last().map(|s| s.sent_at).unwrap_or_default();
-                        let chat = stories.first().and_then(|s| s.group.clone().or_else(|| s.author.as_deref().map(ConversationId::direct)));
-                        let unread = stories.iter().any(|s| !s.read);
-                        if story_row(app, ui, &palette, &name, &crate::format::short_timestamp(last), chat.as_ref(), true, unread) {
-                            let first = stories.iter().position(|s| !s.read).unwrap_or(0);
-                            app.panes.stories.viewer = Some((k.clone(), first, Instant::now()));
-                            app.panes.stories.reply.clear();
+                        other_row(app, ui, &palette, k, stories, false);
+                    }
+                }
+                // Desktop's Hidden stories, folded under the rest.
+                let hidden_rows: Vec<_> = all.iter().filter(|(k, s)| k != "me" && is_hidden(s)).collect();
+                if !hidden_rows.is_empty() {
+                    ui.add_space(8.);
+                    let label = format!("{} Hidden stories", if app.panes.stories.show_hidden { "▾" } else { "▸" });
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.);
+                        if ui.add(egui::Label::new(RichText::new(label).font(theme::semibold(13.)).color(palette.text_secondary)).sense(Sense::click())).clicked() {
+                            app.panes.stories.show_hidden = !app.panes.stories.show_hidden;
+                        }
+                    });
+                    if app.panes.stories.show_hidden {
+                        for (k, stories) in hidden_rows {
+                            other_row(app, ui, &palette, k, stories, true);
                         }
                     }
                 }
@@ -234,6 +250,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let rect = ui.max_rect();
         match app.panes.stories.viewer.clone() {
             Some((k, index, since)) => viewer(app, ui, &palette, &all, &k, index, since),
+            None if app.panes.stories.my_stories => my_stories(app, ui, &palette, &all),
             None => {
                 ui.painter().rect_filled(rect, 0, palette.background);
                 ui.centered_and_justified(|ui| {
@@ -248,9 +265,43 @@ fn new_composer(app: &mut App) {
     app.panes.stories.composer = Some(Composer { text: String::new(), background: 0, media: None, targets: vec![StoryTarget::MyStory] });
 }
 
-/// One row of the list: an avatar ringed when unread, a name and a time.
+/// Someone's (or a group's) row: opens their stories; its menu hides or
+/// shows them and goes to the chat (Desktop's `StoryListItem`).
+fn other_row(app: &mut App, ui: &mut Ui, palette: &Palette, k: &str, stories: &[Story], hidden: bool) {
+    let name = who(app, k, stories);
+    let last = stories.last().map(|s| s.sent_at).unwrap_or_default();
+    let chat = stories.first().and_then(|s| s.group.clone().or_else(|| s.author.as_deref().map(ConversationId::direct)));
+    let unread = stories.iter().any(|s| !s.read);
+    let response = story_row(app, ui, palette, &name, &crate::format::short_timestamp(last), chat.as_ref(), stories.last(), unread && !hidden);
+    if response.clicked() {
+        let first = stories.iter().position(|s| !s.read).unwrap_or(0);
+        app.panes.stories.viewer = Some((k.to_owned(), first, Instant::now()));
+        app.panes.stories.my_stories = false;
+        app.panes.stories.player = None;
+        app.panes.stories.paused = None;
+        app.panes.stories.reply.clear();
+    }
+    let Some(chat) = chat else { return };
+    let menu = egui::Id::unique(("story-row-menu", k));
+    if response.secondary_clicked()
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        crate::menu::open_at(ui.ctx(), menu, at);
+    }
+    crate::menu::show(ui.ctx(), menu, |m| {
+        if m.item(Some(if hidden { "eye" } else { "eye-slash" }), if hidden { "Show story" } else { "Hide story" }) {
+            app.send(Command::SetChat { conversation: chat.clone(), change: langis_core::ChatChange::HideStory(!hidden) });
+        }
+        if m.item(Some("message"), "Go to chat") {
+            app.open(chat.clone());
+        }
+    });
+}
+
+/// One row of the list: an avatar ringed when unread, a name and a time,
+/// and the newest story small on the right (`StoryListItem__preview`).
 #[allow(clippy::too_many_arguments)]
-fn story_row(app: &App, ui: &mut Ui, palette: &Palette, name: &str, subtitle: &str, chat: Option<&ConversationId>, _has: bool, unread: bool) -> bool {
+fn story_row(app: &App, ui: &mut Ui, palette: &Palette, name: &str, subtitle: &str, chat: Option<&ConversationId>, latest: Option<&Story>, unread: bool) -> egui::Response {
     let width = ui.available_width();
     let (outer, response) = ui.allocate_exact_size(Vec2::new(width, 64.), Sense::click());
     let rect = Rect::from_min_max(outer.min + Vec2::new(10., 2.), outer.max - Vec2::new(10., 2.));
@@ -272,7 +323,97 @@ fn story_row(app: &App, ui: &mut Ui, palette: &Palette, name: &str, subtitle: &s
     let x = avatar.right() + 12.;
     ui.painter().text(Pos2::new(x, rect.top() + 12.), egui::Align2::LEFT_TOP, name, theme::semibold(14.), palette.text);
     ui.painter().text(Pos2::new(x, rect.top() + 32.), egui::Align2::LEFT_TOP, subtitle, theme::regular(12.), palette.text_secondary);
-    response.clicked()
+    if let Some(s) = latest {
+        let thumb = Rect::from_min_size(Pos2::new(rect.right() - 12. - 32., rect.center().y - 28.), Vec2::new(32., 56.));
+        story_thumb(ui, s, thumb);
+    }
+    response
+}
+
+/// A story small: a text story drawn small, a photo or video's picture.
+fn story_thumb(ui: &Ui, s: &Story, rect: Rect) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    match &s.content {
+        StoryContent::Text(t) => {
+            let small = TextStory { text: String::new(), ..t.clone() };
+            paint_text_story(ui, &small, rect);
+        }
+        StoryContent::Media { attachment, .. } => {
+            ui.painter().rect_filled(rect, CornerRadius::same(6), Color32::BLACK);
+            let image = attachment.content_type.starts_with("image/");
+            let poster = if image { None } else { attachment.local_path.as_deref().and_then(|p| crate::video::poster(ui.ctx(), p)) };
+            if let Some(path) = attachment.local_path.as_deref().filter(|_| image).or(attachment.thumbnail_path.as_deref()).or(poster.as_deref()) {
+                crate::chat::cover_image(ui, path, rect, CornerRadius::same(6));
+            }
+        }
+    }
+}
+
+/// Desktop's `MyStories`: each of ours with its picture, views and time;
+/// a click views it, and its menu saves or deletes it.
+fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Story>)]) {
+    let full = ui.max_rect();
+    ui.painter().rect_filled(full, 0, palette.background);
+    let mine: Vec<Story> = all.iter().find(|(k, _)| k == "me").map(|(_, s)| s.clone()).unwrap_or_default();
+    if mine.is_empty() {
+        app.panes.stories.my_stories = false;
+        return;
+    }
+    let mut delete = None;
+    let mut view = None;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(full.shrink2(Vec2::new(32., 24.))), |ui| {
+        ui.horizontal(|ui| {
+            if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() {
+                app.panes.stories.my_stories = false;
+            }
+            ui.label(RichText::new("My Stories").font(theme::semibold(18.)));
+        });
+        ui.add_space(12.);
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (i, s) in mine.iter().enumerate().rev() {
+                let (row, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 84.), Sense::click());
+                if r.hovered() {
+                    ui.painter().rect_filled(row, CornerRadius::same(12), palette.fill);
+                }
+                story_thumb(ui, s, Rect::from_min_size(row.min + Vec2::new(10., 6.), Vec2::new(40., 72.)));
+                let views = if app.panes.stories.receipts { format!("{} views", s.views.len()) } else { "Views off".to_owned() };
+                ui.painter().text(Pos2::new(row.left() + 64., row.top() + 22.), egui::Align2::LEFT_TOP, views, theme::semibold(14.), palette.text);
+                ui.painter().text(Pos2::new(row.left() + 64., row.top() + 44.), egui::Align2::LEFT_TOP, crate::format::short_timestamp(s.sent_at), theme::regular(12.), palette.text_secondary);
+                if r.clicked() {
+                    view = Some(i);
+                }
+                let menu = egui::Id::unique(("my-story-menu", s.id));
+                if r.secondary_clicked()
+                    && let Some(at) = r.interact_pointer_pos()
+                {
+                    crate::menu::open_at(ui.ctx(), menu, at);
+                }
+                crate::menu::show(ui.ctx(), menu, |m| {
+                    if let StoryContent::Media { attachment, .. } = &s.content
+                        && let Some(path) = &attachment.local_path
+                        && m.item(Some("download"), "Download")
+                    {
+                        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "story".into());
+                        if let Some(to) = rfd::FileDialog::new().set_file_name(&name).save_file() {
+                            let _ = std::fs::copy(path, to);
+                        }
+                    }
+                    if m.item(Some("trash"), "Delete") {
+                        delete = Some(s.id);
+                    }
+                });
+            }
+        });
+    });
+    if let Some(i) = view {
+        app.panes.stories.my_stories = false;
+        app.panes.stories.viewer = Some(("me".into(), i, Instant::now()));
+    }
+    if let Some(id) = delete {
+        app.send(Command::DeleteStory { id });
+    }
 }
 
 /// Paints a story's content into `rect`.
