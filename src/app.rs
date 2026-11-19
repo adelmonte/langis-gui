@@ -141,6 +141,9 @@ pub struct App {
     pub notify: (bool, String),
     /// Sounds, call notifications and the taskbar flash.
     pub sound: crate::sounds::Prefs,
+    /// Each person's first visible profile badge, as image files for the
+    /// light and dark themes (Desktop draws it on their avatar).
+    pub badges: std::collections::HashMap<String, (Option<String>, Option<String>)>,
     /// When the last frame ran, by the wall clock, to notice a sleep.
     last_tick: Option<std::time::SystemTime>,
     /// The composer's settings (Settings, Chats, Text input).
@@ -262,6 +265,7 @@ impl App {
             unread_mentions: Default::default(),
             sound: Default::default(),
             last_tick: None,
+            badges: Default::default(),
             input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None },
             unread_only: false,
             fun: Default::default(),
@@ -424,6 +428,7 @@ impl App {
                 self.load_reactions();
                 self.load_link_previews();
                 self.load_recent_emoji();
+                self.load_badges();
                 self.load(|db| async move {
                     let get = |v: Option<String>| v.map(|v| v == "true");
                     let auto_convert = get(db.setting(crate::settings::SETTING_AUTO_CONVERT_EMOJI).await.ok().flatten()).unwrap_or(true);
@@ -536,6 +541,7 @@ impl App {
                     Err(why) => self.toast(format!("Can't share your screen: {why}")),
                 }
             }
+            Event::BadgesChanged => self.load_badges(),
             Event::OwnProfileChanged => self.load_me(),
             Event::AccountSettingsChanged => {
                 self.settings.stale = true;
@@ -661,6 +667,34 @@ impl App {
                 .collect();
             Some(Loaded::Reactions(list))
         });
+    }
+
+    /// Who shows which badge, and its downloaded images.
+    pub fn load_badges(&self) {
+        self.load(|db| async move {
+            let holders = db.badge_holders().await.ok()?;
+            let badges = db.badges().await.ok()?;
+            let files = db.badge_image_files().await.ok()?;
+            let mut out = std::collections::HashMap::new();
+            for (sid, ids) in holders {
+                let Some(badge) = ids.first().and_then(|id| badges.iter().find(|b| &b.id == id)) else { continue };
+                // The second size fits a chat list avatar; else the first.
+                let Some(image) = badge.images.get(1).or(badge.images.first()) else { continue };
+                let path = |url: &Option<String>| url.as_ref().and_then(|u| files.get(u).cloned());
+                let (light, dark) = (path(&image.light), path(&image.dark).or_else(|| path(&image.light)));
+                if light.is_some() || dark.is_some() {
+                    out.insert(sid, (light, dark));
+                }
+            }
+            Some(Loaded::Apply(Box::new(move |app: &mut App| app.badges = out)))
+        });
+    }
+
+    /// The badge image to draw on someone's avatar, for the theme.
+    pub fn badge_for(&self, aci: &str) -> Option<&str> {
+        let (light, dark) = self.badges.get(aci)?;
+        let dark_theme = crate::theme::Palette::of(&self.ctx).dark;
+        if dark_theme { dark.as_deref().or(light.as_deref()) } else { light.as_deref().or(dark.as_deref()) }
     }
 
     /// Desktop keeps the last 32 emoji used for its pickers' Recents.

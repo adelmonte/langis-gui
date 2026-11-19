@@ -224,7 +224,8 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     let typing = app.typing.get(&c.id).is_some_and(|t| !t.is_empty());
                     let selected = app.selected.as_ref() == Some(&c.id);
                     let mentions = app.unread_mentions.get(&c.id).copied().unwrap_or(0);
-                    let row = chat_row(ui, &palette, c, selected, typing, mentions);
+                    let badge = c.id.as_direct().and_then(|sid| app.badge_for(sid)).map(str::to_owned);
+                    let row = chat_row(ui, &palette, c, selected, typing, mentions, badge.as_deref());
                     if row.clicked() {
                         open = Some(c.id.clone());
                     }
@@ -354,7 +355,8 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
 }
 
 /// One chat: 68px, avatar 48, title and time over two lines of preview.
-fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, typing: bool, mentions: u32) -> egui::Response {
+#[allow(clippy::too_many_arguments)]
+fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, typing: bool, mentions: u32, badge: Option<&str>) -> egui::Response {
     let width = ui.available_width();
     let (outer, response) = ui.allocate_exact_size(Vec2::new(width, 72.), Sense::click());
     let rect = Rect::from_min_max(outer.min + Vec2::new(10., 2.), outer.max - Vec2::new(10., 2.));
@@ -365,6 +367,9 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     let inner = rect.shrink2(Vec2::new(14., 10.));
     let avatar = Rect::from_min_size(inner.min, Vec2::splat(48.));
     widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
+    if let Some(badge) = badge {
+        widgets::paint_badge(ui, avatar, badge);
+    }
 
     let left = avatar.right() + 12.;
     let right = inner.right();

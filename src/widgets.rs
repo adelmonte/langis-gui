@@ -40,6 +40,14 @@ pub fn avatar(ui: &mut Ui, spec: &AvatarSpec<'_>, size: f32) -> Response {
     response
 }
 
+/// Desktop's `BadgeImage` on an avatar: the badge at its bottom right,
+/// about a third of its size.
+pub fn paint_badge(ui: &Ui, avatar: Rect, path: &str) {
+    let side = (avatar.width() * 0.375).max(14.);
+    let at = Rect::from_min_size(avatar.right_bottom() - Vec2::splat(side * 0.85), Vec2::splat(side));
+    egui::Image::new(format!("file://{path}")).fit_to_exact_size(at.size()).paint_at(ui, at);
+}
+
 pub fn paint_avatar(ui: &Ui, rect: Rect, spec: &AvatarSpec<'_>) {
     let size = rect.width();
     if let Some(path) = spec.photo {
