@@ -77,6 +77,8 @@ pub struct ChatView {
     /// opened, the message the divider goes above, and whether the chat
     /// still has to scroll to it.
     pub unread_at_open: u32,
+    /// Unread messages that mention us, oldest first: the @ button's.
+    pub unread_mentions: Vec<i64>,
     pub unread_marker: Option<(i64, u32)>,
     /// `TimelineFloatingHeader`: the last scroll offset, and when it moved.
     last_offset: f32,
@@ -136,6 +138,8 @@ enum Action {
     ReactBar { message_id: i64, at: Pos2 },
     /// Scroll to the message a quote quotes.
     JumpToQuote { author: Option<String>, sent_at: i64 },
+    /// Scrolls to a message by id.
+    Jump(i64),
     /// Show a photo or video in the viewer.
     Lightbox { message_id: i64, index: usize },
     Vote { message_id: i64, options: Vec<u32> },
@@ -181,6 +185,7 @@ impl ChatView {
             want_newer: false,
             scroll_target: None,
             unread_at_open: 0,
+            unread_mentions: Vec::new(),
             unread_marker: None,
             last_offset: 0.,
             scrolled_at: None,
@@ -425,6 +430,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::FetchLongText(message_id) => app.send(Command::FetchLongText { message_id }),
+            Action::Jump(message_id) => app.open_at(id.clone(), message_id),
             Action::JumpToQuote { author, sent_at } => {
                 let here = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.sent_at == sent_at && m.author == author).map(|m| m.id));
                 match here {
@@ -837,13 +843,34 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         painter.rect_filled(pill, CornerRadius::same(255), fill.gamma_multiply(shown));
         painter.galley(pill.center() - galley.size() / 2., galley, palette.text_secondary.gamma_multiply(shown));
     }
-    // Desktop's "scroll to bottom" button.
+    // Desktop's `ScrollDownButton`s: unread mentions above, then to the
+    // bottom, each with its count.
+    let mut next_above = output.inner_rect.bottom() - 56.;
+    if chat.scrolled_up {
+        next_above -= 48.;
+    }
+    if let Some(&mention) = chat.unread_mentions.first() {
+        let rect = Rect::from_min_size(Pos2::new(output.inner_rect.right() - 56., next_above), Vec2::splat(40.));
+        let r = ui.interact(rect, ui.scope_id().with("to-mention"), Sense::click());
+        ui.painter().circle_filled(rect.center(), 20., palette.popover);
+        ui.painter().circle_stroke(rect.center(), 20., Stroke::new(1., palette.border));
+        Icon::At.paint(ui, rect, 20., palette.text);
+        widgets::count_badge(ui, Pos2::new(rect.right() + 4., rect.top() + 2.), chat.unread_mentions.len() as u32, false);
+        if r.on_hover_text("Go to next unread mention").clicked() {
+            chat.unread_mentions.remove(0);
+            actions.push(Action::Jump(mention));
+        }
+    }
     if chat.scrolled_up {
         let rect = Rect::from_min_size(output.inner_rect.right_bottom() - Vec2::new(56., 56.), Vec2::splat(40.));
         let r = ui.interact(rect, ui.scope_id().with("to-bottom"), Sense::click());
         ui.painter().circle_filled(rect.center(), 20., palette.popover);
         ui.painter().circle_stroke(rect.center(), 20., Stroke::new(1., palette.border));
         Icon::ChevronShallowDown.paint(ui, rect, 20., palette.text);
+        let unread = c.unread_count + c.marked_unread as u32;
+        if unread > 0 {
+            widgets::count_badge(ui, Pos2::new(rect.right() + 4., rect.top() + 2.), unread, false);
+        }
         if r.on_hover_text("Scroll to bottom").clicked() {
             if chat.at_end {
                 chat.scroll_to_bottom = 10;

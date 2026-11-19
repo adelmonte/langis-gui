@@ -716,7 +716,18 @@ impl App {
             self.load(move |db| async move { db.display_names(&members).await.ok().map(Loaded::Names) });
         }
         self.load_pinned(id.clone());
-        self.send(Command::MarkRead { conversation: id });
+        // Unread mentions are read before the chat is marked read, so its @
+        // button has them.
+        let me = self.aci.clone();
+        self.load(move |db| async move {
+            let mentions = db.unread_mentions(&id, &me).await.unwrap_or_default();
+            Some(Loaded::Apply(Box::new(move |app: &mut App| {
+                if let Some(chat) = app.chat.as_mut().filter(|c| c.id == id) {
+                    chat.unread_mentions = mentions;
+                }
+                app.send(Command::MarkRead { conversation: id });
+            })))
+        });
     }
 
     /// Closes the open chat (Desktop's Ctrl+Shift+C), keeping its draft.
