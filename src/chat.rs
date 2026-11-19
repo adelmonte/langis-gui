@@ -2063,27 +2063,46 @@ pub fn append_with_emoji(job: &mut egui::text::LayoutJob, text: &str, format: eg
     }
 }
 
-/// Web links in `text`: http(s) URLs and bare `www.` hosts, as Desktop
-/// makes clickable. Nothing else opens, so a message can't make a `file:`
-/// link.
+/// Links in a message, as Desktop's Linkify finds them (linkify-it): web
+/// links with or without `https://`, bare domains like `example.com`, and
+/// email addresses. Each comes with what opening it opens.
 pub fn find_links(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    for word in text.split_inclusive(char::is_whitespace) {
-        let trimmed = word.trim_end();
-        let lower = trimmed.to_ascii_lowercase();
-        if lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("www.") {
-            let clean = trimmed.trim_end_matches(['.', ',', '!', '?', ')', ';', ':', '"', '\'']);
-            if clean.len() > 8 {
-                let url = if lower.starts_with("www.") { format!("https://{clean}") } else { clean.to_owned() };
-                out.push((start..start + clean.len(), url));
-            }
-        }
-        start += word.len();
-    }
-    out
+    let mut finder = linkify::LinkFinder::new();
+    finder.url_must_have_scheme(false);
+    finder
+        .links(text)
+        .filter_map(|link| {
+            let found = link.as_str();
+            let lower = found.to_ascii_lowercase();
+            let url = match link.kind() {
+                linkify::LinkKind::Email => format!("mailto:{found}"),
+                linkify::LinkKind::Url if lower.starts_with("https://") || lower.starts_with("http://") => found.to_owned(),
+                // Any other scheme (file:, javascript:) isn't a link.
+                linkify::LinkKind::Url if lower.contains("://") || lower.starts_with("mailto:") => return None,
+                linkify::LinkKind::Url if lower.starts_with("www.") => format!("https://{found}"),
+                linkify::LinkKind::Url if bare_domain(&lower) => format!("http://{found}"),
+                _ => return None,
+            };
+            Some((link.start()..link.end(), url))
+        })
+        .collect()
 }
 
+/// Whether a link written without a scheme ends its host in a real
+/// top-level domain, as linkify-it's list requires: "example.com" is a
+/// link, "notes.txt" isn't.
+fn bare_domain(link: &str) -> bool {
+    const COMMON: &[&str] = &[
+        "com", "org", "net", "edu", "gov", "mil", "int", "info", "biz", "name", "pro", "app", "dev", "io", "ai", "co", "me", "tv",
+        "xyz", "online", "site", "store", "tech", "blog", "news", "shop", "cloud", "page", "art", "link", "live", "life", "space",
+        "website", "club", "design", "email", "media", "social", "world", "today", "zone", "rocks", "wiki", "eu", "asia",
+    ];
+    let host = link.split(['/', '?', '#', ':']).next().unwrap_or(link);
+    let Some(tld) = host.rsplit('.').next().filter(|_| host.contains('.')) else { return false };
+    // Two letters is a country (.uk, .de); a file's extension like .txt
+    // or .md... .md is Moldova, as linkify-it also has it.
+    (tld.len() == 2 && tld.chars().all(|c| c.is_ascii_alphabetic())) || COMMON.contains(&tld)
+}
 
 /// Opens a link from a message: Signal's own links in the app, as Desktop
 /// routes them (`ts/util/signalRoutes`), anything else in the browser.
@@ -2141,6 +2160,15 @@ mod tests {
         let links = find_links("see https://example.org/a, www.example.com. not file:///etc/passwd");
         let urls: Vec<_> = links.iter().map(|(_, u)| u.as_str()).collect();
         assert_eq!(urls, ["https://example.org/a", "https://www.example.com"]);
+    }
+
+    #[test]
+    fn bare_domains_and_emails_are_links_but_file_names_arent() {
+        let text = "try signal.org/blog or mail maya@example.org, not notes.txt";
+        let links = find_links(text);
+        let urls: Vec<_> = links.iter().map(|(_, u)| u.as_str()).collect();
+        assert_eq!(urls, ["http://signal.org/blog", "mailto:maya@example.org"]);
+        assert_eq!(&text[links[0].0.clone()], "signal.org/blog");
     }
 }
 

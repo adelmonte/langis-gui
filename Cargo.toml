@@ -29,6 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 notify-rust = "4"
 signal-hook = "0.3"
 libc = "0.2"
+linkify = "0.10"
 
 [dev-dependencies]
 egui_kittest = { version = "0.37", features = ["wgpu", "snapshot", "eframe"] }

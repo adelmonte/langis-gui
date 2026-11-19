@@ -3769,6 +3769,7 @@ dependencies = [
  "langis-emoji",
  "langis-store",
  "libc",
+ "linkify",
  "notify-rust",
  "qrcode",
  "rfd",
