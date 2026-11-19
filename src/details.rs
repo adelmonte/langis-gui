@@ -46,6 +46,9 @@ pub struct Details {
     /// The member list's search, and whether it shows everyone.
     pub member_query: String,
     pub all_members: bool,
+    /// The group link's Share: chats chosen and the search, or its QR code.
+    pub share_link: Option<(Vec<ConversationId>, String)>,
+    pub link_qr: bool,
 }
 
 impl Details {
@@ -65,6 +68,8 @@ impl Details {
             nickname_on_load: false,
             member_query: String::new(),
             all_members: false,
+            share_link: None,
+            link_qr: false,
         }
     }
 }
@@ -733,10 +738,22 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
             ui.ctx().copy_text(link.url.clone());
             app.toast("Group link copied.");
         }
+        // Desktop's Share: send it in a chat, or show its QR code.
+        if axo_list::item(ui, Item::new("Share via Signal").symbol("forward"), End::Click).clicked()
+            && let Some(d) = app.panes.details.as_mut()
+        {
+            d.share_link = Some((Vec::new(), String::new()));
+        }
+        if axo_list::item(ui, Item::new("QR code").symbol("qrcode"), End::Click).clicked()
+            && let Some(d) = app.panes.details.as_mut()
+        {
+            d.link_qr = true;
+        }
         if admin && axo_list::item(ui, Item::new("Reset link").symbol("arrow-clockwise"), End::Click).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(ask, true));
         }
     });
+    share_link_dialogs(app, ui, &link.url, c);
     if admin {
         axo_list::gap(ui);
         axo_list::list(ui, None, None, |ui| {
@@ -755,6 +772,68 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
         }
         if answer.is_some() {
             ui.ctx().data_mut(|d| d.remove::<bool>(ask));
+        }
+    }
+}
+
+/// The group link sent to chats picked from a list, or shown as a QR code.
+fn share_link_dialogs(app: &mut App, ui: &mut Ui, url: &str, c: &Conversation) {
+    let palette = Palette::of(ui.ctx());
+    if app.panes.details.as_ref().is_some_and(|d| d.link_qr) {
+        let mut done = false;
+        let closed = crate::panes::modal(ui, "group-link-qr", 340., |ui| {
+            crate::panes::title(ui, &c.title);
+            ui.vertical_centered(|ui| {
+                if let Some(qr) = crate::startup::qr_texture_of(ui.ctx(), &format!("group-link:{url}"), url.as_bytes()) {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(240., 240.), egui::Sense::hover());
+                    ui.painter().rect_filled(rect.expand(8.), CornerRadius::same(12), egui::Color32::WHITE);
+                    egui::Image::new((qr.id(), rect.size())).paint_at(ui, rect);
+                }
+                ui.add_space(12.);
+                body(ui, &palette, "Anyone with a Signal account can scan this to ask to join the group.");
+            });
+            done = crate::panes::buttons(ui, &["Done"]).is_some();
+        });
+        if (done || closed)
+            && let Some(d) = app.panes.details.as_mut()
+        {
+            d.link_qr = false;
+        }
+    }
+    let Some((mut chosen, mut query)) = app.panes.details.as_mut().and_then(|d| d.share_link.take()) else { return };
+    let mut answer = None;
+    let closed = crate::panes::modal(ui, "share-group-link", 400., |ui| {
+        crate::panes::title(ui, "Share group link");
+        widgets::text_field(ui, &mut query, "Search", false);
+        ui.add_space(6.);
+        let q = query.trim().to_lowercase();
+        egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
+            for chat in app.conversations.iter().filter(|x| !x.left && !x.blocked && x.id != c.id && (q.is_empty() || x.title.to_lowercase().contains(&q))) {
+                let mut on = chosen.contains(&chat.id);
+                if ui.checkbox(&mut on, &chat.title).changed() {
+                    if on {
+                        chosen.push(chat.id.clone());
+                    } else {
+                        chosen.retain(|x| *x != chat.id);
+                    }
+                }
+            }
+        });
+        answer = crate::panes::buttons(ui, &["Send", "Cancel"]);
+    });
+    match answer {
+        Some(0) if !chosen.is_empty() => {
+            for to in &chosen {
+                app.send(Command::SendText { conversation: to.clone(), body: url.to_owned(), quote: None, preview: None, mentions: Vec::new(), styles: Vec::new() });
+            }
+            app.toast(if chosen.len() == 1 { "Link sent.".to_owned() } else { format!("Link sent to {} chats.", chosen.len()) });
+        }
+        Some(_) => {}
+        None if closed => {}
+        None => {
+            if let Some(d) = app.panes.details.as_mut() {
+                d.share_link = Some((chosen, query));
+            }
         }
     }
 }
