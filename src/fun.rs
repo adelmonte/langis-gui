@@ -285,6 +285,11 @@ fn tabs(ui: &mut Ui, palette: &Palette, tab: &mut Tab) {
 
 /// A sticker's image in `rect`.
 fn sticker_image(ui: &Ui, path: &std::path::Path, rect: Rect) {
+    // Animated stickers play while hovered in the picker, as Desktop's do.
+    let file = path.to_string_lossy();
+    if ui.rect_contains_pointer(rect) && crate::anim::paint(ui, &file, rect) {
+        return;
+    }
     egui::Image::new(format!("file://{}", path.display())).maintain_aspect_ratio(true).fit_to_exact_size(rect.size()).paint_at(ui, rect);
 }
 

@@ -13,6 +13,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     ui.ctx().request_repaint_after(std::time::Duration::from_secs(30));
     // GIF players not drawn for a while are let go.
     crate::video::gc();
+    crate::anim::gc();
     let palette = Palette::of(ui.ctx());
     if !matches!(app.phase, Phase::Ready) {
         crate::startup::show(app, ui);

@@ -1158,7 +1158,10 @@ fn message(
         if let Some(path) = s.local_path.as_deref().or(s.thumbnail_path.as_deref())
             && crate::thumbs::visible(ui, rect)
         {
-            egui::Image::new(format!("file://{path}")).maintain_aspect_ratio(true).paint_at(ui, rect);
+            // Animated stickers (APNG, WebP) play, as in Desktop.
+            if !crate::anim::paint(ui, path, rect) {
+                egui::Image::new(format!("file://{path}")).maintain_aspect_ratio(true).paint_at(ui, rect);
+            }
         }
         let r = ui.interact(rect, ui.scope_id().with(("sticker", m.id)), Sense::click());
         if r.clicked() {
@@ -1744,7 +1747,9 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
                     uv = Rect::from_min_max(Pos2::new(0., (1. - keep) / 2.), Pos2::new(1., (1. + keep) / 2.));
                 }
             }
-            if crate::thumbs::visible(ui, rect) {
+            // A GIF or animated WebP sent as a picture plays where it is.
+            let animated = image && crate::thumbs::visible(ui, rect) && crate::anim::maybe_animated(path, Some(&a.content_type)) && a.content_type != "image/png" && crate::anim::paint(ui, path, rect);
+            if !animated && crate::thumbs::visible(ui, rect) {
                 egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).corner_radius(radius).uv(uv).fit_to_exact_size(rect.size()).paint_at(ui, rect);
             }
         }

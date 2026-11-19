@@ -2,6 +2,7 @@
 //! the langis library, laid out like Signal Desktop.
 
 mod actions;
+mod anim;
 mod app;
 mod thumbs;
 mod shortcuts;
