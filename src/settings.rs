@@ -458,6 +458,11 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             app.input.auto_convert = convert;
             write(app, SETTING_AUTO_CONVERT_EMOJI, convert.to_string());
         }
+        let mut spell = app.input.spell;
+        if axo_list::switch(ui, Item::new("Spell check text entered in message composition box"), &mut spell) {
+            app.input.spell = spell;
+            write(app, crate::spell::SETTING_SPELL_CHECK, spell.to_string());
+        }
         let mut formatting = app.input.formatting;
         if axo_list::switch(ui, Item::new("Text formatting").description("Show the formatting toolbar when text is selected"), &mut formatting) {
             app.input.formatting = formatting;

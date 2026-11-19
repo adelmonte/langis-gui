@@ -269,8 +269,12 @@ impl Preview {
 }
 
 /// Lays out the composer's text with its styles and mentions.
-fn layout(ui: &Ui, text: &str, spans: &Spans, palette: &Palette, wrap: f32) -> std::sync::Arc<egui::Galley> {
+fn layout(ui: &Ui, text: &str, spans: &Spans, palette: &Palette, wrap: f32, spell: bool) -> std::sync::Arc<egui::Galley> {
+    let wrong = if spell { crate::spell::misspelled(text) } else { Vec::new() };
     let mut cuts = vec![0, text.len()];
+    for r in &wrong {
+        cuts.extend([r.start, r.end]);
+    }
     for s in &spans.styles {
         cuts.extend([s.start, s.start + s.len]);
     }
@@ -301,6 +305,7 @@ fn layout(ui: &Ui, text: &str, spans: &Spans, palette: &Palette, wrap: f32) -> s
         if mention {
             format.background = palette.fill_pressed;
         }
+
         if active(TextStyle::Spoiler) {
             format.background = palette.text_secondary.gamma_multiply(0.35);
         }
@@ -654,7 +659,8 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
         let large = chat.composer_large;
         let spans = chat.spans.clone();
         let pal = *palette;
-        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| layout(ui, text.as_str(), &spans, &pal, wrap);
+        let spell = app.input.spell;
+        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| layout(ui, text.as_str(), &spans, &pal, wrap, spell);
         let framed = egui::Frame::new()
             .fill(palette.bubble_in)
             .corner_radius(CornerRadius::same(18))
@@ -666,8 +672,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                     // The theme's 28px interact height would make one line
                     // taller than the input, and scroll it.
                     ui.spacing_mut().interact_size.y = 20.;
-                    ui.add(
-                        egui::TextEdit::multiline(&mut chat.composer)
+                    let output = egui::TextEdit::multiline(&mut chat.composer)
                             .hint_text(if editing { "Edit message" } else { "Message" })
                             .frame(egui::Frame::NONE)
                             .margin(egui::Margin::ZERO)
@@ -677,12 +682,89 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                             .font(theme::regular(14.))
                             .layouter(&mut layouter)
                             .return_key(if large { egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Enter) } else { egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter) })
-                            .id(id),
-                    )
+                            .id(id)
+                            .show(ui);
+                    (output.response.clone(), output.galley.clone(), output.galley_pos)
                 })
                 .inner
             });
-        let response = framed.inner;
+        let (response, galley, galley_pos) = framed.inner;
+        // Misspelled words get the browsers' red zigzag under them, drawn
+        // here: the input's scroll area would clip an underline at its edge.
+        if spell {
+            let clip = framed.response.rect;
+            let painter = ui.painter().with_clip_rect(clip);
+            for range in crate::spell::misspelled(&chat.composer) {
+                let (a, b) = (chat.composer[..range.start].chars().count(), chat.composer[..range.end].chars().count());
+                let start = galley.pos_from_cursor(egui::text::CCursor::new(a));
+                let end = galley.pos_from_cursor(egui::text::CCursor::new(b));
+                if (start.top() - end.top()).abs() > 1. {
+                    continue;
+                }
+                let y = galley_pos.y + start.bottom() - 2.;
+                let (x0, x1) = (galley_pos.x + start.left(), galley_pos.x + end.left());
+                let mut points = Vec::new();
+                let mut x = x0;
+                let mut up = true;
+                while x < x1 {
+                    points.push(Pos2::new(x, if up { y } else { y + 2. }));
+                    x += 2.;
+                    up = !up;
+                }
+                points.push(Pos2::new(x1, if up { y } else { y + 2. }));
+                painter.add(egui::Shape::line(points, Stroke::new(1., palette.destructive)));
+            }
+        }
+        // A right-click on a misspelled word: Chromium's suggestions, and
+        // Add to dictionary.
+        let spell_menu = egui::Id::unique("composer-spell-menu");
+        if spell
+            && response.secondary_clicked()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let at = galley.cursor_from_pos(pointer - galley_pos).index.0;
+            let byte = byte_of(&chat.composer, at);
+            if let Some(range) = crate::spell::misspelled(&chat.composer).into_iter().find(|r| r.start <= byte && byte <= r.end) {
+                let word = chat.composer[range.clone()].to_owned();
+                ui.ctx().data_mut(|d| d.insert_temp(spell_menu, (range.start, range.end, word)));
+                crate::menu::open_at(ui.ctx(), spell_menu, pointer);
+            }
+        }
+        if let Some((start, end, word)) = ui.ctx().data(|d| d.get_temp::<(usize, usize, String)>(spell_menu)) {
+            let mut replace: Option<String> = None;
+            let mut add = false;
+            let open = crate::menu::show(ui.ctx(), spell_menu, |m| {
+                let suggestions = crate::spell::suggestions(&word);
+                if suggestions.is_empty() {
+                    m.label("No suggestions");
+                }
+                for s in suggestions {
+                    if m.item(None, &s) {
+                        replace = Some(s);
+                    }
+                }
+                m.separator();
+                if m.item(Some("plus"), "Add to dictionary") {
+                    add = true;
+                }
+            });
+            if let Some(with) = replace
+                && chat.composer.get(start..end) == Some(word.as_str())
+            {
+                chat.composer.replace_range(start..end, &with);
+                chat.spans.follow(&chat.composer);
+            }
+            if add {
+                let saved = serde_json::to_string(&crate::spell::add_word(&word)).unwrap_or_default();
+                app.load(move |db| async move {
+                    let _ = db.set_setting(crate::spell::SETTING_SPELL_WORDS, &saved).await;
+                    None
+                });
+            }
+            if !open {
+                ui.ctx().data_mut(|d| d.remove::<(usize, usize, String)>(spell_menu));
+            }
+        }
         input_rect = framed.response.rect;
         // Desktop's expand toggle: centered over the input once it's more
         // than a line, and while large.

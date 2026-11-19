@@ -39,6 +39,7 @@ mod search;
 mod settings;
 mod sidebar;
 mod sounds;
+mod spell;
 mod startup;
 mod stories;
 mod symbols;

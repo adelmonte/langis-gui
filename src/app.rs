@@ -190,6 +190,8 @@ pub struct InputPrefs {
     /// The selection's formatting toolbar.
     pub formatting: bool,
     pub skin_tone: Option<langis_emoji::SkinTone>,
+    /// Spell check in the composer (Desktop's "Spell check text entered").
+    pub spell: bool,
 }
 
 impl App {
@@ -266,7 +268,7 @@ impl App {
             sound: Default::default(),
             last_tick: None,
             badges: Default::default(),
-            input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None },
+            input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None, spell: true },
             unread_only: false,
             fun: Default::default(),
         };
@@ -435,9 +437,12 @@ impl App {
                     let formatting = get(db.setting(crate::settings::SETTING_TEXT_FORMATTING).await.ok().flatten()).unwrap_or(true);
                     let tone = db.setting(crate::settings::SETTING_SKIN_TONE).await.ok().flatten().and_then(|v| v.parse::<usize>().ok()).filter(|i| (1..=5).contains(i));
                     let skin_tone = tone.map(|i| langis_emoji::SkinTone::ALL[i - 1]);
+                    let spell = get(db.setting(crate::spell::SETTING_SPELL_CHECK).await.ok().flatten()).unwrap_or(true);
+                    let words: Vec<String> = db.setting(crate::spell::SETTING_SPELL_WORDS).await.ok().flatten().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
                     Some(Loaded::Apply(Box::new(move |app: &mut App| {
-                        app.input = InputPrefs { auto_convert, formatting, skin_tone };
+                        app.input = InputPrefs { auto_convert, formatting, skin_tone, spell };
                         crate::emoji_picker::set_skin_tone(skin_tone);
+                        crate::spell::start(&app.ctx, words);
                     })))
                 });
                 self.load(|db| async move {

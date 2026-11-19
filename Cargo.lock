@@ -3776,6 +3776,7 @@ dependencies = [
  "rfd",
  "serde_json",
  "signal-hook",
+ "spellbook",
  "tempfile",
  "tracing",
  "tracing-subscriber",
@@ -7419,6 +7420,16 @@ name = "sorted-vec"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "238653bedf881fede50103cb7838b029e2b73d3d3d8e70d36f0a96be32a65c7b"
+
+[[package]]
+name = "spellbook"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d204abcbdf8e88729306a8d0ca01a79d8a49969fe1f84696909d6dbc4321c1a"
+dependencies = [
+ "foldhash 0.2.0",
+ "hashbrown 0.17.1",
+]
 
 [[package]]
 name = "spin"
