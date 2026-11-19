@@ -25,6 +25,8 @@ pub struct ProfileEditor {
     pub link: Option<String>,
     /// Editing the username: the nickname, the digits, and the reservation.
     pub editing_username: Option<UsernameEdit>,
+    /// "Delete username" waiting on its confirmation.
+    pub confirm_delete_username: bool,
 }
 
 pub struct UsernameEdit {
@@ -91,6 +93,7 @@ pub fn open(app: &mut App) {
         username: None,
         link: None,
         editing_username: None,
+        confirm_delete_username: false,
     });
     let aci = app.aci.clone();
     app.load(move |db| async move {
@@ -156,6 +159,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         username(app, ui, &palette, &mut e);
         answer = buttons(ui, &["Save", "Cancel"]);
     });
+    if e.confirm_delete_username {
+        let name = e.username.clone().unwrap_or_default();
+        let description = format!("This will remove your username and disable your QR code and link. \u{201c}{name}\u{201d} will be available for others to claim. Are you sure?");
+        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("delete-username"), "", &description, "Delete", crate::dialog::Variant::StrongDestructive) {
+            Some(crate::dialog::Choice::Action) => {
+                e.confirm_delete_username = false;
+                app.send(Command::DeleteUsername);
+            }
+            Some(crate::dialog::Choice::Cancel) => e.confirm_delete_username = false,
+            None => {}
+        }
+    }
     match answer {
         Some(0) if e.given.trim().is_empty() => {
             app.toast("Your profile needs a first name.");
@@ -204,7 +219,7 @@ fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor
                             e.editing_username = Some(UsernameEdit { nickname, digits, typed_at: Instant::now(), asked: None, reservation: None, problem: None, saving: false });
                         }
                         if ui.link("Delete username").clicked() {
-                            app.send(Command::DeleteUsername);
+                            e.confirm_delete_username = true;
                         }
                     });
                 }
