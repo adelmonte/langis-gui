@@ -332,6 +332,17 @@ fn screenshots_composer() {
     save(&mut harness, "composer-reply");
     harness.state_mut().chat.as_mut().unwrap().quote = None;
 
+    // A misspelled word, underlined once the dictionary is read.
+    harness.state_mut().chat.as_mut().unwrap().composer = "See you at the trailhed tomorow".into();
+    let start = std::time::Instant::now();
+    while crate::spell::misspelled("trailhed").is_empty() && start.elapsed().as_secs() < 20 {
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    wait(&mut harness, "spelling", |_| true);
+    save(&mut harness, "composer-spelling");
+    harness.state_mut().chat.as_mut().unwrap().composer.clear();
+
     // Files waiting to go: a photo and a document.
     let mut png = std::io::Cursor::new(Vec::new());
     image::RgbImage::from_fn(200, 150, |x, y| image::Rgb([x as u8, y as u8, 160])).write_to(&mut png, image::ImageFormat::Png).unwrap();
