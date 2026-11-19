@@ -246,9 +246,10 @@ impl Preview {
     /// Follows the text's first link; true when it's time to fetch it.
     fn follow(&mut self, text: &str, enabled: bool) -> Option<String> {
         let link = enabled
-            .then(|| crate::chat::find_links(text).into_iter().map(|(_, url)| url).find(|u| langis_core::link_preview::should_preview(u)))
-            .flatten()
-            .filter(|u| !self.dismissed.contains(u) && !self.failed.contains(u));
+            // The same link finder the backend checks a sent preview against,
+            // so a preview shown here isn't dropped on send.
+            .then(|| langis_core::link_preview::links_in(text).into_iter().find(|u| langis_core::link_preview::should_preview(u) && !self.dismissed.contains(u) && !self.failed.contains(u)))
+            .flatten();
         if link != self.url {
             self.url = link;
             self.since = Some(Instant::now());
@@ -811,7 +812,7 @@ pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversat
         return;
     }
     let (body, mentions, styles) = chat.spans.to_send(&chat.composer);
-    let preview = chat.preview.draft.take().filter(|p| chat.composer.contains(&p.url) || chat.composer.contains(p.url.trim_start_matches("https://")));
+    let preview = chat.preview.draft.take().filter(|p| langis_core::link_preview::is_valid(&body, &p.url));
     let command = match chat.editing.take() {
         Some(message_id) => Command::EditMessage { message_id, body, mentions, styles, preview },
         None => Command::SendText { conversation: c.id.clone(), body, quote: chat.quote.take(), preview, mentions, styles },
