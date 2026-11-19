@@ -161,6 +161,8 @@ pub struct App {
     pub lightbox: Option<crate::lightbox::Lightbox>,
     /// Link previews on (Settings, Chats).
     pub link_previews: bool,
+    /// Missed calls not looked at yet: the Calls tab's badge.
+    pub unseen_calls: u32,
     /// Stickers, GIFs and the sticker manager.
     pub fun: crate::fun::Fun,
 }
@@ -230,6 +232,7 @@ impl App {
             reactions: crate::actions::DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect(),
             lightbox: None,
             link_previews: true,
+            unseen_calls: 0,
             fun: Default::default(),
         };
         let dir = &app.data_dir;
@@ -655,6 +658,11 @@ impl App {
 
     pub fn reload_conversations(&self) {
         self.load(|db| async move { db.conversations().await.ok().map(Loaded::Conversations) });
+        // Calls are messages: whatever changes the chat list may change this.
+        self.load(|db| async move {
+            let n = db.unseen_calls().await.ok()?;
+            Some(Loaded::Apply(Box::new(move |app: &mut App| app.unseen_calls = n.max(0) as u32)))
+        });
     }
 
     /// Opens a chat: saves the draft of the one being left, loads the

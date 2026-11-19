@@ -30,7 +30,7 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
             if chats.on_hover_text("Chats").clicked() {
                 app.tab = Tab::Chats;
             }
-            let calls = tab_item(ui, &palette, if app.tab == Tab::Calls { Icon::PhoneFill } else { Icon::Phone }, app.tab == Tab::Calls, 0);
+            let calls = tab_item(ui, &palette, if app.tab == Tab::Calls { Icon::PhoneFill } else { Icon::Phone }, app.tab == Tab::Calls, if app.tab == Tab::Calls { 0 } else { app.unseen_calls });
             if calls.on_hover_text("Calls").clicked() {
                 app.tab = Tab::Calls;
                 app.panes.calls_loaded = false;
