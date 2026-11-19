@@ -438,8 +438,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     None => {
                         let conversation = id.clone();
                         app.load(move |db| async move {
-                            let m = db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten()?;
-                            Some(crate::app::Loaded::Chat(ChatLoaded::Jump { conversation, message_id: m.id }))
+                            match db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten() {
+                                Some(m) => Some(crate::app::Loaded::Chat(ChatLoaded::Jump { conversation, message_id: m.id })),
+                                // Desktop's "Original message not found".
+                                None => Some(crate::app::Loaded::Apply(Box::new(|app: &mut App| app.toast("Original message not found")))),
+                            }
                         });
                     }
                 }
@@ -1109,7 +1112,7 @@ fn message(
 
     // Heights.
     let name_h = name_galley.as_ref().map(|g| g.size().y + 2.).unwrap_or(0.);
-    let quote_h = if m.quote.is_some() { 58. } else { 0. };
+    let quote_h = m.quote.as_ref().map(|q| quote_height(ui, q, bubble_w - pad.x * 2.) + 6.).unwrap_or(0.);
     let media_h: f32 = images.iter().map(|(_, a)| media_size(a, Some(bubble_w)).y + 2.).sum();
     // `MessageAudio`'s countdown shares the line with the time when the
     // audio is all there is.
@@ -1196,7 +1199,7 @@ fn message(
         y += name_h;
     }
     if let Some(q) = &m.quote {
-        let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., 52.));
+        let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., quote_h - 6.));
         quote(ui, palette, outgoing, q, rect, ctx);
         if !q.story && ui.interact(rect, ui.scope_id().with(("quote", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             actions.push(Action::JumpToQuote { author: q.author.clone(), sent_at: q.sent_at });
@@ -1624,6 +1627,48 @@ fn file_row(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: 
     response.clicked()
 }
 
+/// Desktop's `Quote` thumbnail or icon: 54px on the right.
+const QUOTE_THUMB: f32 = 54.;
+
+/// The quote's text: up to 2 lines (`-webkit-line-clamp: 2`).
+fn quote_body(ui: &Ui, q: &langis_store::Quote, width: f32, color: Color32) -> std::sync::Arc<egui::Galley> {
+    let body = if q.text.is_empty() { q.attachment.as_ref().map(|a| a.label()).unwrap_or_default() } else { crate::format::one_line(&q.text) };
+    let side = if q.thumbnail.is_some() || q.attachment.is_some() { QUOTE_THUMB + 4. } else { 0. };
+    let mut job = egui::text::LayoutJob::simple(body, theme::regular(13.), color, (width - 24. - side).max(40.));
+    job.wrap.max_rows = 2;
+    job.wrap.overflow_character = Some('…');
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// A quote's height: the author, its text, at least the thumbnail's.
+fn quote_height(ui: &Ui, q: &langis_store::Quote, width: f32) -> f32 {
+    let text = quote_body(ui, q, width, Color32::WHITE).size().y;
+    let h = 6. + 19. + text + 7.;
+    if q.thumbnail.is_some() || q.attachment.is_some() { h.max(QUOTE_THUMB) } else { h }
+}
+
+/// An image cropped to fill `at` (`object-fit: cover`), once its size is
+/// known; until then, drawn as it is.
+pub fn cover_image(ui: &Ui, path: &str, at: Rect, radius: CornerRadius) {
+    let uri = crate::thumbs::uri(ui.ctx(), path, at.size());
+    let size = match ui.ctx().try_load_texture(&uri, egui::TextureOptions::LINEAR, egui::SizeHint::default()) {
+        Ok(egui::load::TexturePoll::Ready { texture }) => Some(texture.size),
+        _ => None,
+    };
+    let mut uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
+    if let Some(size) = size.filter(|s| s.x > 0. && s.y > 0.) {
+        let (photo, frame) = (size.x / size.y, at.width() / at.height());
+        if photo > frame {
+            let keep = frame / photo;
+            uv = Rect::from_min_max(Pos2::new((1. - keep) / 2., 0.), Pos2::new((1. + keep) / 2., 1.));
+        } else {
+            let keep = photo / frame;
+            uv = Rect::from_min_max(Pos2::new(0., (1. - keep) / 2.), Pos2::new(1., (1. + keep) / 2.));
+        }
+    }
+    egui::Image::new(uri).uv(uv).corner_radius(radius).paint_at(ui, at);
+}
+
 fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, rect: Rect, ctx: &Ctx<'_>) {
     // `Quote.scss`: the chat's color, shaded, fixed to the window like the
     // bubbles; the bar is its start color, white in our own bubbles.
@@ -1641,20 +1686,35 @@ fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, re
         None => "You".to_owned(),
         Some(a) => ctx.app.names.get(a).cloned().unwrap_or_else(|| q.author_name.clone()),
     };
-    let mut thumb_w = 0.;
+    let side = Rect::from_min_size(Pos2::new(rect.right() - QUOTE_THUMB, rect.top()), Vec2::new(QUOTE_THUMB, rect.height().min(QUOTE_THUMB)));
     if let Some(path) = &q.thumbnail {
-        thumb_w = 52.;
-        let at = Rect::from_min_size(Pos2::new(rect.right() - 52., rect.top()), Vec2::splat(52.));
-        if crate::thumbs::visible(ui, at) {
-            egui::Image::new(crate::thumbs::uri(ui.ctx(), path, at.size())).corner_radius(CornerRadius { ne: 8, se: 8, nw: 0, sw: 0 }).paint_at(ui, at);
+        if crate::thumbs::visible(ui, side) {
+            cover_image(ui, path, side, CornerRadius { ne: 8, se: 4, nw: 0, sw: 0 });
         }
+        // A video's thumbnail carries Desktop's play mark.
+        if q.attachment.as_ref().is_some_and(|a| a.content_type.starts_with("video/") && !a.gif) {
+            ui.painter().circle_filled(side.center(), 12., Color32::from_black_alpha(120));
+            theme::paint_symbol(ui.painter(), "play-fill", side.center(), 14., Color32::WHITE);
+        }
+    } else if let Some(a) = &q.attachment {
+        // No thumbnail: an icon for what it is (`Quote__icon-container`).
+        let symbol = if a.voice || a.content_type.starts_with("audio/") {
+            "audio"
+        } else if a.gif {
+            "gif"
+        } else if a.content_type.starts_with("video/") {
+            "videocamera"
+        } else if a.content_type.starts_with("image/") {
+            "photo"
+        } else {
+            "file"
+        };
+        ui.painter().circle_filled(side.center(), 16., text_color.gamma_multiply(0.12));
+        theme::paint_symbol(ui.painter(), symbol, side.center(), 18., text_color);
     }
     let inner = rect.shrink2(Vec2::new(10., 6.));
     ui.painter().text(Pos2::new(inner.left() + 2., inner.top()), Align2::LEFT_TOP, author, theme::semibold(13.), text_color);
-    let body = if q.text.is_empty() { q.attachment.as_ref().map(|a| a.label()).unwrap_or_default() } else { crate::format::one_line(&q.text) };
-    let mut job = egui::text::LayoutJob::simple_singleline(body, theme::regular(13.), text_color);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(inner.width() - thumb_w - 4.);
-    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let galley = quote_body(ui, q, rect.width(), text_color);
     ui.painter().galley(Pos2::new(inner.left() + 2., inner.top() + 19.), galley, text_color);
 }
 
