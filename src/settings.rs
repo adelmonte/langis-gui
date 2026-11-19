@@ -453,7 +453,9 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
         if axo_list::item(ui, Item::new("Create a folder").symbol("plus"), End::Arrow(None)).clicked() {
             app.settings.folder = Some((new_id(), true, ChatFolderParams::defaults()));
         }
-        for f in &folders {
+        let order: Vec<String> = folders.iter().map(|f| f.id.clone()).collect();
+        let mut reorder: Option<Vec<String>> = None;
+        for (i, f) in folders.iter().enumerate() {
             if f.folder_type == ChatFolderType::All {
                 axo_list::item(ui, Item::new("All chats").symbol("folder"), End::None);
                 continue;
@@ -468,10 +470,24 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
                 if m.item(Some("pencil"), "Edit folder") {
                     app.settings.folder = Some(edit());
                 }
+                // Desktop drags folders into order; here they move a step.
+                if i > 0 && m.item(Some("arrow-up"), "Move up") {
+                    let mut o = order.clone();
+                    o.swap(i, i - 1);
+                    reorder = Some(o);
+                }
+                if i + 1 < order.len() && m.item(Some("arrow-down"), "Move down") {
+                    let mut o = order.clone();
+                    o.swap(i, i + 1);
+                    reorder = Some(o);
+                }
                 if m.item(Some("trash"), "Delete") {
                     app.settings.ask = Some(Ask::DeleteFolder(f.id.clone(), f.name.clone()));
                 }
             });
+        }
+        if let Some(order) = reorder {
+            app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::Reorder(order)));
         }
     });
     axo_list::gap(ui);
@@ -521,7 +537,13 @@ fn folder_summary(f: &langis_store::ChatFolder) -> String {
 fn folder_editor(app: &mut App, ui: &mut Ui) {
     use langis_store::ChatFolderEdit;
     let Some((id, new, mut params)) = app.settings.folder.take() else { return };
+    // What it held when opened, for Desktop's unsaved-changes question.
+    let original_id = egui::Id::unique(("folder-editor-original", &id));
+    let original: langis_store::ChatFolderParams = ui.ctx().data_mut(|d| d.get_temp_mut_or_insert_with(original_id, || params.clone()).clone());
+    let asking_id = egui::Id::unique(("folder-editor-asking", &id));
+    let mut asking = ui.ctx().data(|d| d.get_temp::<bool>(asking_id).unwrap_or(false));
     let mut answer = None;
+    let mut delete = false;
     let closed = crate::panes::modal(ui, "folder-editor", 440., |ui| {
         crate::panes::title(ui, if new { "Create a folder" } else { "Edit folder" });
         widgets::text_field(ui, &mut params.name, "Folder name", false);
@@ -532,7 +554,7 @@ fn folder_editor(app: &mut App, ui: &mut Ui) {
         ui.checkbox(&mut params.show_muted_chats, "Show muted chats");
         ui.add_space(8.);
         ui.label(egui::RichText::new("Included chats").font(theme::semibold(13.)));
-        egui::ScrollArea::vertical().max_height(220.).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("folder-included").max_height(180.).show(ui, |ui| {
             for c in app.conversations.iter() {
                 let mut on = params.included.contains(&c.id);
                 if ui.checkbox(&mut on, &c.title).changed() {
@@ -545,10 +567,78 @@ fn folder_editor(app: &mut App, ui: &mut Ui) {
                 }
             }
         });
-        answer = crate::panes::buttons(ui, &["Save", "Cancel"]);
+        // Desktop's Exceptions: chats left out of "all 1:1" or "all groups".
+        if params.include_all_individual_chats || params.include_all_group_chats {
+            ui.add_space(8.);
+            ui.label(egui::RichText::new("Excluded chats").font(theme::semibold(13.)));
+            egui::ScrollArea::vertical().id_salt("folder-excluded").max_height(140.).show(ui, |ui| {
+                let covered = |c: &&langis_store::Conversation| {
+                    let group = c.kind == langis_store::ConversationKind::Group;
+                    (group && params.include_all_group_chats) || (!group && params.include_all_individual_chats)
+                };
+                for c in app.conversations.iter().filter(covered) {
+                    let mut on = params.excluded.contains(&c.id);
+                    if ui.checkbox(&mut on, &c.title).changed() {
+                        if on {
+                            params.excluded.push(c.id.clone());
+                            params.included.retain(|x| *x != c.id);
+                        } else {
+                            params.excluded.retain(|x| *x != c.id);
+                        }
+                    }
+                }
+            });
+        }
+        ui.add_space(8.);
+        ui.horizontal(|ui| {
+            if !new && widgets::pill_button(ui, "Delete folder", false).clicked() {
+                delete = true;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::pill_button(ui, "Save", true).clicked() {
+                    answer = Some(0);
+                }
+                if widgets::pill_button(ui, "Cancel", false).clicked() {
+                    answer = Some(1);
+                }
+            });
+        });
     });
+    let changed = params != original;
+    // Closing with changes asks first (Desktop's `EditChatFoldersPage`).
+    let leaving = matches!(answer, Some(1)) || (closed && answer.is_none());
+    if leaving && changed && !asking {
+        asking = true;
+        answer = None;
+    }
+    let mut keep_open = false;
+    if asking {
+        use crate::dialog::{Answer, Variant};
+        match crate::dialog::show(ui.ctx(), egui::Id::unique("folder-unsaved"), "Save changes?", "You made changes to this chat folder.", Some("Discard"), &[("Save", Variant::StrongPrimary)]) {
+            Some(Answer::Action(_)) => {
+                asking = false;
+                answer = Some(0);
+            }
+            Some(Answer::Cancel) => {
+                asking = false;
+                answer = Some(1);
+            }
+            None => keep_open = true,
+        }
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(asking_id, asking));
+    let finished = |ui: &mut Ui| ui.ctx().data_mut(|d| {
+        d.remove::<langis_store::ChatFolderParams>(original_id);
+        d.remove::<bool>(asking_id);
+    });
+    if delete {
+        finished(ui);
+        app.settings.ask = Some(Ask::DeleteFolder(id, params.name));
+        return;
+    }
     match answer {
         Some(0) if !params.name.trim().is_empty() => {
+            finished(ui);
             params.name = params.name.trim().to_owned();
             let edit = if new { ChatFolderEdit::Create { id, params } } else { ChatFolderEdit::Update { id, params } };
             app.send(Command::EditChatFolders(edit));
@@ -557,8 +647,8 @@ fn folder_editor(app: &mut App, ui: &mut Ui) {
             app.toast("Give the folder a name.");
             app.settings.folder = Some((id, new, params));
         }
-        Some(_) => {}
-        None if closed => {}
+        Some(_) => finished(ui),
+        None if closed && !keep_open && !asking => finished(ui),
         None => app.settings.folder = Some((id, new, params)),
     }
 }
