@@ -630,3 +630,40 @@ pub fn icon(name: &str) -> Option<char> {
     };
     char::from_u32(code)
 }
+
+#[cfg(test)]
+mod used_names {
+    /// Every symbol name written in the source as `paint_symbol(…, "name"`
+    /// or a menu item's `Some("name")` exists: a typo draws nothing in
+    /// release builds and panics in debug ones.
+    #[test]
+    fn every_symbol_named_in_the_source_exists() {
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir("src").unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") || path.ends_with("symbols.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for marker in ["paint_symbol(", "item(Some(\""] {
+                for (at, _) in text.match_indices(marker) {
+                    let rest = &text[at + marker.len()..];
+                    let line = rest.split('\n').next().unwrap_or("");
+                    let quoted = if marker.ends_with('"') { Some(line) } else { line.split_once('"').map(|(_, r)| r) };
+                    let Some(name) = quoted.and_then(|q| q.split('"').next()) else { continue };
+                    // Only literal names; computed ones are checked where made.
+                    if name.is_empty() || line.trim_start().starts_with(|c: char| c.is_alphabetic() && !marker.ends_with('"')) && !line.contains(&format!("\"{name}\"")) {
+                        continue;
+                    }
+                    if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-[]".contains(c)) {
+                        continue;
+                    }
+                    if super::icon(name).is_none() {
+                        missing.push(format!("{}: {name}", path.display()));
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "unknown symbols: {missing:?}");
+    }
+}
