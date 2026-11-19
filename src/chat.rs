@@ -1065,10 +1065,24 @@ fn message(
 
     // Sticker: large, no bubble.
     if let Some(s) = sticker {
+        // Desktop's sticker: no bubble, but the author's name in a group
+        // (`module-message__author_with_sticker`), the time and status
+        // under it, reactions, and the failed line.
         let size = Vec2::splat(144.);
-        let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, size.y + 18.), Sense::hover());
+        let name_galley = author_name.as_ref().map(|n| {
+            let color = m.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.text);
+            ui.painter().layout_no_wrap(n.clone(), theme::semibold(13.), color)
+        });
+        let name_h = name_galley.as_ref().map(|g| g.size().y + 4.).unwrap_or(0.);
+        let reactions_h = if m.reactions.is_empty() { 0. } else { 18. };
+        let status = status_line(m);
+        let status_h = if status.is_some() { 18. } else { 0. };
+        let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, name_h + size.y + 18. + reactions_h + status_h), Sense::hover());
         let x = if outgoing { row.right() - side - size.x } else { row.left() + lead + avatar_col };
-        let rect = Rect::from_min_size(Pos2::new(x, row.top()), size);
+        if let Some(g) = name_galley {
+            ui.painter().galley(Pos2::new(x, row.top()), g, palette.text);
+        }
+        let rect = Rect::from_min_size(Pos2::new(x, row.top() + name_h), size);
         if let Some(path) = s.local_path.as_deref().or(s.thumbnail_path.as_deref())
             && crate::thumbs::visible(ui, rect)
         {
@@ -1090,8 +1104,31 @@ fn message(
                 _ => Action::Menu { message_id: m.id, at },
             });
         }
-        let at = Pos2::new(if outgoing { rect.right() - meta_w } else { rect.left() }, rect.bottom() + 2.);
+        let meta_y = rect.bottom() + 2.;
+        let at = Pos2::new(if outgoing { rect.right() - meta_w } else { rect.left() }, meta_y);
         ui.painter().galley(at, meta, palette.text_secondary);
+        if outgoing {
+            let icon = crate::sidebar::status_icon(m.status);
+            let tint = if m.status == DeliveryStatus::Failed { palette.destructive } else { palette.text_secondary };
+            icon.paint(ui, Rect::from_min_size(Pos2::new(rect.right() - 12., meta_y + 1.), Vec2::splat(12.)), 12., tint);
+        }
+        let below = Rect::from_min_size(rect.min, Vec2::new(size.x, size.y + 18. + 4.));
+        if !m.reactions.is_empty() {
+            reaction_pills(ui, ctx, m, below, outgoing, actions);
+        }
+        if let Some((text, then)) = status {
+            let color = if m.status == DeliveryStatus::Paused { palette.text_secondary } else { palette.destructive };
+            let label = ui.painter().layout_no_wrap(text.into(), theme::regular(12.), color);
+            let y = below.bottom() + reactions_h - 2.;
+            let at = if outgoing { Pos2::new(rect.right() - label.size().x, y) } else { Pos2::new(rect.left(), y) };
+            let hit = Rect::from_min_size(at, label.size());
+            ui.painter().galley(at, label, color);
+            if let Some(then) = then
+                && ui.interact(hit, ui.scope_id().with(("sticker-status", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+            {
+                actions.push(then);
+            }
+        }
         if show_avatar && !collapsed_below {
             if let Some(action) = avatar_for(ui, ctx, m, Pos2::new(row.left() + lead, rect.bottom() - 28.)) {
                 actions.push(action);
@@ -1429,14 +1466,44 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     let label_g = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(14.), text_color);
     let meta = ui.painter().layout_no_wrap(crate::format::message_time(m.sent_at), theme::regular(11.), meta_color);
     let status_w = if outgoing { 6. + 12. * crate::sidebar::status_icon(m.status).aspect() } else { 0. };
-    let w = 12. + 22. + label_g.size().x + 12. + meta.size().x + status_w + 12.;
-    let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, 40.), Sense::hover());
+    // In a group, the author's name over it; reactions and the failed line
+    // under it, as any bubble.
+    let name_galley = (show_avatar).then(|| {
+        let name = m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into());
+        let color = m.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.text);
+        ui.painter().layout_no_wrap(name, theme::semibold(13.), color)
+    });
+    let name_h = name_galley.as_ref().map(|g| g.size().y).unwrap_or(0.);
+    let reactions_h = if m.reactions.is_empty() { 0. } else { 18. };
+    let status = status_line(m);
+    let status_h = if status.is_some() { 18. } else { 0. };
+    let w = (12. + 22. + label_g.size().x + 12. + meta.size().x + status_w + 12.).max(name_galley.as_ref().map(|g| g.size().x + 24.).unwrap_or(0.));
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, 40. + name_h + reactions_h + status_h), Sense::hover());
     let x = if outgoing { row.right() - 16. - w } else { row.left() + 16. + avatar_col };
-    let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(w, 40.));
+    let whole = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(w, 40. + name_h));
+    let bubble = Rect::from_min_max(Pos2::new(x, row.top() + name_h), whole.max);
     if outgoing {
-        crate::chat_colors::paint(ui.painter(), bubble, CornerRadius::same(18), crate::chat_colors::for_chat(ctx.app, ctx.chat_id), ui.ctx().content_rect());
+        crate::chat_colors::paint(ui.painter(), whole, CornerRadius::same(18), crate::chat_colors::for_chat(ctx.app, ctx.chat_id), ui.ctx().content_rect());
     } else {
-        ui.painter().rect_filled(bubble, CornerRadius::same(18), palette.bubble_in);
+        ui.painter().rect_filled(whole, CornerRadius::same(18), palette.bubble_in);
+    }
+    if let Some(g) = name_galley {
+        ui.painter().galley(Pos2::new(whole.left() + 12., whole.top() + 6.), g, palette.text);
+    }
+    if !m.reactions.is_empty() {
+        reaction_pills(ui, ctx, m, whole, outgoing, actions);
+    }
+    if let Some((text, then)) = status {
+        let color = if m.status == langis_store::DeliveryStatus::Paused { palette.text_secondary } else { palette.destructive };
+        let label = ui.painter().layout_no_wrap(text.into(), theme::regular(12.), color);
+        let at = Pos2::new(whole.right() - label.size().x, whole.bottom() + reactions_h + 2.);
+        let hit = Rect::from_min_size(at, label.size());
+        ui.painter().galley(at, label, color);
+        if let Some(then) = then
+            && ui.interact(hit, ui.scope_id().with(("view-once-status", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        {
+            actions.push(then);
+        }
     }
     let icon_rect = Rect::from_min_size(Pos2::new(bubble.left() + 12., bubble.center().y - 10.), Vec2::splat(20.));
     icon.paint(ui, icon_rect, 18., text_color);
@@ -1448,11 +1515,11 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
         crate::sidebar::status_icon(m.status).paint(ui, at, 12., meta_color);
     }
     if show_avatar {
-        if let Some(action) = avatar_for(ui, ctx, m, Pos2::new(row.left() + 16., bubble.bottom() - 28.)) {
+        if let Some(action) = avatar_for(ui, ctx, m, Pos2::new(row.left() + 16., whole.bottom() - 28.)) {
             actions.push(action);
         }
     }
-    let r = ui.interact(bubble, ui.scope_id().with(("view-once", m.id)), Sense::click());
+    let r = ui.interact(whole, ui.scope_id().with(("view-once", m.id)), Sense::click());
     if ready {
         if r.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
