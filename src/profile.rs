@@ -27,6 +27,8 @@ pub struct ProfileEditor {
     pub editing_username: Option<UsernameEdit>,
     /// "Delete username" waiting on its confirmation.
     pub confirm_delete_username: bool,
+    /// The About emoji's picker, while open.
+    pub about_picker: Option<crate::emoji_picker::Picker>,
 }
 
 pub struct UsernameEdit {
@@ -94,6 +96,7 @@ pub fn open(app: &mut App) {
         link: None,
         editing_username: None,
         confirm_delete_username: false,
+        about_picker: None,
     });
     let aci = app.aci.clone();
     app.load(move |db| async move {
@@ -137,8 +140,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg"]).pick_file()
                     && let Ok(bytes) = std::fs::read(&path)
                 {
-                    e.photo = Some(path.to_string_lossy().into_owned());
-                    e.avatar = AvatarChange::New(std::sync::Arc::new(bytes));
+                    // Desktop's AvatarEditor crops to a square; this takes
+                    // the middle square, at most 512 pixels.
+                    match square_photo(&bytes) {
+                        Some(cropped) => {
+                            let preview = std::env::temp_dir().join(format!("langis-avatar-{}.jpg", std::process::id()));
+                            let _ = std::fs::write(&preview, &cropped);
+                            ui.ctx().forget_image(&format!("file://{}", preview.display()));
+                            e.photo = Some(preview.to_string_lossy().into_owned());
+                            e.avatar = AvatarChange::New(std::sync::Arc::new(cropped));
+                        }
+                        None => app.toast("That picture couldn't be read."),
+                    }
                 }
                 if photo.is_some() && ui.link("Remove").clicked() {
                     e.avatar = AvatarChange::Remove;
@@ -151,8 +164,38 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         widgets::text_field(ui, &mut e.family, "Last name (optional)", false);
         ui.add_space(6.);
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut e.about_emoji).hint_text("🙂").desired_width(32.));
+            // The About emoji from the picker, as Desktop's BioInput does.
+            let face = if e.about_emoji.is_empty() { "🙂".to_owned() } else { e.about_emoji.clone() };
+            let mut job = egui::text::LayoutJob::default();
+            crate::chat::append_with_emoji(&mut job, &face, egui::TextFormat { font_id: theme::emoji(18.), color: palette.text, ..Default::default() });
+            if ui.add(egui::Button::new(job).corner_radius(CornerRadius::same(8))).on_hover_text("Choose an emoji").clicked() {
+                e.about_picker = if e.about_picker.is_some() { None } else { Some(Default::default()) };
+            }
             widgets::text_field(ui, &mut e.about, "About", false);
+        });
+        if let Some(picker) = e.about_picker.as_mut() {
+            ui.add_space(6.);
+            if let Some(emoji) = picker.body(ui, &app.recent_emoji) {
+                e.about_emoji = emoji.to_owned();
+                e.about_picker = None;
+            }
+        }
+        // Desktop's About presets.
+        ui.add_space(4.);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(4., 4.);
+            for (emoji, text) in [("👋", "Speak Freely"), ("🤐", "Encrypted"), ("👍", "Free to chat"), ("☕", "Coffee lover"), ("📴", "Taking a break")] {
+                let mut job = egui::text::LayoutJob::default();
+                crate::chat::append_with_emoji(&mut job, &format!("{emoji} {text}"), egui::TextFormat { font_id: theme::regular(12.), color: palette.text, ..Default::default() });
+                if ui.add(egui::Button::new(job).corner_radius(CornerRadius::same(12))).clicked() {
+                    e.about_emoji = emoji.to_owned();
+                    e.about = text.to_owned();
+                }
+            }
+            if (!e.about.is_empty() || !e.about_emoji.is_empty()) && ui.add(egui::Button::new(RichText::new("Clear").font(theme::regular(12.))).corner_radius(CornerRadius::same(12))).clicked() {
+                e.about.clear();
+                e.about_emoji.clear();
+            }
         });
         ui.add_space(12.);
         ui.label(RichText::new("Username").font(theme::semibold(14.)));
@@ -379,5 +422,33 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
     }
     if close || closed {
         app.panes.username_link = None;
+    }
+}
+
+/// The middle square of a picture, at most 512 pixels, as a JPEG.
+fn square_photo(bytes: &[u8]) -> Option<Vec<u8>> {
+    let image = image::load_from_memory(bytes).ok()?;
+    let side = image.width().min(image.height());
+    let x = (image.width() - side) / 2;
+    let y = (image.height() - side) / 2;
+    let square = image.crop_imm(x, y, side, side).resize_exact(side.min(512), side.min(512), image::imageops::FilterType::Lanczos3).to_rgb8();
+    let mut out = std::io::Cursor::new(Vec::new());
+    square.write_to(&mut out, image::ImageFormat::Jpeg).ok()?;
+    Some(out.into_inner())
+}
+
+#[cfg(test)]
+mod photo_tests {
+    #[test]
+    fn photos_are_cropped_to_the_middle_square() {
+        let wide = image::RgbImage::from_fn(800, 400, |x, _| if x < 200 || x >= 600 { image::Rgb([255, 0, 0]) } else { image::Rgb([0, 0, 255]) });
+        let mut png = std::io::Cursor::new(Vec::new());
+        wide.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let out = super::square_photo(&png.into_inner()).unwrap();
+        let back = image::load_from_memory(&out).unwrap().to_rgb8();
+        assert_eq!(back.dimensions(), (400, 400));
+        // Only the blue middle is left.
+        let edge = back.get_pixel(2, 200);
+        assert!(edge[2] > 200 && edge[0] < 60, "{edge:?}");
     }
 }
