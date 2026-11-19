@@ -427,20 +427,72 @@ pub fn folder_tabs(app: &mut App, ui: &mut Ui, palette: &Palette) {
     egui::ScrollArea::horizontal().id_salt("folder-tabs").show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.add_space(16.);
-            let tab = |ui: &mut Ui, label: &str, selected: bool| {
+            // Each tab with its unread count (Desktop's `LeftPaneChatFolders`).
+            let tab = |ui: &mut Ui, label: &str, selected: bool, unread: u32| {
                 let galley = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(13.), palette.text);
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(galley.size().x + 20., 28.), egui::Sense::click());
+                let badge_w = if unread > 0 { ui.painter().layout_no_wrap(unread.to_string(), theme::semibold(11.), egui::Color32::WHITE).size().x + 10. + 6. } else { 0. };
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(galley.size().x + 20. + badge_w, 28.), egui::Sense::click());
                 let fill = if selected { palette.fill_pressed } else if response.hovered() { palette.fill } else { egui::Color32::TRANSPARENT };
                 ui.painter().rect_filled(rect, CornerRadius::same(14), fill);
-                ui.painter().galley(rect.center() - galley.size() / 2., galley, palette.text);
-                response.clicked()
+                ui.painter().galley(egui::pos2(rect.left() + 10., rect.center().y - galley.size().y / 2.), galley, palette.text);
+                if unread > 0 {
+                    widgets::count_badge(ui, egui::pos2(rect.right() - 8., rect.center().y), unread, false);
+                }
+                response
             };
-            if tab(ui, "All chats", app.panes.folder.is_none()) {
+            let unread_in = |f: Option<&ChatFolder>| -> u32 {
+                app.conversations.iter().filter(|c| !c.archived && !c.muted && f.is_none_or(|f| in_folder(f, c))).map(|c| c.unread_count + c.marked_unread as u32).filter(|n| *n > 0).count() as u32
+            };
+            if tab(ui, "All chats", app.panes.folder.is_none(), unread_in(None)).clicked() {
                 app.panes.folder = None;
             }
+            let mut todo: Option<(ChatFolder, u8)> = None;
             for f in &custom {
-                if tab(ui, &f.name, app.panes.folder.as_ref() == Some(&f.id)) {
+                let r = tab(ui, &f.name, app.panes.folder.as_ref() == Some(&f.id), unread_in(Some(f)));
+                if r.clicked() {
                     app.panes.folder = Some(f.id.clone());
+                }
+                // Desktop's folder menu: mark all read, mute, edit.
+                crate::menu::context(ui, &r, egui::Id::unique("folder-tab-menu").with(&f.id), |m| {
+                    if m.item(Some("message-check"), "Mark all read") {
+                        todo = Some((f.clone(), 0));
+                    }
+                    let chats: Vec<&Conversation> = app.conversations.iter().filter(|c| in_folder(f, c)).collect();
+                    if chats.iter().any(|c| !c.muted) {
+                        if m.item(Some("bell-slash"), "Mute notifications") {
+                            todo = Some((f.clone(), 1));
+                        }
+                    } else if m.item(Some("bell"), "Unmute all") {
+                        todo = Some((f.clone(), 2));
+                    }
+                    if m.item(Some("pencil"), "Edit folder") {
+                        todo = Some((f.clone(), 3));
+                    }
+                });
+            }
+            if let Some((f, what)) = todo {
+                use langis_core::ChatChange;
+                let chats: Vec<Conversation> = app.conversations.iter().filter(|c| in_folder(&f, c)).cloned().collect();
+                match what {
+                    0 => {
+                        for c in chats.iter().filter(|c| c.unread_count > 0 || c.marked_unread) {
+                            app.send(Command::MarkRead { conversation: c.id.clone() });
+                            if c.marked_unread {
+                                app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MarkedUnread(false) });
+                            }
+                        }
+                    }
+                    1 | 2 => {
+                        let until = if what == 1 { i64::MAX } else { 0 };
+                        for c in chats.iter().filter(|c| c.muted != (what == 1)) {
+                            app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(until) });
+                        }
+                    }
+                    _ => {
+                        app.settings.folder = Some(crate::settings::folder_edit(&f));
+                        app.settings.page = crate::settings::Page::ChatFolders;
+                        app.tab = crate::app::Tab::Settings;
+                    }
                 }
             }
         });

@@ -109,6 +109,20 @@ enum Ask {
     DeleteFolder(String, String),
 }
 
+/// A folder as the editor holds it: its id, not new, and what it holds.
+pub fn folder_edit(f: &langis_store::ChatFolder) -> (String, bool, langis_store::ChatFolderParams) {
+    let params = langis_store::ChatFolderParams {
+        name: f.name.clone(),
+        show_only_unread: f.show_only_unread,
+        show_muted_chats: f.show_muted_chats,
+        include_all_individual_chats: f.include_all_individual_chats,
+        include_all_group_chats: f.include_all_group_chats,
+        included: f.included.clone(),
+        excluded: f.excluded.clone(),
+    };
+    (f.id.clone(), false, params)
+}
+
 #[derive(Default)]
 pub struct SettingsView {
     pub page: Page,
@@ -446,18 +460,7 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
             }
             let summary = folder_summary(f);
             let r = axo_list::item(ui, Item::new(&f.name).symbol("folder").description(&summary), End::Arrow(None));
-            let edit = || {
-                let params = ChatFolderParams {
-                    name: f.name.clone(),
-                    show_only_unread: f.show_only_unread,
-                    show_muted_chats: f.show_muted_chats,
-                    include_all_individual_chats: f.include_all_individual_chats,
-                    include_all_group_chats: f.include_all_group_chats,
-                    included: f.included.clone(),
-                    excluded: f.excluded.clone(),
-                };
-                (f.id.clone(), false, params)
-            };
+            let edit = || folder_edit(f);
             if r.clicked() {
                 app.settings.folder = Some(edit());
             }
