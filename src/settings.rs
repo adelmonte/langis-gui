@@ -807,10 +807,56 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             app.settings.page = Page::WhileMuted;
         }
     });
+    // Desktop's sound and attention rows, then its call ones.
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        let rows: [(usize, &str, &str); 5] = [
+            (0, "Notification sound", "Play a sound with each notification"),
+            (1, "In-chat sounds", "Play a sound for new messages in the chat you're reading"),
+            (4, "Draw attention to this window when a notification arrives", ""),
+            (3, "Incoming call notifications", "Show a notification when a call comes in"),
+            (2, "Call ringtone", "Play a ringtone for incoming calls"),
+        ];
+        for (i, title, description) in rows {
+            let prefs = &mut app.sound;
+            let slot = match i {
+                0 => &mut prefs.notification,
+                1 => &mut prefs.in_chat,
+                2 => &mut prefs.ringtone,
+                3 => &mut prefs.call_notify,
+                _ => &mut prefs.attention,
+            };
+            let mut on = *slot;
+            let item = if description.is_empty() { Item::new(title) } else { Item::new(title).description(description) };
+            if axo_list::switch(ui, item, &mut on) {
+                *slot = on;
+                write(app, crate::sounds::KEYS[i], on.to_string());
+                if on && i == 0 {
+                    crate::sounds::once(crate::sounds::message_chime());
+                }
+            }
+        }
+    });
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
         account_switch(app, ui, s, AccountSetting::ReactionNotifications, Item::new("Reaction notifications").description("Notify when someone reacts to your message"));
         account_switch(app, ui, s, AccountSetting::ShowUnreadReminders, Item::new("Unread reminders").description("Occasionally notify when there are unread messages in muted chats."));
+    });
+    // Desktop's Reset notification settings: this device's back to default.
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        if axo_list::item(ui, Item::new("Reset notification settings"), End::Click).clicked() {
+            app.sound = crate::sounds::Prefs::default();
+            let d = app.sound;
+            for (key, on) in crate::sounds::KEYS.iter().zip([d.notification, d.in_chat, d.ringtone, d.call_notify, d.attention]) {
+                write(app, key, on.to_string());
+            }
+            write(app, SETTING_NOTIFICATIONS, "true".into());
+            write(app, SETTING_NOTIFICATION_CONTENT, "all".into());
+            app.notify = (true, "all".into());
+            app.settings.stale = true;
+            app.toast("Notification settings reset.");
+        }
     });
 }
 

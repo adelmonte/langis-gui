@@ -38,6 +38,7 @@ mod scroll;
 mod search;
 mod settings;
 mod sidebar;
+mod sounds;
 mod startup;
 mod stories;
 mod symbols;

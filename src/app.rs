@@ -42,7 +42,7 @@ pub enum Loaded {
     Settings(Box<crate::settings::Snapshot>),
     Theme(Option<String>),
     /// Our notification settings: shown at all, and what they show.
-    NotifyPrefs { on: bool, content: String, nav_collapsed: bool },
+    NotifyPrefs { on: bool, content: String, nav_collapsed: bool, sound: crate::sounds::Prefs },
     /// Our own profile name and photo.
     Me { name: Option<String>, photo: Option<String> },
     /// A desktop notification to show.
@@ -139,6 +139,8 @@ pub struct App {
     pub focused: bool,
     /// Desktop notifications on, and what they show ("all", "name", "none").
     pub notify: (bool, String),
+    /// Sounds, call notifications and the taskbar flash.
+    pub sound: crate::sounds::Prefs,
     /// Desktop's collapsed nav tabs: the toggle moves into the list header.
     pub nav_collapsed: bool,
     momentum: crate::scroll::Momentum,
@@ -241,6 +243,7 @@ impl App {
             unseen_calls: 0,
             recent_emoji: Vec::new(),
             unread_mentions: Default::default(),
+            sound: Default::default(),
             unread_only: false,
             fun: Default::default(),
         };
@@ -457,6 +460,26 @@ impl App {
                 if started { set.insert(author) } else { set.remove(&author) };
             }
             Event::Call(update) => {
+                // Ring while a call rings us; a notification when it starts.
+                let ringing = update.as_ref().is_some_and(|u| u.incoming && u.status == langis_core::CallStatus::Ringing);
+                let was_ringing = self.call.as_ref().is_some_and(|u| u.incoming && u.status == langis_core::CallStatus::Ringing);
+                if ringing && !was_ringing {
+                    if self.sound.ringtone {
+                        crate::sounds::start_ring();
+                    }
+                    if self.sound.call_notify && !self.focused
+                        && let Some(u) = update.as_ref()
+                    {
+                        let who = self.conversation(&u.conversation).map(|c| c.title.clone()).unwrap_or_else(|| "Someone".into());
+                        let body = if u.video { "Incoming video call" } else { "Incoming voice call" };
+                        let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into() });
+                    }
+                    if self.sound.attention {
+                        self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Critical));
+                    }
+                } else if !ringing {
+                    crate::sounds::stop_ring();
+                }
                 if update.is_none() {
                     self.call_view = Default::default();
                 } else if self.call.is_none() && self.share_available.is_none() {
@@ -546,8 +569,9 @@ impl App {
                 }
             }
             Loaded::Settings(snapshot) => self.settings.snapshot = Some(*snapshot),
-            Loaded::NotifyPrefs { on, content, nav_collapsed } => {
+            Loaded::NotifyPrefs { on, content, nav_collapsed, sound } => {
                 self.notify = (on, content);
+                self.sound = sound;
                 self.nav_collapsed = nav_collapsed;
             }
             Loaded::Me { name, photo } => {
@@ -647,7 +671,12 @@ impl App {
             let on = db.setting(crate::settings::SETTING_NOTIFICATIONS).await.ok().flatten().as_deref() != Some("false");
             let content = db.setting(crate::settings::SETTING_NOTIFICATION_CONTENT).await.ok().flatten().unwrap_or_else(|| "all".into());
             let nav_collapsed = db.setting(crate::settings::SETTING_NAV_TABS_COLLAPSED).await.ok().flatten().as_deref() == Some("true");
-            Some(Loaded::NotifyPrefs { on, content, nav_collapsed })
+            let mut values: [Option<String>; 5] = Default::default();
+            for (slot, key) in values.iter_mut().zip(crate::sounds::KEYS) {
+                *slot = db.setting(key).await.ok().flatten();
+            }
+            let sound = crate::sounds::Prefs::from_values(values);
+            Some(Loaded::NotifyPrefs { on, content, nav_collapsed, sound })
         });
     }
 
@@ -658,8 +687,18 @@ impl App {
         let (on, content) = self.notify.clone();
         let Some(chat) = self.conversation(conversation) else { return };
         let reading = self.focused && self.selected.as_ref() == Some(conversation);
+        // Desktop's in-chat sound, for the chat being read.
+        if reading && self.sound.in_chat && !chat.muted {
+            crate::sounds::once(crate::sounds::in_chat_tick());
+        }
         if !on || reading || (chat.muted && !for_me) {
             return;
+        }
+        if self.sound.notification {
+            crate::sounds::once(crate::sounds::message_chime());
+        }
+        if self.sound.attention {
+            self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         }
         let (title, group) = (chat.title.clone(), chat.kind == langis_store::ConversationKind::Group);
         if content == "none" {
