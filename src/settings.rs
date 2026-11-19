@@ -140,6 +140,8 @@ pub struct SettingsView {
     /// what it holds.
     pub folder: Option<(String, bool, langis_store::ChatFolderParams)>,
     ask: Option<Ask>,
+    /// Desktop's Add blocked user: its search, while choosing.
+    block_chooser: Option<String>,
 }
 
 fn load(app: &App) {
@@ -1088,6 +1090,38 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
     let intro = ui.painter().layout("Blocked users will not be able to call you or send you messages".to_owned(), theme::regular(12.), palette.text_secondary, ui.available_width() - 32.);
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), intro.size().y + 8.), Sense::hover());
     ui.painter().galley(r.min + Vec2::new(16., 0.), intro, palette.text_secondary);
+    // `PreferencesBlockChooserDialog`: pick someone (or a group) to block.
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        if axo_list::item(ui, Item::new("Add blocked user").symbol("plus"), End::Click).clicked() {
+            app.settings.block_chooser = Some(String::new());
+        }
+    });
+    if let Some(mut query) = app.settings.block_chooser.take() {
+        let mut picked = None;
+        let mut cancel = false;
+        let closed = crate::panes::modal(ui, "block-chooser", 380., |ui| {
+            crate::panes::title(ui, "Block someone");
+            widgets::text_field(ui, &mut query, "Search", false);
+            ui.add_space(6.);
+            let q = query.trim().to_lowercase();
+            egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
+                for c in app.conversations.iter().filter(|c| !c.blocked && c.kind != ConversationKind::NoteToSelf && (q.is_empty() || c.title.to_lowercase().contains(&q))) {
+                    let r = crate::panes::contact_row(ui, palette, &c.title, c.phone.as_deref(), c.color, c.avatar_path.as_deref());
+                    if r.clicked() {
+                        picked = Some(c.id.clone());
+                    }
+                }
+            });
+            cancel = crate::panes::buttons(ui, &["Cancel"]).is_some();
+        });
+        match picked {
+            // Blocking asks first, as everywhere.
+            Some(id) => app.panes.chat_confirm = Some((id, crate::panes::ChatConfirm::Block)),
+            None if !cancel && !closed => app.settings.block_chooser = Some(query),
+            None => {}
+        }
+    }
     for (title, list) in [("Blocked Users", people), ("Blocked Groups", groups)] {
         if list.is_empty() {
             continue;
