@@ -563,6 +563,12 @@ impl App {
                 self.fun.preview = Some((id, key, None));
             }
             Event::LinkPreview { url, preview } => {
+                // The story composer's link, or the chat composer's.
+                if let Some(c) = self.panes.stories.composer.as_mut()
+                    && c.preview_for.as_deref() == Some(url.as_str())
+                {
+                    c.preview = preview.clone();
+                }
                 if let Some(chat) = self.chat.as_mut() {
                     chat.preview.arrived(&url, preview);
                 }

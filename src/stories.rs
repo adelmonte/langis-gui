@@ -74,9 +74,55 @@ pub struct StoriesView {
 
 pub struct Composer {
     pub text: String,
+    /// Index into the solid colors, then the gradients.
     pub background: usize,
     pub media: Option<(std::sync::Arc<Vec<u8>>, String, String)>,
     pub targets: Vec<StoryTarget>,
+    /// Desktop's `TextStoryCreator` buttons: the font, and the text's
+    /// style (white, black, or on a pill).
+    pub font: langis_store::StoryFont,
+    pub text_style: usize,
+    /// The first link's preview, and the link it's for.
+    pub preview: Option<langis_core::LinkPreviewDraft>,
+    pub preview_for: Option<String>,
+    /// Picking groups for New group story, with the search.
+    pub new_group: Option<(Vec<ConversationId>, String)>,
+}
+
+/// Gradient backgrounds after the solid ones, top to bottom (ARGB).
+const GRADIENTS: [(u32, u32); 6] = [
+    (0xff19a9e0, 0xffe28a4c),
+    (0xff4d2fbf, 0xffde4f8e),
+    (0xff12976d, 0xff9dd149),
+    (0xffbd4a2b, 0xfff2c14e),
+    (0xff1d2b64, 0xfff8cdda),
+    (0xff232526, 0xff5e6a71),
+];
+
+/// The fonts the font button cycles through.
+const FONTS: [langis_store::StoryFont; 5] =
+    [langis_store::StoryFont::Regular, langis_store::StoryFont::Bold, langis_store::StoryFont::Serif, langis_store::StoryFont::Script, langis_store::StoryFont::Condensed];
+
+impl Composer {
+    fn story_background(&self) -> StoryBackground {
+        if self.background < BACKGROUNDS.len() {
+            StoryBackground::Color(BACKGROUNDS[self.background])
+        } else {
+            let (a, b) = GRADIENTS[(self.background - BACKGROUNDS.len()).min(GRADIENTS.len() - 1)];
+            StoryBackground::Gradient { colors: vec![a, b], positions: vec![0., 1.], angle: 180 }
+        }
+    }
+
+    /// The text story as it'll go: its font, colors and background.
+    fn text_story(&self, text: String) -> TextStory {
+        let (foreground, text_background) = match self.text_style {
+            1 => (Some(0xff000000), None),
+            2 => (Some(0xff000000), Some(0xffffffff)),
+            3 => (Some(0xffffffff), Some(0xff000000)),
+            _ => (Some(0xffffffff), None),
+        };
+        TextStory { text, font: self.font, foreground, text_background, background: self.story_background(), ..Default::default() }
+    }
 }
 
 pub fn load(app: &App) {
@@ -262,7 +308,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 }
 
 fn new_composer(app: &mut App) {
-    app.panes.stories.composer = Some(Composer { text: String::new(), background: 0, media: None, targets: vec![StoryTarget::MyStory] });
+    app.panes.stories.composer = Some(Composer {
+        text: String::new(),
+        background: 0,
+        media: None,
+        targets: vec![StoryTarget::MyStory],
+        font: langis_store::StoryFont::Regular,
+        text_style: 0,
+        preview: None,
+        preview_for: None,
+        new_group: None,
+    });
 }
 
 /// Someone's (or a group's) row: opens their stories; its menu hides or
@@ -816,30 +872,93 @@ fn composer(app: &mut App, ui: &mut Ui) {
     let Some(mut c) = app.panes.stories.composer.take() else { return };
     let palette = Palette::of(ui.ctx());
     let mut answer = None;
-    let closed = modal(ui, "story-composer", 560., |ui| {
+    // A text story's first link gets its preview, as Desktop's does.
+    if c.media.is_none() {
+        let link = langis_core::link_preview::first_previewable(&c.text);
+        if link != c.preview_for {
+            c.preview = None;
+            c.preview_for = link.clone();
+            if let Some(url) = link {
+                app.send(Command::FetchLinkPreview { url });
+            }
+        }
+    }
+    let closed = modal(ui, "story-composer", 600., |ui| {
         title(ui, "New story");
         ui.horizontal(|ui| {
             // The preview, 9:16.
             let (rect, _) = ui.allocate_exact_size(Vec2::new(200., 356.), Sense::hover());
             match &c.media {
-                Some((_, _, name)) => {
+                Some((bytes, content_type, name)) => {
                     ui.painter().rect_filled(rect, CornerRadius::same(12), Color32::BLACK);
-                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, name, theme::regular(13.), Color32::WHITE);
+                    if content_type.starts_with("image/") {
+                        egui::Image::new(egui::ImageSource::Bytes { uri: format!("bytes://story-media/{name}").into(), bytes: bytes.to_vec().into() })
+                            .corner_radius(CornerRadius::same(12))
+                            .fit_to_exact_size(rect.size())
+                            .paint_at(ui, rect);
+                    } else {
+                        theme::paint_symbol(ui.painter(), "videocamera", rect.center() - Vec2::new(0., 14.), 28., Color32::WHITE);
+                        ui.painter().text(rect.center() + Vec2::new(0., 16.), egui::Align2::CENTER_CENTER, name, theme::regular(12.), Color32::WHITE);
+                    }
+                    if !c.text.is_empty() {
+                        let g = ui.painter().layout(c.text.clone(), theme::regular(12.), Color32::WHITE, rect.width() - 20.);
+                        let at = Pos2::new(rect.left() + 10., rect.bottom() - g.size().y - 10.);
+                        ui.painter().rect_filled(Rect::from_min_size(at - Vec2::splat(4.), g.size() + Vec2::splat(8.)), CornerRadius::same(6), Color32::from_black_alpha(120));
+                        ui.painter().galley(at, g, Color32::WHITE);
+                    }
                 }
                 None => {
-                    let story = TextStory { text: if c.text.is_empty() { "Add text".into() } else { c.text.clone() }, background: StoryBackground::Color(BACKGROUNDS[c.background]), ..Default::default() };
+                    let story = c.text_story(if c.text.is_empty() { "Add text".into() } else { c.text.clone() });
                     paint_text_story(ui, &story, rect);
+                    if let Some(p) = &c.preview {
+                        // The link's card at the bottom (Desktop's TextAttachment).
+                        let card = Rect::from_min_size(Pos2::new(rect.left() + 10., rect.bottom() - 62.), Vec2::new(rect.width() - 20., 52.));
+                        ui.painter().rect_filled(card, CornerRadius::same(8), Color32::from_white_alpha(230));
+                        let mut job = egui::text::LayoutJob::simple_singleline(p.title.clone(), theme::semibold(11.), Color32::BLACK);
+                        job.wrap = egui::text::TextWrapping::truncate_at_width(card.width() - 16.);
+                        let g = ui.fonts_mut(|f| f.layout_job(job));
+                        ui.painter().galley(card.min + Vec2::new(8., 8.), g, Color32::BLACK);
+                        let domain = p.url.split("://").nth(1).and_then(|r| r.split('/').next()).unwrap_or(&p.url).to_owned();
+                        ui.painter().text(card.min + Vec2::new(8., 28.), egui::Align2::LEFT_TOP, domain, theme::regular(10.), Color32::from_gray(90));
+                    }
                 }
             }
             ui.add_space(12.);
             ui.vertical(|ui| {
                 if c.media.is_none() {
-                    ui.add(egui::TextEdit::multiline(&mut c.text).hint_text("Add text").desired_rows(4).desired_width(300.));
+                    ui.add(egui::TextEdit::multiline(&mut c.text).hint_text("Add text").desired_rows(4).desired_width(340.));
                     ui.add_space(6.);
+                    // The font and text style buttons.
+                    ui.horizontal(|ui| {
+                        let font_name = match c.font {
+                            langis_store::StoryFont::Bold => "Bold",
+                            langis_store::StoryFont::Serif => "Serif",
+                            langis_store::StoryFont::Script => "Script",
+                            langis_store::StoryFont::Condensed => "Condensed",
+                            _ => "Regular",
+                        };
+                        if widgets::pill_button(ui, &format!("Font: {font_name}"), false).clicked() {
+                            let i = FONTS.iter().position(|f| *f == c.font).unwrap_or(0);
+                            c.font = FONTS[(i + 1) % FONTS.len()];
+                        }
+                        let style = ["White text", "Black text", "On white", "On black"][c.text_style % 4];
+                        if widgets::pill_button(ui, style, false).clicked() {
+                            c.text_style = (c.text_style + 1) % 4;
+                        }
+                    });
+                    ui.add_space(6.);
+                    // Solid colors, then gradients.
                     ui.horizontal_wrapped(|ui| {
-                        for (i, bg) in BACKGROUNDS.iter().enumerate() {
+                        for i in 0..BACKGROUNDS.len() + GRADIENTS.len() {
                             let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.), Sense::click());
-                            ui.painter().circle_filled(r.center(), 12., argb(*bg));
+                            if i < BACKGROUNDS.len() {
+                                ui.painter().circle_filled(r.center(), 12., argb(BACKGROUNDS[i]));
+                            } else {
+                                let (a, b) = GRADIENTS[i - BACKGROUNDS.len()];
+                                ui.painter().circle_filled(r.center(), 12., argb(a));
+                                let half = Rect::from_min_max(Pos2::new(r.left(), r.center().y), r.max);
+                                ui.painter().with_clip_rect(half).circle_filled(r.center(), 12., argb(b));
+                            }
                             if i == c.background {
                                 ui.painter().circle_stroke(r.center(), 13., Stroke::new(2., palette.text));
                             }
@@ -848,6 +967,9 @@ fn composer(app: &mut App, ui: &mut Ui) {
                             }
                         }
                     });
+                    if c.preview.is_some() && ui.link("Remove link preview").clicked() {
+                        c.preview = None;
+                    }
                 }
                 ui.add_space(6.);
                 if ui.link(if c.media.is_some() { "Use text instead" } else { "Choose a photo or video" }).clicked() {
@@ -870,29 +992,98 @@ fn composer(app: &mut App, ui: &mut Ui) {
                     }
                 }
                 if c.media.is_some() {
-                    ui.add(egui::TextEdit::singleline(&mut c.text).hint_text("Add a caption").desired_width(300.));
+                    ui.add(egui::TextEdit::singleline(&mut c.text).hint_text("Add a caption").desired_width(340.));
                 }
                 ui.add_space(10.);
-                ui.label(RichText::new("Send to").font(theme::semibold(13.)));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Send to").font(theme::semibold(13.)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Desktop's New group story.
+                        if ui.link("New group story").clicked() {
+                            c.new_group = Some((Vec::new(), String::new()));
+                        }
+                    });
+                });
+                // Groups offered: those added to stories (`Always`), and any
+                // with stories up now (`IfActive`), not removed (`Never`).
+                let modes = app.panes.stories.send_modes.clone();
+                let with_stories: Vec<ConversationId> = app.panes.stories.list.iter().filter_map(|s| s.group.clone()).collect();
+                let offered = |g: &langis_store::Conversation| match modes.iter().find(|(id, _)| *id == g.id).map(|(_, m)| *m) {
+                    Some(langis_store::StorySendMode::Always) => true,
+                    Some(langis_store::StorySendMode::Never) => false,
+                    _ => with_stories.contains(&g.id),
+                };
                 let mut options = vec![StoryTarget::MyStory];
                 options.extend(app.panes.stories.lists.iter().filter(|l| !l.is_my_story()).map(|l| StoryTarget::List(l.id.clone())));
-                options.extend(app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left).map(|g| StoryTarget::Group(g.id.clone())));
-                egui::ScrollArea::vertical().max_height(140.).show(ui, |ui| {
+                let groups: Vec<ConversationId> = app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left && offered(g)).map(|g| g.id.clone()).collect();
+                options.extend(groups.iter().cloned().map(StoryTarget::Group));
+                let mut remove: Option<ConversationId> = None;
+                egui::ScrollArea::vertical().max_height(150.).show(ui, |ui| {
                     for t in options {
-                        let mut on = c.targets.contains(&t);
-                        if ui.checkbox(&mut on, target_label(app, &t)).changed() {
-                            if on {
-                                c.targets.push(t);
-                            } else {
-                                c.targets.retain(|x| *x != t);
+                        ui.horizontal(|ui| {
+                            let mut on = c.targets.contains(&t);
+                            if ui.checkbox(&mut on, target_label(app, &t)).changed() {
+                                if on {
+                                    c.targets.push(t.clone());
+                                } else {
+                                    c.targets.retain(|x| *x != t);
+                                }
                             }
-                        }
+                            // Desktop's Remove group story.
+                            if let StoryTarget::Group(g) = &t
+                                && ui.small_button("Remove").on_hover_text("Remove this group story").clicked()
+                            {
+                                remove = Some(g.clone());
+                            }
+                        });
                     }
                 });
+                if let Some(g) = remove {
+                    app.send(Command::SetStorySendMode { groups: vec![g.clone()], mode: langis_store::StorySendMode::Never });
+                    c.targets.retain(|t| *t != StoryTarget::Group(g.clone()));
+                    app.panes.stories.send_modes.retain(|(id, _)| *id != g);
+                    app.panes.stories.send_modes.push((g, langis_store::StorySendMode::Never));
+                }
             });
         });
         answer = buttons(ui, &["Send story", "Cancel"]);
     });
+    // New group story: pick groups, added for stories from now on.
+    if let Some((mut picked, mut query)) = c.new_group.take() {
+        let mut done = None;
+        let closed_picker = modal(ui, "new-group-story", 380., |ui| {
+            title(ui, "New group story");
+            widgets::text_field(ui, &mut query, "Search groups", false);
+            ui.add_space(6.);
+            let q = query.trim().to_lowercase();
+            egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
+                for g in app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left && (q.is_empty() || g.title.to_lowercase().contains(&q))) {
+                    let mut on = picked.contains(&g.id);
+                    if ui.checkbox(&mut on, &g.title).changed() {
+                        if on {
+                            picked.push(g.id.clone());
+                        } else {
+                            picked.retain(|x| *x != g.id);
+                        }
+                    }
+                }
+            });
+            done = buttons(ui, &["Add", "Cancel"]);
+        });
+        match done {
+            Some(0) if !picked.is_empty() => {
+                app.send(Command::SetStorySendMode { groups: picked.clone(), mode: langis_store::StorySendMode::Always });
+                for g in picked {
+                    app.panes.stories.send_modes.retain(|(id, _)| *id != g);
+                    app.panes.stories.send_modes.push((g.clone(), langis_store::StorySendMode::Always));
+                    c.targets.push(StoryTarget::Group(g));
+                }
+            }
+            Some(_) => {}
+            None if closed_picker => {}
+            None => c.new_group = Some((picked, query)),
+        }
+    }
     match answer {
         Some(0) => {
             if c.targets.is_empty() || (c.media.is_none() && c.text.trim().is_empty()) {
@@ -900,11 +1091,11 @@ fn composer(app: &mut App, ui: &mut Ui) {
                 app.panes.stories.composer = Some(c);
                 return;
             }
-            let story = match c.media {
+            let story = match c.media.take() {
                 Some((bytes, content_type, _)) => OutgoingStory::Media { bytes, content_type, caption: c.text.trim().to_owned(), styles: Vec::new() },
                 None => {
-                    let text = TextStory { text: c.text.trim().to_owned(), background: StoryBackground::Color(BACKGROUNDS[c.background]), ..Default::default() };
-                    OutgoingStory::Text { story: Box::new(text), preview: None }
+                    let text = c.text_story(c.text.trim().to_owned());
+                    OutgoingStory::Text { story: Box::new(text), preview: c.preview.take() }
                 }
             };
             app.send(Command::PostStory { story, targets: c.targets });
