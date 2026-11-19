@@ -141,6 +141,9 @@ pub struct App {
     pub notify: (bool, String),
     /// Sounds, call notifications and the taskbar flash.
     pub sound: crate::sounds::Prefs,
+    /// Attachments downloading: (message id, index) to bytes received and
+    /// the total, from langis's DownloadProgress.
+    pub downloads: std::collections::HashMap<(i64, usize), (u64, u64)>,
     /// Each person's first visible profile badge, as image files for the
     /// light and dark themes (Desktop draws it on their avatar).
     pub badges: std::collections::HashMap<String, (Option<String>, Option<String>)>,
@@ -268,6 +271,7 @@ impl App {
             sound: Default::default(),
             last_tick: None,
             badges: Default::default(),
+            downloads: Default::default(),
             input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None, spell: true },
             unread_only: false,
             fun: Default::default(),
@@ -561,6 +565,13 @@ impl App {
             Event::MessageStickerPack { pack: Some((id, key)), .. } => {
                 self.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
                 self.fun.preview = Some((id, key, None));
+            }
+            Event::DownloadProgress { message_id, index, received, total } => {
+                if received == 0 {
+                    self.downloads.remove(&(message_id, index));
+                } else {
+                    self.downloads.insert((message_id, index), (received, total));
+                }
             }
             Event::LinkPreview { url, preview } => {
                 // The story composer's link, or the chat composer's.

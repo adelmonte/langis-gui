@@ -153,6 +153,8 @@ enum Action {
     Info(i64),
     /// Downloads every attachment of a message not here yet.
     FetchAll(i64),
+    /// Stops a download in progress.
+    CancelDownload { message_id: i64, index: usize },
     /// Opens a message's edit history.
     EditHistory(i64),
     /// A notice's button.
@@ -407,7 +409,16 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     for action in actions {
         match action {
             Action::Retry(message_id) => app.send_checked(id.clone(), PendingSend::Retry(message_id)),
-            Action::Fetch { message_id, index } => app.send(Command::FetchAttachment { message_id, index }),
+            Action::Fetch { message_id, index } => {
+                // Shown as downloading at once, before its first progress.
+                let size = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == message_id)).and_then(|m| m.attachments.get(index)).map(|a| a.size).unwrap_or(0);
+                app.downloads.insert((message_id, index), (0, size));
+                app.send(Command::FetchAttachment { message_id, index });
+            }
+            Action::CancelDownload { message_id, index } => {
+                app.downloads.remove(&(message_id, index));
+                app.send(Command::CancelDownload { message_id, index });
+            }
             Action::React { message_id, emoji, remove } => app.send(Command::React { message_id, emoji, remove }),
             Action::Reply(message_id) => {
                 if let Some(chat) = app.chat.as_mut() {
@@ -1356,11 +1367,16 @@ fn message(
             let r = |on: bool, v: u8| if on { v } else { 0 };
             let (l, rt, t, b) = (cell.left() < 1., cell.right() > bubble_w - 1., at_top && cell.top() < 1., media_only && cell.bottom() > h - 1.);
             let mr = CornerRadius { nw: r(l && t, radius.nw), ne: r(rt && t, radius.ne), sw: r(l && b, radius.sw), se: r(rt && b, radius.se) };
+            let loading = download_progress(ctx, m, *index, a);
             if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
-                match &a.local_path {
-                    Some(_) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
-                    None => actions.push(Action::Fetch { message_id: m.id, index: *index }),
+                match (&a.local_path, loading) {
+                    (Some(_), _) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
+                    (None, Some(_)) => actions.push(Action::CancelDownload { message_id: m.id, index: *index }),
+                    (None, None) => actions.push(Action::Fetch { message_id: m.id, index: *index }),
                 }
+            }
+            if let Some(done) = loading {
+                progress_ring(ui, rect.center(), done);
             }
             // The fifth of more than five says how many more.
             if k == 4 && images.len() > 5 {
@@ -1387,11 +1403,16 @@ fn message(
         let size = media_size(a, Some(bubble_w));
         let rect = Rect::from_min_size(Pos2::new(bubble.left(), y), Vec2::new(bubble_w, size.y));
         let mr = if media_only { radius } else if y <= bubble.top() + 1. { CornerRadius { nw: radius.nw, ne: radius.ne, sw: 0, se: 0 } } else { CornerRadius::ZERO };
+        let loading = download_progress(ctx, m, *index, a);
         if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
-            match &a.local_path {
-                Some(_) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
-                None => actions.push(Action::Fetch { message_id: m.id, index: *index }),
+            match (&a.local_path, loading) {
+                (Some(_), _) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
+                (None, Some(_)) => actions.push(Action::CancelDownload { message_id: m.id, index: *index }),
+                (None, None) => actions.push(Action::Fetch { message_id: m.id, index: *index }),
             }
+        }
+        if let Some(done) = loading {
+            progress_ring(ui, rect.center(), done);
         }
         y += size.y + 2.;
     }
@@ -1408,11 +1429,17 @@ fn message(
             continue;
         }
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., 44.));
+        let loading = download_progress(ctx, m, *index, a);
         if file_row(ui, palette, a, rect, in_color, meta_color, ui.scope_id().with(("file", m.id, *index))) {
-            match &a.local_path {
-                Some(path) => actions.push(Action::Open(path.clone())),
-                None => actions.push(Action::Fetch { message_id: m.id, index: *index }),
+            match (&a.local_path, loading) {
+                (Some(path), _) => actions.push(Action::Open(path.clone())),
+                (None, Some(_)) => actions.push(Action::CancelDownload { message_id: m.id, index: *index }),
+                (None, None) => actions.push(Action::Fetch { message_id: m.id, index: *index }),
             }
+        }
+        if let Some(done) = loading {
+            // Over the file's icon: the progress, and a click cancels.
+            progress_ring(ui, rect.min + Vec2::new(15., 22.), done);
         }
         y += 48.;
     }
@@ -1687,6 +1714,37 @@ fn media_size(a: &langis_store::AttachmentMeta, width: Option<f32>) -> Vec2 {
     };
     let target = width.unwrap_or((w as f32).clamp(200., 300.));
     Vec2::new(target, (target * h as f32 / w as f32).round().clamp(50., 450.))
+}
+
+/// How far attachment `index` of `m` has downloaded (0 to 1), while it is.
+fn download_progress(ctx: &Ctx<'_>, m: &Message, index: usize, a: &langis_store::AttachmentMeta) -> Option<f32> {
+    if a.local_path.is_some() {
+        return None;
+    }
+    let (received, total) = *ctx.app.downloads.get(&(m.id, index))?;
+    let total = if total > 0 { total } else { a.size };
+    Some(if total > 0 { (received as f32 / total as f32).clamp(0., 1.) } else { 0. })
+}
+
+/// Desktop's download spinner: a ring filling as it comes, an X to cancel.
+fn progress_ring(ui: &Ui, center: Pos2, done: f32) {
+    let r = 20.;
+    ui.painter().circle_filled(center, r + 4., Color32::from_black_alpha(160));
+    ui.painter().circle_stroke(center, r, Stroke::new(3., Color32::from_white_alpha(70)));
+    // The arc, from the top clockwise; turning while nothing's come yet.
+    let (start, sweep) = if done > 0. {
+        (-std::f32::consts::FRAC_PI_2, done * std::f32::consts::TAU)
+    } else {
+        let t = ui.input(|i| i.time) as f32;
+        (t * 4., 1.2)
+    };
+    let points: Vec<Pos2> = (0..=48).map(|k| {
+        let a = start + sweep * k as f32 / 48.;
+        center + Vec2::new(a.cos(), a.sin()) * r
+    }).collect();
+    ui.painter().add(egui::Shape::line(points, Stroke::new(3., Color32::WHITE)));
+    theme::paint_symbol(ui.painter(), "x", center, 16., Color32::WHITE);
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
 }
 
 /// Desktop's `ImageGrid` width: two 150px cells and the gap.
