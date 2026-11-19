@@ -40,6 +40,9 @@ pub struct ChatView {
     pub typing_refreshed: Option<Instant>,
     pub last_typed: Option<Instant>,
     pub emoji_open: bool,
+    /// The message picked with the keyboard (Desktop's selected message,
+    /// from Ctrl+J), which the message shortcuts act on.
+    pub kb_selected: Option<i64>,
     pub emoji: crate::emoji_picker::Picker,
     pub revealed: HashSet<i64>,
     /// Desktop's `displayLimit`: how much of a long message's text shows,
@@ -88,7 +91,7 @@ pub struct ChatView {
     /// Scrolled up from the bottom (for the jump-down button).
     pub scrolled_up: bool,
     /// Reload the newest page (the jump-down button, away from the end).
-    want_latest: bool,
+    pub want_latest: bool,
     /// A message to load around and jump to, once the frame is drawn.
     pending_jump: Option<i64>,
     /// The composer's formatting and mentions.
@@ -180,6 +183,7 @@ impl ChatView {
             typing_refreshed: None,
             last_typed: None,
             emoji_open: false,
+            kb_selected: None,
             emoji: Default::default(),
             revealed: HashSet::new(),
             expanded: HashMap::new(),
@@ -806,7 +810,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             crate::actions::Popup::Menu { message, .. } | crate::actions::Popup::Reactions { message, .. } => *message,
         });
         let selecting = chat.selected.is_some();
-        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting, expanded: &chat.expanded, pinned: chat.pinned.iter().map(|m| m.id).collect() };
+        let ctx = Ctx { app, palette, group, width, chat_id: &chat.id, menu_for, selecting, expanded: &chat.expanded, pinned: chat.pinned.iter().map(|m| m.id).collect(), kb_selected: chat.kb_selected };
         let messages = &chat.messages;
         let mut reached = None;
         let view_top = ui.clip_rect().top();
@@ -976,6 +980,8 @@ struct Ctx<'a> {
     expanded: &'a HashMap<i64, usize>,
     /// Pinned messages' ids: their time gets Desktop's pin mark.
     pinned: Vec<i64>,
+    /// The keyboard's selected message, drawn ringed.
+    kb_selected: Option<i64>,
 }
 
 /// The top of a chat's history: Desktop's `ConversationHero`.
@@ -1298,6 +1304,9 @@ fn message(
         crate::chat_colors::paint(ui.painter(), bubble, radius, crate::chat_colors::for_chat(ctx.app, ctx.chat_id), ui.ctx().content_rect());
     } else {
         ui.painter().rect_filled(bubble, radius, palette.bubble_in);
+    }
+    if ctx.kb_selected == Some(m.id) {
+        ui.painter().rect_stroke(bubble.expand(2.), radius, Stroke::new(2., palette.accent), egui::StrokeKind::Outside);
     }
     let mut y = bubble.top() + top_pad;
     let left = bubble.left() + pad.x;

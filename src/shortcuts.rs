@@ -30,6 +30,13 @@ const GUIDE: &[(&str, &[(&str, &[&str])])] = &[
             ("Focus composer", &["Ctrl", "Shift", "T"]),
             ("Open all media view", &["Ctrl", "Shift", "M"]),
             ("Open emoji chooser", &["Ctrl", "Shift", "J"]),
+            ("Open sticker chooser", &["Ctrl", "Shift", "O"]),
+            ("Open GIF chooser", &["Ctrl", "Shift", "G"]),
+            ("Begin recording voice note", &["Ctrl", "Shift", "Y"]),
+            ("Open chat menu", &["Ctrl", "Shift", "L"]),
+            ("Focus oldest unread or last message", &["Ctrl", "J"]),
+            ("Scroll to top of list", &["Ctrl", "↑"]),
+            ("Scroll to bottom of list", &["Ctrl", "↓"]),
             ("Archive chat", &["Ctrl", "Shift", "A"]),
             ("Unarchive chat", &["Ctrl", "Shift", "U"]),
             ("Close chat", &["Ctrl", "Shift", "C"]),
@@ -37,9 +44,26 @@ const GUIDE: &[(&str, &[(&str, &[&str])])] = &[
         ],
     ),
     (
+        "Message",
+        &[
+            ("Default action for selected message", &["Enter"]),
+            ("View selected message details", &["Ctrl", "D"]),
+            ("Toggle reply to selected message", &["Ctrl", "Shift", "R"]),
+            ("Toggle emoji-reaction picker for selected message", &["Ctrl", "Shift", "E"]),
+            ("Save attachment from selected message", &["Ctrl", "S"]),
+            ("Delete selected messages", &["Ctrl", "Shift", "D"]),
+            ("Forward selected messages", &["Ctrl", "Shift", "S"]),
+        ],
+    ),
+    (
         "Composer",
         &[
             ("Add newline to message", &["Shift", "Enter"]),
+            ("Expand composer", &["Ctrl", "Shift", "K"]),
+            ("Send (in expanded composer)", &["Ctrl", "Enter"]),
+            ("Attach file", &["Ctrl", "U"]),
+            ("Remove draft link preview", &["Ctrl", "P"]),
+            ("Remove all draft attachments", &["Ctrl", "Shift", "P"]),
             ("Edit last message", &["↑"]),
             ("Bold text", &["Ctrl", "B"]),
             ("Italicize text", &["Ctrl", "I"]),
@@ -53,6 +77,7 @@ const GUIDE: &[(&str, &[(&str, &[&str])])] = &[
         &[
             ("Mute and unmute", &["Shift", "M"]),
             ("Turn camera on and off", &["Shift", "V"]),
+            ("Start or stop presenting", &["Shift", "P"]),
             ("Raise or lower hand", &["Shift", "H"]),
             ("Accept call with video", &["Alt", "Shift", "V"]),
             ("Accept call without video", &["Alt", "Shift", "A"]),
@@ -126,6 +151,13 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
                     app.call_view.video_on = Some(on);
                     app.send(Command::SetCallVideo(on));
                 }
+                if pressed(ctx, Modifiers::SHIFT, Key::P) && app.share_available == Some(true) {
+                    if call.sharing {
+                        app.send(Command::StopSharing);
+                    } else {
+                        app.send(Command::StartSharing { source: langis_core::PORTAL_SOURCE.into() });
+                    }
+                }
                 if call.group && pressed(ctx, Modifiers::SHIFT, Key::H) {
                     let raised = call.local_demux_id.is_some_and(|d| call.raised_hands.contains(&d));
                     app.send(Command::RaiseHand(!raised));
@@ -196,6 +228,124 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     }
     if pressed(ctx, CTRL_SHIFT, Key::C) {
         app.close_chat();
+        return;
+    }
+    // The fun picker's tabs, and a voice note.
+    for (key, tab) in [(Key::O, crate::fun::Tab::Stickers), (Key::G, crate::fun::Tab::Gifs)] {
+        if pressed(ctx, CTRL_SHIFT, key)
+            && let Some(chat) = app.chat.as_mut()
+        {
+            chat.emoji_open = true;
+            app.fun.tab = tab;
+        }
+    }
+    if pressed(ctx, CTRL_SHIFT, Key::Y)
+        && let Some(mut chat) = app.chat.take()
+    {
+        crate::voice::start(app, &mut chat);
+        app.chat = Some(chat);
+    }
+    if pressed(ctx, CTRL_SHIFT, Key::L) {
+        let at = ctx.content_rect().right_top() + egui::vec2(-240., 52.);
+        crate::menu::open_at(ctx, egui::Id::unique("chat-header-menu"), at);
+    }
+    if pressed(ctx, CTRL, Key::U)
+        && let Some(mut chat) = app.chat.take()
+    {
+        crate::composer::attach_file(app, &mut chat);
+        app.chat = Some(chat);
+    }
+    // The viewer has its own keys (Ctrl+S saves what it shows).
+    if app.lightbox.is_some() {
+        return;
+    }
+    let Some(chat) = app.chat.as_mut() else { return };
+    if pressed(ctx, CTRL, Key::P) {
+        crate::composer::remove_preview(chat);
+    }
+    if pressed(ctx, CTRL_SHIFT, Key::P) {
+        chat.staged.clear();
+        chat.view_once = false;
+    }
+    // Ctrl+Up and Ctrl+Down: the top and bottom of the timeline.
+    if pressed(ctx, CTRL, Key::ArrowUp)
+        && let Some(first) = chat.messages.first()
+    {
+        chat.scroll_target = Some(first.id);
+    }
+    if pressed(ctx, CTRL, Key::ArrowDown) {
+        if chat.at_end {
+            chat.scroll_to_bottom = 10;
+        } else {
+            chat.want_latest = true;
+        }
+    }
+    // Desktop's selected message: Ctrl+J picks the oldest unread one (or
+    // the last), the arrows move it while nothing takes typing.
+    if pressed(ctx, CTRL, Key::J) {
+        let unread = app.conversation(&id).map(|c| c.unread_count).unwrap_or(0) as usize;
+        let chat = app.chat.as_mut().unwrap();
+        let incoming: Vec<i64> = chat.messages.iter().filter(|m| m.direction == langis_store::Direction::Incoming && m.notice.is_none()).map(|m| m.id).collect();
+        let pick = if unread > 0 && unread <= incoming.len() { incoming.get(incoming.len() - unread).copied() } else { chat.messages.iter().rev().find(|m| m.notice.is_none()).map(|m| m.id) };
+        chat.kb_selected = pick;
+        chat.scroll_target = pick;
+        ctx.memory_mut(|m| m.surrender_focus(crate::composer::input_id(&id)));
+    }
+    let Some(chat) = app.chat.as_mut() else { return };
+    let Some(selected) = chat.kb_selected else { return };
+    let typing = ctx.memory(|m| m.focused().is_some());
+    if !typing {
+        for (key, step) in [(Key::ArrowUp, -1i64), (Key::ArrowDown, 1)] {
+            if pressed(ctx, Modifiers::NONE, key) {
+                let list: Vec<i64> = chat.messages.iter().filter(|m| m.notice.is_none()).map(|m| m.id).collect();
+                if let Some(i) = list.iter().position(|m| *m == selected) {
+                    let to = (i as i64 + step).clamp(0, list.len() as i64 - 1) as usize;
+                    chat.kb_selected = Some(list[to]);
+                    chat.scroll_target = Some(list[to]);
+                }
+            }
+        }
+        if pressed(ctx, Modifiers::NONE, Key::Escape) && chat.popup.is_none() && chat.dialog.is_none() {
+            chat.kb_selected = None;
+            return;
+        }
+    }
+    let Some(m) = chat.messages.iter().find(|m| m.id == selected).cloned() else { return };
+    if !typing && pressed(ctx, Modifiers::NONE, Key::Enter) {
+        // The default action: a photo or video opens in the viewer.
+        if let Some(index) = m.attachments.iter().position(|a| !a.sticker && a.local_path.is_some() && (a.content_type.starts_with("image/") || a.content_type.starts_with("video/"))) {
+            app.open_lightbox(&m, index);
+            return;
+        }
+    }
+    let chat = app.chat.as_mut().unwrap();
+    if pressed(ctx, CTRL, Key::D) {
+        crate::actions::load_details(app, m.id);
+        if let Some(chat) = app.chat.as_mut() {
+            chat.dialog = Some(crate::actions::Dialog::Info { message: m.id, details: None });
+        }
+        return;
+    }
+    if pressed(ctx, CTRL_SHIFT, Key::R) {
+        chat.quote = if chat.quote == Some(m.id) { None } else { Some(m.id) };
+        ctx.memory_mut(|mem| mem.request_focus(crate::composer::input_id(&id)));
+    }
+    if pressed(ctx, CTRL_SHIFT, Key::E) {
+        chat.popup = match chat.popup {
+            Some(crate::actions::Popup::Reactions { message, .. }) if message == m.id => None,
+            _ => Some(crate::actions::Popup::Reactions { message: m.id, at: ctx.content_rect().center(), full: false, picker: Default::default() }),
+        };
+    }
+    if pressed(ctx, CTRL_SHIFT, Key::D) {
+        chat.dialog = Some(crate::actions::Dialog::Delete { messages: vec![m.id] });
+    }
+    if pressed(ctx, CTRL_SHIFT, Key::S) && crate::actions::can_forward(&m) {
+        chat.dialog = Some(crate::actions::Dialog::Forward { messages: vec![m.id], query: String::new(), chosen: Vec::new() });
+    }
+    if pressed(ctx, CTRL, Key::S)
+        && let Some(index) = m.attachments.iter().position(|a| !a.sticker)
+    {
+        crate::actions::save_attachment(app, &m, index);
     }
 }
 

@@ -651,6 +651,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             chat.emoji_open = !chat.emoji_open;
         }
         ui.add_space(4. + 6.);
+        let large = chat.composer_large;
         let spans = chat.spans.clone();
         let pal = *palette;
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| layout(ui, text.as_str(), &spans, &pal, wrap);
@@ -675,7 +676,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                             .desired_width(width - 24.)
                             .font(theme::regular(14.))
                             .layouter(&mut layouter)
-                            .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
+                            .return_key(if large { egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Enter) } else { egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter) })
                             .id(id),
                     )
                 })
@@ -734,7 +735,10 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             chat.spans.follow(&chat.composer);
             set_cursor(ui.ctx(), id, start_char + emoji.glyph.chars().count());
         }
-        if response.has_focus() && picked_mention.is_none() && picked_emoji.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) {
+        // In the large composer Enter is a new line and Ctrl+Enter sends
+        // (Desktop's "Send (in expanded composer)").
+        let send_key = if chat.composer_large { ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command) } else { ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) };
+        if response.has_focus() && picked_mention.is_none() && picked_emoji.is_none() && send_key {
             send = true;
         }
         if !response.has_focus() && app.safety.is_none() && app.lightbox.is_none() && chat.dialog.is_none() && ui.memory(|m| m.focused().is_none()) {
@@ -1021,6 +1025,20 @@ impl Staged {
 const MAX_STAGED: usize = 32;
 
 /// Picks files to add to the message.
+/// Ctrl+U: Desktop's Attach file.
+pub fn attach_file(app: &mut App, chat: &mut ChatView) {
+    attach(app, chat, false);
+}
+
+/// Ctrl+P: Desktop's Remove draft link preview.
+pub fn remove_preview(chat: &mut ChatView) {
+    if let Some(url) = chat.preview.url.clone() {
+        chat.preview.dismissed.insert(url);
+    }
+    chat.preview.url = None;
+    chat.preview.draft = None;
+}
+
 fn attach(app: &mut App, chat: &mut ChatView, media: bool) {
     let mut dialog = rfd::FileDialog::new().set_title("Add attachment");
     if media {
