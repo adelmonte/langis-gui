@@ -2019,7 +2019,7 @@ fn select_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
                 chat.selected = None;
             }
             let forwardable = !chosen.is_empty()
-                && chosen.iter().all(|id| chat.messages.iter().find(|m| m.id == *id).is_some_and(|m| !m.deleted && m.view_once.is_none() && m.poll.is_none() && m.notice.is_none()));
+                && chosen.iter().all(|id| chat.messages.iter().find(|m| m.id == *id).is_some_and(crate::actions::can_forward));
             if button(ui, rect.right() - 4. - 22., "forward", "Forward selected messages", forwardable) {
                 if chosen.len() > 30 {
                     app.toast("You can only forward up to 30 messages");

@@ -143,11 +143,23 @@ fn offers(app: &App, m: &Message, c: &langis_store::Conversation, pinned: bool) 
         react: !m.deleted && can_send,
         edit: can_send && langis_core::edits::can_edit(m, note_to_self, now),
         copy: usable && !m.body.is_empty() && m.poll.is_none(),
-        forward: usable && m.poll.is_none() && (!m.body.is_empty() || !m.attachments.is_empty()),
+        forward: can_forward(m),
         pin: (usable && can_send && m.notice.is_none()).then_some(pinned),
         retry_delete: failed_delete,
         delete: true,
     }
+}
+
+/// Whether langis will forward `m` (its rule in `Command::Forward`, after
+/// Desktop's `canForward`): not deleted, a poll, view-once or a notice, and
+/// every attachment downloaded and not a sticker.
+pub fn can_forward(m: &Message) -> bool {
+    !m.deleted
+        && m.view_once.is_none()
+        && m.poll.is_none()
+        && m.notice.is_none()
+        && m.attachments.iter().all(|a| a.local_path.is_some() && !a.sticker)
+        && (!m.body.is_empty() || !m.attachments.is_empty())
 }
 
 /// Draws the open popup, if any; returns what it asked for.
@@ -545,8 +557,14 @@ pub fn load_details(app: &App, message: i64) {
     });
 }
 
-/// Saves attachment `index` of `m` where the user picks.
+/// Saves attachment `index` of `m` where the user picks; with several,
+/// saves them all into a folder and starts every missing download, as
+/// Desktop's `TimelineMessage` Download does.
 pub fn save_attachment(app: &mut App, m: &Message, index: usize) {
+    let files: Vec<&langis_store::AttachmentMeta> = m.attachments.iter().filter(|a| !a.sticker).collect();
+    if files.len() > 1 {
+        return save_all(app, m, &files);
+    }
     let Some(a) = m.attachments.get(index) else { return };
     let Some(path) = a.local_path.clone() else {
         app.send(Command::FetchAttachment { message_id: m.id, index });
@@ -560,4 +578,37 @@ pub fn save_attachment(app: &mut App, m: &Message, index: usize) {
         Ok(_) => app.toast(format!("Saved to {}", target.display())),
         Err(error) => app.toast(format!("Couldn't save: {error}")),
     }
+}
+
+fn save_all(app: &mut App, m: &Message, files: &[&langis_store::AttachmentMeta]) {
+    let missing = files.iter().filter(|a| a.local_path.is_none()).count();
+    if missing > 0 {
+        app.send(Command::FetchAttachments { message_id: m.id });
+    }
+    let here: Vec<_> = files.iter().filter_map(|a| a.local_path.as_ref().map(|p| (a, p))).collect();
+    if here.is_empty() {
+        app.toast("Downloading. Save them again once they're here.");
+        return;
+    }
+    let Some(folder) = rfd::FileDialog::new().set_title("Save to folder").pick_folder() else { return };
+    let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
+    let mut saved = 0;
+    for (n, (a, path)) in here.iter().enumerate() {
+        let ext = crate::chat::extension_for(&a.content_type);
+        let name = a.file_name.clone().unwrap_or_else(|| format!("signal-{stamp}-{}.{ext}", n + 1));
+        // Never overwrite: number a name that's taken.
+        let mut target = folder.join(&name);
+        let mut k = 1;
+        while target.exists() {
+            let stem = std::path::Path::new(&name).file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_owned();
+            let ext = std::path::Path::new(&name).extension().and_then(|s| s.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+            target = folder.join(format!("{stem} ({k}){ext}"));
+            k += 1;
+        }
+        if std::fs::copy(path, &target).is_ok() {
+            saved += 1;
+        }
+    }
+    let note = if missing > 0 { format!("; {missing} still downloading") } else { String::new() };
+    app.toast(format!("Saved {saved} of {} to {}{note}", files.len(), folder.display()));
 }
