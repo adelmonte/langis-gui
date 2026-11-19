@@ -716,6 +716,10 @@ impl App {
             self.load(move |db| async move { db.display_names(&members).await.ok().map(Loaded::Names) });
         }
         self.load_pinned(id.clone());
+        // Whether its group has a call going, for the call notices' Join.
+        if self.conversation(&id).is_some_and(|c| c.kind == langis_store::ConversationKind::Group) {
+            self.send(Command::PeekGroupCall { conversation: id.clone() });
+        }
         // Unread mentions are read before the chat is marked read, so its @
         // button has them.
         let me = self.aci.clone();

@@ -34,6 +34,8 @@ pub enum Dialog {
     PollVotes { message: i64 },
     /// Desktop's `EditHistoryMessagesModal`: every version, newest first.
     EditHistory { message: i64, details: Option<Details> },
+    /// A notice's Learn more: what it means.
+    Explain { title: &'static str, body: &'static str },
     /// Desktop's `CustomizingPreferredReactionsModal`: the reaction bar's
     /// six, one picked to change from the emoji picker.
     Reactions { slots: Vec<String>, selected: Option<usize>, picker: crate::emoji_picker::Picker },
@@ -454,6 +456,13 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 crate::polls::dialog(ui, &palette, poll, &c.id, &mut out);
             });
             if modal.should_close() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::Explain { title, body } => {
+            let (title, body) = (*title, *body);
+            if let Some(answer) = crate::dialog::show(ui.ctx(), egui::Id::unique("notice-explain"), title, body, None, &[("OK", crate::dialog::Variant::StrongPrimary)]) {
+                let _ = answer;
                 out.push(Do::Close);
             }
         }

@@ -63,6 +63,8 @@ pub struct Panes {
     /// A chat waiting on "Delete chat?", and whether we're still in it.
     pub delete_chat: Option<(ConversationId, bool)>,
     pub menu_for: Option<ConversationId>,
+    /// Who's in each group's call, from its last peek (empty: no call).
+    pub active_calls: std::collections::HashMap<ConversationId, Vec<String>>,
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
@@ -143,8 +145,9 @@ pub fn on_event(app: &mut App, event: Event) {
         }
         Event::GroupPeek { conversation, users } => {
             if let Some(lobby) = app.panes.lobby.as_mut().filter(|l| l.conversation == conversation) {
-                lobby.users = users;
+                lobby.users = users.clone();
             }
+            app.panes.active_calls.insert(conversation, users);
         }
         Event::CallReactions(list) => {
             let now = Instant::now();

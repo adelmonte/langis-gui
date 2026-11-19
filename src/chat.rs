@@ -144,6 +144,8 @@ enum Action {
     Info(i64),
     /// Opens a message's edit history.
     EditHistory(i64),
+    /// A notice's button.
+    Notice(NoticeButton),
     /// Show a photo or video in the viewer.
     Lightbox { message_id: i64, index: usize },
     Vote { message_id: i64, options: Vec<u32> },
@@ -435,6 +437,25 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             Action::FetchLongText(message_id) => app.send(Command::FetchLongText { message_id }),
             Action::Jump(message_id) => app.open_at(id.clone(), message_id),
+            Action::Notice(button) => match button {
+                NoticeButton::Call { video } => app.send(Command::StartCall { conversation: id.clone(), video }),
+                NoticeButton::Join => crate::panes::open_lobby(app, id.clone(), true),
+                NoticeButton::Safety(who) => crate::details::open_safety(app, ConversationId::direct(&who)),
+                NoticeButton::Go { author, sent_at } => {
+                    let conversation = id.clone();
+                    app.load(move |db| async move {
+                        match db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten() {
+                            Some(m) => Some(crate::app::Loaded::Chat(ChatLoaded::Jump { conversation, message_id: m.id })),
+                            None => Some(crate::app::Loaded::Apply(Box::new(|app: &mut App| app.toast("That message is no longer here")))),
+                        }
+                    });
+                }
+                NoticeButton::Explain(title, body) => {
+                    if let Some(chat) = app.chat.as_mut() {
+                        chat.dialog = Some(crate::actions::Dialog::Explain { title, body });
+                    }
+                }
+            },
             Action::EditHistory(message_id) => {
                 crate::actions::load_details(app, message_id);
                 if let Some(chat) = app.chat.as_mut() {
@@ -956,10 +977,19 @@ fn message(
     let palette = ctx.palette;
     if let Some(notice) = &m.notice {
         let text = crate::notices::notice_text(notice, |sid| ctx.app.name(sid));
+        let button = notice_button(ctx, m, notice);
         ui.add_space(10.);
         ui.vertical_centered(|ui| {
             ui.set_max_width((ctx.width - 80.).max(200.));
             ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
+            if let Some((label, action)) = button
+                && !ctx.selecting
+            {
+                ui.add_space(6.);
+                if widgets::pill_button(ui, label, false).clicked() {
+                    actions.push(Action::Notice(action));
+                }
+            }
         });
         ui.add_space(10.);
         return None;
@@ -2102,6 +2132,54 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
 }
 
 /// Desktop's typing bubble: three dots pulsing in an incoming bubble.
+/// What a notice's button does (Desktop's `CallingNotification`,
+/// `SafetyNumberNotification`, `PollTerminateNotification`,
+/// `PinnedMessageNotification`, `ChatSessionRefreshedNotification`,
+/// `DeliveryIssueNotification`).
+#[derive(Clone)]
+pub enum NoticeButton {
+    Call { video: bool },
+    Join,
+    Safety(String),
+    Go { author: Option<String>, sent_at: i64 },
+    Explain(&'static str, &'static str),
+}
+
+fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> Option<(&'static str, NoticeButton)> {
+    use langis_store::{CallOutcome, Notice};
+    match notice {
+        Notice::Call { incoming, video, outcome, .. } if !ctx.group => {
+            let label = if *incoming && *outcome == CallOutcome::Missed { "Call back" } else { "Call again" };
+            Some((label, NoticeButton::Call { video: *video }))
+        }
+        // While the group's call goes on: Join, or Return when we're in it.
+        Notice::GroupCall { .. } => {
+            let going = ctx.app.panes.active_calls.get(ctx.chat_id).is_some_and(|u| !u.is_empty());
+            let latest = ctx.app.chat.as_ref().is_none_or(|c| !c.messages.iter().any(|o| o.sent_at > m.sent_at && matches!(o.notice, Some(Notice::GroupCall { .. }))));
+            let ours = ctx.app.call.as_ref().is_some_and(|c| c.conversation == *ctx.chat_id);
+            (going && latest && !ours).then_some(("Join", NoticeButton::Join))
+        }
+        Notice::SafetyNumberChanged { who } => Some(("View safety number", NoticeButton::Safety(who.clone()))),
+        Notice::PollEnded { by, sent_at, .. } => Some(("View poll", NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
+        Notice::Pinned { author, sent_at, .. } => Some(("Go to message", NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),
+        Notice::SessionRefreshed => Some((
+            "Learn more",
+            NoticeButton::Explain(
+                "Chat session refreshed",
+                "Signal encrypts each message with keys that change as you chat. One of them couldn't be used, so the session was reset; a message from them may not have arrived. Ask them to send it again if something is missing.",
+            ),
+        )),
+        Notice::DeliveryIssue { .. } => Some((
+            "Learn more",
+            NoticeButton::Explain(
+                "Delivery issue",
+                "A message, sticker, reaction or receipt they sent couldn't be decrypted, and it won't be sent again. They can resend it if it mattered.",
+            ),
+        )),
+        _ => None,
+    }
+}
+
 /// The line under an outgoing bubble that didn't fully go, in Desktop's
 /// words (`MessageMetadata`), and what clicking it does.
 fn status_line(m: &Message) -> Option<(&'static str, Option<Action>)> {
