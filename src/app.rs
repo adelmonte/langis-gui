@@ -141,6 +141,8 @@ pub struct App {
     pub notify: (bool, String),
     /// Sounds, call notifications and the taskbar flash.
     pub sound: crate::sounds::Prefs,
+    /// The composer's settings (Settings, Chats, Text input).
+    pub input: InputPrefs,
     /// Desktop's collapsed nav tabs: the toggle moves into the list header.
     pub nav_collapsed: bool,
     momentum: crate::scroll::Momentum,
@@ -173,6 +175,16 @@ pub struct App {
     pub recent_emoji: Vec<String>,
     /// Stickers, GIFs and the sticker manager.
     pub fun: crate::fun::Fun,
+}
+
+/// The composer's settings.
+#[derive(Clone, Copy, Debug)]
+pub struct InputPrefs {
+    /// Desktop's "Convert typed emoticons to emoji".
+    pub auto_convert: bool,
+    /// The selection's formatting toolbar.
+    pub formatting: bool,
+    pub skin_tone: Option<langis_emoji::SkinTone>,
 }
 
 impl App {
@@ -247,6 +259,7 @@ impl App {
             recent_emoji: Vec::new(),
             unread_mentions: Default::default(),
             sound: Default::default(),
+            input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None },
             unread_only: false,
             fun: Default::default(),
         };
@@ -408,6 +421,17 @@ impl App {
                 self.load_reactions();
                 self.load_link_previews();
                 self.load_recent_emoji();
+                self.load(|db| async move {
+                    let get = |v: Option<String>| v.map(|v| v == "true");
+                    let auto_convert = get(db.setting(crate::settings::SETTING_AUTO_CONVERT_EMOJI).await.ok().flatten()).unwrap_or(true);
+                    let formatting = get(db.setting(crate::settings::SETTING_TEXT_FORMATTING).await.ok().flatten()).unwrap_or(true);
+                    let tone = db.setting(crate::settings::SETTING_SKIN_TONE).await.ok().flatten().and_then(|v| v.parse::<usize>().ok()).filter(|i| (1..=5).contains(i));
+                    let skin_tone = tone.map(|i| langis_emoji::SkinTone::ALL[i - 1]);
+                    Some(Loaded::Apply(Box::new(move |app: &mut App| {
+                        app.input = InputPrefs { auto_convert, formatting, skin_tone };
+                        crate::emoji_picker::set_skin_tone(skin_tone);
+                    })))
+                });
                 self.load(|db| async move {
                     let saved = db.setting("ui.recent_gifs").await.ok().flatten()?;
                     let gifs = crate::fun::parse_recent_gifs(&saved);

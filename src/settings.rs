@@ -16,6 +16,9 @@ use crate::widgets;
 
 /// Ours: whether to show desktop notifications (on unless "false").
 pub const SETTING_NOTIFICATIONS: &str = "ui.notifications";
+pub const SETTING_AUTO_CONVERT_EMOJI: &str = "ui.auto_convert_emoji";
+pub const SETTING_TEXT_FORMATTING: &str = "ui.text_formatting";
+pub const SETTING_SKIN_TONE: &str = "ui.skin_tone";
 /// Ours: what notifications show: "all", "name" or "none".
 pub const SETTING_NOTIFICATION_CONTENT: &str = "ui.notification_content";
 /// Desktop's `navTabsCollapsed`: the nav tabs hidden, "true" or unset.
@@ -96,6 +99,9 @@ pub struct Snapshot {
     pub contacts_synced_at: Option<i64>,
     pub stories_disabled: bool,
     pub username: Option<String>,
+    /// langis's image optimization (`max`, `fast` or `off`) and Giphy key.
+    pub optimization: String,
+    pub giphy_key: String,
 }
 
 /// A question the page is asking.
@@ -162,6 +168,8 @@ fn load(app: &App) {
             contacts_synced_at: get(langis_core::SETTING_CONTACTS_SYNCED_AT).await.and_then(|v| v.parse().ok()),
             stories_disabled: langis_core::setting_on(get(langis_core::SETTING_STORIES_DISABLED).await.as_deref()),
             username: None,
+            optimization: get(langis_core::SETTING_IMAGE_OPTIMIZATION).await.unwrap_or_else(|| "max".into()),
+            giphy_key: get(langis_core::SETTING_GIPHY_API_KEY).await.unwrap_or_default(),
         };
         Some(Loaded::Settings(Box::new(snapshot)))
     });
@@ -442,6 +450,53 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::gap(ui);
     axo_list::list(ui, Some("Text input"), None, |ui| {
         account_switch(app, ui, s, AccountSetting::LinkPreviews, Item::new("Generate link previews").description("Retrieve link previews directly from websites for messages you send."));
+        // Desktop's text input rows, kept as `ui.` settings.
+        let mut convert = app.input.auto_convert;
+        if axo_list::switch(ui, Item::new("Convert typed emoticons to emoji").description("For example, :-) will be converted to 🙂"), &mut convert) {
+            app.input.auto_convert = convert;
+            write(app, SETTING_AUTO_CONVERT_EMOJI, convert.to_string());
+        }
+        let mut formatting = app.input.formatting;
+        if axo_list::switch(ui, Item::new("Text formatting").description("Show the formatting toolbar when text is selected"), &mut formatting) {
+            app.input.formatting = formatting;
+            write(app, SETTING_TEXT_FORMATTING, formatting.to_string());
+        }
+        let tones = ["Default", "Light", "Medium light", "Medium", "Medium dark", "Dark"];
+        let chosen = app.input.skin_tone.map(|t| langis_emoji::SkinTone::ALL.iter().position(|x| *x == t).unwrap_or(0) + 1).unwrap_or(0);
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("skin-tone"), Item::new("Default emoji skin tone"), &tones, Some(chosen)) {
+            app.input.skin_tone = (i > 0).then(|| langis_emoji::SkinTone::ALL[i - 1]);
+            crate::emoji_picker::set_skin_tone(app.input.skin_tone);
+            write(app, SETTING_SKIN_TONE, i.to_string());
+        }
+    });
+    // Images are shrunk without loss before sending; how hard is the choice
+    // here (Desktop's "Sent media quality" is the nearest).
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Media"), None, |ui| {
+        let levels = ["max", "fast", "off"];
+        let chosen = levels.iter().position(|l| *l == s.optimization).or(Some(0));
+        let item = Item::new("Sent image optimization").description("Every level keeps the picture as it is and removes its metadata; smaller takes longer");
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("optimization"), item, &["Smallest", "Faster", "Off"], chosen) {
+            app.send(Command::SetLocalSetting(langis_core::LocalSetting::ImageOptimization(langis_core::media::Optimization::from_setting(Some(levels[i])))));
+            app.settings.stale = true;
+        }
+    });
+    // GIF search needs your own Giphy key.
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("GIFs"), Some("Get a key at developers.giphy.com. Without one, GIF search is off."), |ui| {
+        let id = egui::Id::unique("settings").with("giphy-key");
+        let mut key = ui.ctx().data_mut(|d| d.get_temp_mut_or_insert_with(id, || s.giphy_key.clone()).clone());
+        ui.horizontal(|ui| {
+            ui.add_space(12.);
+            ui.set_width(ui.available_width() - 12.);
+            let r = widgets::text_field(ui, &mut key, "Giphy API key", true);
+            if r.lost_focus() && key.trim() != s.giphy_key {
+                app.send(Command::SetLocalSetting(langis_core::LocalSetting::GiphyKey(key.clone())));
+                app.settings.stale = true;
+                app.toast("Giphy key saved.");
+            }
+        });
+        ui.ctx().data_mut(|d| d.insert_temp(id, key));
     });
     axo_list::gap(ui);
     let count = app.panes.folders.iter().filter(|f| f.folder_type == langis_store::ChatFolderType::Custom).count();

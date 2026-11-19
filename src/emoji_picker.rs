@@ -6,6 +6,17 @@ use langis_emoji::Group;
 
 use crate::theme::{self, Palette};
 
+/// Desktop's default skin tone (Settings, Chats), for emoji that take one.
+static SKIN_TONE: std::sync::Mutex<Option<langis_emoji::SkinTone>> = std::sync::Mutex::new(None);
+
+pub fn set_skin_tone(tone: Option<langis_emoji::SkinTone>) {
+    *SKIN_TONE.lock().unwrap() = tone;
+}
+
+pub fn skin_tone() -> Option<langis_emoji::SkinTone> {
+    *SKIN_TONE.lock().unwrap()
+}
+
 #[derive(Default)]
 pub struct Picker {
     query: String,
@@ -46,14 +57,16 @@ impl Picker {
             for row in emoji.chunks(COLUMNS) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.;
+                    let tone = skin_tone();
                     for e in row {
                         let (rect, r) = ui.allocate_exact_size(Vec2::splat(CELL), Sense::click());
                         if r.hovered() {
                             ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                         }
-                        ui.painter().text(rect.center(), Align2::CENTER_CENTER, e.glyph, theme::emoji(24.), palette.text);
+                        let glyph = if e.supports_skin_tones() { e.glyph_with(tone) } else { e.glyph };
+                        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, theme::emoji(24.), palette.text);
                         if r.on_hover_text(e.shortcode().map(|s| format!(":{s}:")).unwrap_or_default()).clicked() {
-                            picked = Some(e.glyph);
+                            picked = Some(glyph);
                         }
                     }
                 });

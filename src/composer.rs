@@ -713,6 +713,17 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                 app.send(Command::Typing { conversation: c.id.clone(), started: true });
             }
         }
+        // Typed emoticons like :-) turn into emoji, when that's on.
+        if response.changed()
+            && app.input.auto_convert
+            && let Some(c) = egui::TextEdit::load_state(ui.ctx(), id).and_then(|s| s.cursor.char_range()).map(|r| byte_of(&chat.composer, r.primary.index.0))
+            && let Some((range, emoji)) = langis_emoji::emoticon_replacement_at(&chat.composer, c)
+        {
+            let start_char = chat.composer[..range.start].chars().count();
+            chat.composer.replace_range(range, emoji.glyph);
+            chat.spans.follow(&chat.composer);
+            set_cursor(ui.ctx(), id, start_char + emoji.glyph.chars().count());
+        }
         // A complete `:shortcode:` turns into its emoji as it's typed.
         if response.changed()
             && let Some(c) = egui::TextEdit::load_state(ui.ctx(), id).and_then(|s| s.cursor.char_range()).map(|r| byte_of(&chat.composer, r.primary.index.0))
@@ -828,7 +839,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
     }
 
     // The selection's formatting toolbar.
-    if focused && !selection.is_empty() && mention_query(&chat.composer, cursor).is_none() {
+    if app.input.formatting && focused && !selection.is_empty() && mention_query(&chat.composer, cursor).is_none() {
         let at = Pos2::new(input_rect.left() + 8., input_rect.top() - 52.);
         let spans = chat.spans.clone();
         crate::actions::popover(ui.ctx(), "formatting", at, 5. * 36. + 8., Some(input_rect), |ui| {
