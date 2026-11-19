@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use egui::{RichText, Ui};
+use egui::{Color32, CornerRadius, RichText, Sense, Ui};
 use langis_core::Command;
 use langis_core::profiles::{AvatarChange, ProfileEdit};
 use langis_core::usernames::{Reservation, UsernameProblem};
@@ -212,6 +212,9 @@ fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor
                         if ui.link("Reset link").clicked() {
                             app.send(Command::ResetUsernameLink);
                         }
+                        if ui.link("QR code").clicked() {
+                            open_link_screen(app);
+                        }
                     }
                     ui.horizontal(|ui| {
                         if ui.link("Edit username").clicked() {
@@ -270,5 +273,111 @@ fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor
                 e.editing_username = None;
             }
         }
+    }
+}
+
+/// Desktop's username link colors (`UsernameLinkEditor`'s `COLOR_MAP`), by
+/// `UsernameLink.Color` 1 to 8: the QR code's color and the card's.
+const LINK_COLORS: [(u32, u32); 8] = [
+    (0x2449c0, 0x506ecd),
+    (0x000000, 0xffffff),
+    (0x464852, 0x6a6c75),
+    (0x73694f, 0xaa9c7c),
+    (0x55733f, 0x7c9b69),
+    (0xd96b2d, 0xee691a),
+    (0xbb617b, 0xf77099),
+    (0x7651c5, 0xa183d4),
+];
+
+pub fn open_link_screen(app: &mut App) {
+    app.panes.username_link = Some(None);
+    let aci = app.aci.clone();
+    app.load(move |db| async move {
+        let p = langis_core::own_profile(&db, &aci).await;
+        let found = p.username.zip(p.username_link);
+        Some(Loaded::Apply(Box::new(move |app: &mut App| {
+            if app.panes.username_link.is_some() {
+                app.panes.username_link = Some(found);
+            }
+        })))
+    });
+}
+
+/// Desktop's username link screen: the QR code on a card in our color,
+/// the username under it, the color choices, Copy link and Reset.
+pub fn link_screen(app: &mut App, ui: &mut Ui) {
+    let Some(state) = app.panes.username_link.clone() else { return };
+    let palette = Palette::of(ui.ctx());
+    let mut close = false;
+    let mut color_pick = None;
+    let mut reset = false;
+    let closed = modal(ui, "username-link", 380., |ui| {
+        title(ui, "Username link");
+        let Some((name, link)) = &state else {
+            ui.spinner();
+            body(ui, &palette, "Set a username in your profile to get a link and QR code.");
+            close = buttons(ui, &["Done"]).is_some();
+            return;
+        };
+        let color = if (1..=8).contains(&link.color) { link.color } else { 1 };
+        let (fg, bg) = LINK_COLORS[(color - 1) as usize];
+        let fg = theme::rgb(fg);
+        let bg = theme::rgb(bg);
+        ui.vertical_centered(|ui| {
+            let (card, _) = ui.allocate_exact_size(egui::vec2(260., 300.), Sense::hover());
+            ui.painter().rect_filled(card, CornerRadius::same(24), bg);
+            let qr_box = egui::Rect::from_center_size(egui::pos2(card.center().x, card.top() + 120.), egui::vec2(200., 200.));
+            ui.painter().rect_filled(qr_box.expand(8.), CornerRadius::same(16), Color32::WHITE);
+            if let Some(url) = link.url()
+                && let Some(qr) = crate::startup::qr_texture_colored(ui.ctx(), &format!("username-link:{color}:{url}"), url.as_bytes(), fg)
+            {
+                egui::Image::new((qr.id(), qr_box.size())).paint_at(ui, qr_box);
+            }
+            let text = if bg == Color32::WHITE { Color32::BLACK } else { Color32::WHITE };
+            ui.painter().text(egui::pos2(card.center().x, card.bottom() - 34.), egui::Align2::CENTER_CENTER, name, theme::semibold(16.), text);
+            ui.add_space(12.);
+            // The eight colors.
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 8. * 30.) / 2.);
+                for (i, (_, swatch)) in LINK_COLORS.iter().enumerate() {
+                    let (r, resp) = ui.allocate_exact_size(egui::vec2(30., 30.), Sense::click());
+                    ui.painter().circle_filled(r.center(), 11., theme::rgb(*swatch));
+                    ui.painter().circle_stroke(r.center(), 11., egui::Stroke::new(1., palette.border));
+                    if i as i32 + 1 == color {
+                        ui.painter().circle_stroke(r.center(), 14., egui::Stroke::new(2., palette.text));
+                    }
+                    if resp.clicked() {
+                        color_pick = Some(i as i32 + 1);
+                    }
+                }
+            });
+            ui.add_space(12.);
+            ui.horizontal(|ui| {
+                if let Some(url) = link.url()
+                    && widgets::pill_button(ui, "Copy link", false).clicked()
+                {
+                    ui.ctx().copy_text(url);
+                    app.toast("Username link copied.");
+                }
+                if widgets::pill_button(ui, "Reset", false).clicked() {
+                    reset = true;
+                }
+            });
+        });
+        close = buttons(ui, &["Done"]).is_some();
+    });
+    if let Some(color) = color_pick {
+        app.send(Command::SetUsernameLinkColor(color));
+        if let Some(Some((_, link))) = app.panes.username_link.as_mut() {
+            link.color = color;
+        }
+    }
+    if reset {
+        app.send(Command::ResetUsernameLink);
+        app.toast("Resetting your username link. The old QR code and link won't work any more.");
+        open_link_screen(app);
+    }
+    if close || closed {
+        app.panes.username_link = None;
     }
 }

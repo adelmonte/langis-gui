@@ -15,6 +15,11 @@ pub fn qr_texture(ctx: &egui::Context, url: &str) -> Option<TextureHandle> {
 
 /// A QR code of any bytes (the safety number's scannable fingerprint too).
 pub fn qr_texture_of(ctx: &egui::Context, name: &str, data: &[u8]) -> Option<TextureHandle> {
+    qr_texture_colored(ctx, name, data, Color32::BLACK)
+}
+
+/// A QR code whose dark modules are `dark` (the username link's colors).
+pub fn qr_texture_colored(ctx: &egui::Context, name: &str, data: &[u8], dark: Color32) -> Option<TextureHandle> {
     let code = qrcode::QrCode::new(data).ok()?;
     let width = code.width();
     let quiet = 2;
@@ -24,7 +29,7 @@ pub fn qr_texture_of(ctx: &egui::Context, name: &str, data: &[u8]) -> Option<Tex
     for y in 0..width {
         for x in 0..width {
             if colors[y * width + x] == qrcode::Color::Dark {
-                pixels[(y + quiet) * side + x + quiet] = Color32::BLACK;
+                pixels[(y + quiet) * side + x + quiet] = dark;
             }
         }
     }

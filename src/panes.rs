@@ -54,6 +54,9 @@ pub struct Panes {
     pub group_link: Option<GroupLinkPreview>,
     pub details: Option<crate::details::Details>,
     pub profile: Option<crate::profile::ProfileEditor>,
+    /// Desktop's username link screen: open, with our username and link
+    /// once read.
+    pub username_link: Option<Option<(String, langis_core::usernames::UsernameLink)>>,
 
     // The chat list.
     pub archived: bool,
@@ -330,6 +333,7 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     group_link_dialog(app, ui);
     lobby_dialog(app, ui);
     crate::profile::show(app, ui);
+    crate::profile::link_screen(app, ui);
     captcha_dialog(app, ui);
     critical_alert(app, ui);
     key_transparency_dialog(app, ui);

@@ -301,7 +301,9 @@ fn nav(app: &mut App, ui: &mut Ui, palette: &Palette) {
         theme::paint_symbol(&painter, "qrcode", qr.center(), 20., palette.text);
         qr_clicked = r.on_hover_text("Open username link screen").clicked();
     }
-    if chip.on_hover_text("Edit profile").clicked() || qr_clicked {
+    if qr_clicked {
+        crate::profile::open_link_screen(app);
+    } else if chip.on_hover_text("Edit profile").clicked() {
         crate::profile::open(app);
     }
     ui.add_space(4.);
