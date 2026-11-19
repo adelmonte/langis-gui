@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use egui::{Align2, Color32, ColorImage, CornerRadius, Pos2, Rect, RichText, Sense, TextureHandle, TextureOptions, Ui, Vec2};
+use egui::{Align2, Color32, ColorImage, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, TextureHandle, TextureOptions, Ui, Vec2};
 use langis_core::{CallStatus, CallUpdate, Command, Frame, FrameSlot};
 
 use crate::app::App;
@@ -245,6 +245,11 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
             let side = (rect.size().min_elem() * 0.4).min(96.);
             widgets::paint_avatar(ui, Rect::from_center_size(rect.center(), Vec2::splat(side)), &widgets::AvatarSpec::person(&name, color));
         }
+    }
+    // Desktop's speaking indicator: an outline while they're heard.
+    if p.audio && video.levels.level(p.demux_id) > 0.04 {
+        ui.painter().rect_stroke(rect, CornerRadius::same(if small { 8 } else { 12 }), Stroke::new(3., Color32::WHITE), egui::StrokeKind::Inside);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     if !small {
         let label = if p.audio { name } else { format!("{name} (muted)") };
