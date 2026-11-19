@@ -1031,7 +1031,9 @@ fn message(
         content_w = content_w.max(n.size().x.min(inner_max));
     }
     let all_audio = !files.is_empty() && files.iter().all(|(_, a)| is_audio(a));
-    if m.quote.is_some() || m.link_preview.is_some() || (!files.is_empty() && !all_audio) || poll_view.is_some() {
+    // Desktop draws no preview on a message with attachments.
+    let preview = m.link_preview.as_ref().filter(|_| m.attachments.is_empty());
+    if m.quote.is_some() || preview.is_some() || (!files.is_empty() && !all_audio) || poll_view.is_some() {
         content_w = content_w.max(inner_max.min(300.));
     }
     if all_audio {
@@ -1045,10 +1047,14 @@ fn message(
     let media_h: f32 = images.iter().map(|(_, a)| media_size(a, Some(bubble_w)).y + 2.).sum();
     // `MessageAudio`'s countdown shares the line with the time when the
     // audio is all there is.
-    let audio_shares_meta = files.len() == 1 && all_audio && galley.is_none() && m.link_preview.is_none() && poll_view.is_none() && show_meta && !meta_inline;
+    let audio_shares_meta = files.len() == 1 && all_audio && galley.is_none() && preview.is_none() && poll_view.is_none() && show_meta && !meta_inline;
     let audio_h = AUDIO_ROW_H + if audio_shares_meta { 0. } else { 20. };
     let files_h: f32 = files.iter().map(|(_, a)| if is_audio(a) { audio_h } else { 48. }).sum();
-    let preview_h = if m.link_preview.is_some() { 84. } else { 0. };
+    // The preview runs edge to edge; flush with the bubble's top when
+    // nothing comes above it, else 4px under it, and 5px over what follows.
+    let preview_first = name_galley.is_none() && m.quote.is_none() && files.is_empty();
+    let preview_card = preview.map(|p| PreviewCard::layout(ui, palette, p, bubble_w));
+    let preview_h = preview_card.as_ref().map(|c| c.height + 5. + if preview_first { 0. } else { 4. }).unwrap_or(0.);
     let poll_h = poll_view.as_ref().map(|p| p.height).unwrap_or(0.);
     // Desktop's line under a long message's start, while the rest isn't here.
     let long_line = m.long_text.as_ref().filter(|_| !m.deleted).map(|l| match l.state {
@@ -1060,7 +1066,7 @@ fn message(
     let text_h = galley.as_ref().map(|g| g.size().y).unwrap_or(0.) + long_h;
     let meta_h = if show_meta && !meta_inline { 16. } else { 0. };
     let media_only = !images.is_empty() && galley.is_none() && m.quote.is_none() && name_galley.is_none() && files.is_empty();
-    let top_pad = if media_only || (images.first().is_some() && name_galley.is_none() && m.quote.is_none()) { 0. } else { pad.y };
+    let top_pad = if media_only || (images.first().is_some() && name_galley.is_none() && m.quote.is_none()) || (preview_card.is_some() && preview_first) { 0. } else { pad.y };
     let text_block = name_h + quote_h + files_h + preview_h + poll_h + text_h + meta_h;
     let bubble_h = top_pad + media_h + if media_only && meta_h > 0. { 0. } else if text_block > 0. { text_block + pad.y + if media_h > 0. { pad.y } else { 0. } } else { 0. };
     let bubble_h = bubble_h.max(if media_only { media_h } else { 36. });
@@ -1147,12 +1153,16 @@ fn message(
         }
         y += 48.;
     }
-    if let Some(p) = &m.link_preview {
-        let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., 78.));
-        if link_preview(ui, palette, outgoing, p, rect, in_color, ui.scope_id().with(("preview", m.id))) {
+    if let (Some(p), Some(card)) = (preview, preview_card) {
+        if !preview_first {
+            y += 4.;
+        }
+        let rect = Rect::from_min_size(Pos2::new(bubble.left(), y), Vec2::new(bubble_w, card.height));
+        let top = if preview_first { CornerRadius { nw: radius.nw, ne: radius.ne, sw: 0, se: 0 } } else { CornerRadius::ZERO };
+        if card.paint(ui, palette, p, rect, top, ui.scope_id().with(("preview", m.id))) {
             actions.push(Action::Open(p.url.clone()));
         }
-        y += preview_h;
+        y += card.height + 5.;
     }
     if let (Some(view), Some(poll)) = (poll_view, m.poll.as_ref()) {
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., poll_h));
@@ -1557,40 +1567,138 @@ fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, re
     ui.painter().galley(Pos2::new(inner.left() + 2., inner.top() + 19.), galley, text_color);
 }
 
-fn link_preview(ui: &Ui, palette: &Palette, outgoing: bool, p: &langis_store::LinkPreview, rect: Rect, text: Color32, id: egui::Id) -> bool {
-    let response = ui.interact(rect, id, Sense::click());
-    let fill = if outgoing { Color32::from_white_alpha(40) } else if palette.dark { Color32::from_black_alpha(60) } else { Color32::from_white_alpha(150) };
-    ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
-    let mut left = rect.left() + 10.;
-    if let Some(path) = p.image.as_ref().and_then(|i| i.local_path.as_deref()) {
-        let at = Rect::from_min_size(rect.min, Vec2::new(78., rect.height()));
-        if crate::thumbs::visible(ui, at) {
-            egui::Image::new(crate::thumbs::uri(ui.ctx(), path, at.size())).corner_radius(CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }).fit_to_exact_size(at.size()).paint_at(ui, at);
+/// Desktop's `module-message__link-preview`: a full-width image on top when
+/// it's large and not square (`shouldUseFullSizeLinkPreviewImage`: both
+/// sides 200 or more), else a 72px thumbnail beside the text; the title in
+/// up to 2 lines, the description in up to 5, then the domain and date.
+struct PreviewCard {
+    height: f32,
+    full_image_h: f32,
+    thumb: bool,
+    title: Option<std::sync::Arc<egui::Galley>>,
+    description: Option<std::sync::Arc<egui::Galley>>,
+    footer: std::sync::Arc<egui::Galley>,
+}
+
+const PREVIEW_PAD: Vec2 = Vec2::new(12., 10.);
+const PREVIEW_THUMB: f32 = 72.;
+
+impl PreviewCard {
+    fn layout(ui: &Ui, palette: &Palette, p: &langis_store::LinkPreview, width: f32) -> Self {
+        let image = p.image.as_ref().filter(|i| i.content_type.starts_with("image/"));
+        let full = image.is_some_and(|i| {
+            let (w, h) = (i.width.unwrap_or(0) as f32, i.height.unwrap_or(0) as f32);
+            w >= 200. && h >= 200. && (1. - w / h).abs() >= 0.05
+        });
+        let full_image_h = match image.filter(|_| full) {
+            Some(i) => (width * i.height.unwrap_or(1) as f32 / i.width.unwrap_or(1).max(1) as f32).round().clamp(50., 450.),
+            None => 0.,
+        };
+        let thumb = image.is_some() && !full;
+        let text_w = (width - PREVIEW_PAD.x * 2. - if thumb { PREVIEW_THUMB + 8. } else { 0. }).max(40.);
+        let (strong, secondary) = preview_colors(palette);
+        let wrapped = |text: String, font: egui::FontId, color: Color32, rows: usize| {
+            let mut job = egui::text::LayoutJob::simple(text, font, color, text_w);
+            job.wrap.max_rows = rows;
+            job.wrap.break_anywhere = false;
+            job.wrap.overflow_character = Some('…');
+            ui.fonts_mut(|f| f.layout_job(job))
+        };
+        let title = p.title.as_ref().map(|t| wrapped(crate::format::one_line(t), theme::semibold(14.), strong, 2));
+        let description = p.description.as_ref().map(|d| wrapped(crate::format::one_line(d), theme::regular(13.), strong, 5));
+        let mut footer = preview_domain(&p.url);
+        if let Some(date) = p.date.and_then(preview_date) {
+            footer = format!("{footer} · {date}");
         }
-        left = at.right() + 10.;
+        let footer = wrapped(footer, theme::regular(13.), secondary, 1);
+        let text_h = title.as_ref().map(|g| g.size().y).unwrap_or(0.)
+            + description.as_ref().map(|g| g.size().y + 4.).unwrap_or(0.)
+            + footer.size().y + 2.;
+        let content_h = text_h.max(if thumb { PREVIEW_THUMB } else { 0. }) + PREVIEW_PAD.y * 2.;
+        Self { height: full_image_h + content_h, full_image_h, thumb, title, description, footer }
     }
-    let width = rect.right() - 10. - left;
-    let mut y = rect.top() + 8.;
-    if let Some(title) = &p.title {
-        let mut job = egui::text::LayoutJob::simple_singleline(title.clone(), theme::semibold(13.), text);
-        job.wrap = egui::text::TextWrapping::truncate_at_width(width);
-        let g = ui.fonts_mut(|f| f.layout_job(job));
-        let h = g.size().y;
-        ui.painter().galley(Pos2::new(left, y), g, text);
-        y += h + 1.;
+
+    /// Draws it in `rect`, its top corners `top`; true when clicked.
+    fn paint(&self, ui: &Ui, palette: &Palette, p: &langis_store::LinkPreview, rect: Rect, top: CornerRadius, id: egui::Id) -> bool {
+        let response = ui.interact(rect, id, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let fill = if palette.dark { theme::rgb(0x2e2e2e) } else { theme::rgb(0xf6f6f6) };
+        let content = Rect::from_min_max(Pos2::new(rect.left(), rect.top() + self.full_image_h), rect.max);
+        let content_radius = if self.full_image_h > 0. { CornerRadius::ZERO } else { top };
+        ui.painter().rect_filled(content, content_radius, fill);
+        if let Some(image) = p.image.as_ref() {
+            if self.full_image_h > 0. {
+                let at = Rect::from_min_size(rect.min, Vec2::new(rect.width(), self.full_image_h));
+                preview_image(ui, palette, image, at, top);
+            } else if self.thumb {
+                let at = Rect::from_min_size(Pos2::new(content.left() + PREVIEW_PAD.x, content.center().y - PREVIEW_THUMB / 2.), Vec2::splat(PREVIEW_THUMB));
+                preview_image(ui, palette, image, at, CornerRadius::same(8));
+            }
+        }
+        let text_h = self.title.as_ref().map(|g| g.size().y).unwrap_or(0.)
+            + self.description.as_ref().map(|g| g.size().y + 4.).unwrap_or(0.)
+            + self.footer.size().y + 2.;
+        let left = content.left() + PREVIEW_PAD.x + if self.thumb { PREVIEW_THUMB + 8. } else { 0. };
+        let mut y = content.center().y - text_h / 2.;
+        let (strong, secondary) = preview_colors(palette);
+        if let Some(g) = &self.title {
+            ui.painter().galley(Pos2::new(left, y), g.clone(), strong);
+            y += g.size().y;
+        }
+        if let Some(g) = &self.description {
+            y += 4.;
+            ui.painter().galley(Pos2::new(left, y), g.clone(), strong);
+            y += g.size().y;
+        }
+        ui.painter().galley(Pos2::new(left, y + 2.), self.footer.clone(), secondary);
+        response.clicked()
     }
-    if let Some(desc) = &p.description {
-        let mut job = egui::text::LayoutJob::simple(crate::format::one_line(desc), theme::regular(12.), text, width);
-        job.wrap.max_rows = 2;
-        job.wrap.overflow_character = Some('…');
-        let g = ui.fonts_mut(|f| f.layout_job(job));
-        let h = g.size().y;
-        ui.painter().galley(Pos2::new(left, y), g, text);
-        y += h + 1.;
+}
+
+/// gray-90 and gray-60 in light, gray-05 and gray-25 in dark.
+fn preview_colors(palette: &Palette) -> (Color32, Color32) {
+    if palette.dark { (theme::rgb(0xe9e9e9), theme::rgb(0xb9b9b9)) } else { (theme::rgb(0x1b1b1b), theme::rgb(0x5e5e5e)) }
+}
+
+/// A preview image, cropped to fill; a gray box until it's downloaded.
+fn preview_image(ui: &Ui, palette: &Palette, image: &langis_store::AttachmentMeta, at: Rect, radius: CornerRadius) {
+    if !crate::thumbs::visible(ui, at) {
+        return;
     }
-    let domain = p.url.split("://").nth(1).and_then(|r| r.split('/').next()).unwrap_or(&p.url).to_owned();
-    ui.painter().text(Pos2::new(left, y.min(rect.bottom() - 18.)), Align2::LEFT_TOP, domain, theme::regular(12.), text.gamma_multiply(0.75));
-    response.clicked()
+    let Some(path) = image.local_path.as_deref() else {
+        let gray = if palette.dark { theme::rgb(0x3b3b3b) } else { theme::rgb(0xe9e9e9) };
+        ui.painter().rect_filled(at, radius, gray);
+        return;
+    };
+    let mut uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
+    if let (Some(w), Some(h)) = (image.width.filter(|w| *w > 0), image.height.filter(|h| *h > 0)) {
+        let (photo, frame) = (w as f32 / h as f32, at.width() / at.height());
+        if photo > frame {
+            let keep = frame / photo;
+            uv = Rect::from_min_max(Pos2::new((1. - keep) / 2., 0.), Pos2::new((1. + keep) / 2., 1.));
+        } else {
+            let keep = photo / frame;
+            uv = Rect::from_min_max(Pos2::new(0., (1. - keep) / 2.), Pos2::new(1., (1. + keep) / 2.));
+        }
+    }
+    egui::Image::new(crate::thumbs::uri(ui.ctx(), path, at.size())).uv(uv).corner_radius(radius).paint_at(ui, at);
+}
+
+/// The link's host, lowercase (Desktop's `getDomain`).
+fn preview_domain(url: &str) -> String {
+    let host = url.split("://").nth(1).and_then(|r| r.split(['/', '?', '#']).next()).unwrap_or(url);
+    let host = host.rsplit('@').next().unwrap_or(host);
+    host.to_lowercase()
+}
+
+/// The page's date as Desktop's `LinkPreviewDate` writes it ("Nov 19, 2026"),
+/// unless it's more than a day ahead (`isLinkPreviewDateValid`).
+fn preview_date(millis: i64) -> Option<String> {
+    let latest = chrono::Utc::now().timestamp_millis() + 86_400_000;
+    if millis <= 0 || millis >= latest {
+        return None;
+    }
+    let date = chrono::DateTime::from_timestamp_millis(millis)?.with_timezone(&chrono::Local);
+    Some(date.format("%b %-d, %Y").to_string())
 }
 
 fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: bool, actions: &mut Vec<Action>) {
