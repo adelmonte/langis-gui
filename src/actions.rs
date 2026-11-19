@@ -34,6 +34,8 @@ pub enum Dialog {
     PollVotes { message: i64 },
     /// Desktop's `EditHistoryMessagesModal`: every version, newest first.
     EditHistory { message: i64, details: Option<Details> },
+    /// Desktop's `PinnedMessagesPanel`: every pinned message.
+    Pinned { messages: Vec<Message> },
     /// A notice's Learn more: what it means.
     Explain { title: &'static str, body: &'static str },
     /// Desktop's `CustomizingPreferredReactionsModal`: the reaction bar's
@@ -63,6 +65,8 @@ pub enum Do {
     Open(Dialog),
     /// Select mode, starting with this message.
     Select(i64),
+    /// Scrolls to a message, loading around it if it isn't here.
+    Jump(i64),
     Close,
 }
 
@@ -454,6 +458,50 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         Dialog::Poll(poll) => {
             let modal = egui::Modal::new(egui::Id::unique("new-poll")).frame(frame).show(ui.ctx(), |ui| {
                 crate::polls::dialog(ui, &palette, poll, &c.id, &mut out);
+            });
+            if modal.should_close() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::Pinned { messages } => {
+            let modal = egui::Modal::new(egui::Id::unique("pinned-messages")).frame(frame).show(ui.ctx(), |ui| {
+                ui.set_width(420.);
+                ui.label(RichText::new("Pinned messages").font(theme::semibold(18.)));
+                ui.add_space(12.);
+                egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
+                    for m in messages.iter() {
+                        let who = match &m.author {
+                            None => "You".to_owned(),
+                            Some(a) => app.name(a),
+                        };
+                        let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { m.body.clone() };
+                        let response = egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(who).font(theme::semibold(13.)));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(RichText::new(crate::format::short_timestamp(m.sent_at)).font(theme::regular(12.)).color(palette.text_secondary));
+                                });
+                            });
+                            let mut job = egui::text::LayoutJob::simple(text, theme::regular(14.), palette.text, ui.available_width());
+                            job.wrap.max_rows = 4;
+                            job.wrap.overflow_character = Some('…');
+                            ui.label(job);
+                        });
+                        let r = ui.interact(response.response.rect, ui.id().with(("pinned", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                        if r.clicked() {
+                            out.push(Do::Close);
+                            out.push(Do::Jump(m.id));
+                        }
+                        ui.add_space(6.);
+                    }
+                });
+                ui.add_space(12.);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::pill_button(ui, "Done", true).clicked() {
+                        out.push(Do::Close);
+                    }
+                });
             });
             if modal.should_close() {
                 out.push(Do::Close);

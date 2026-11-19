@@ -562,6 +562,13 @@ fn popups(app: &mut App, ui: &mut Ui) {
                 replaced = true;
             }
             Do::Select(id) => chat.selected = Some(vec![id]),
+            Do::Jump(id) => {
+                if chat.messages.iter().any(|x| x.id == id) {
+                    chat.scroll_target = Some(id);
+                } else {
+                    chat.pending_jump = Some(id);
+                }
+            }
             Do::Open(dialog) => {
                 if let crate::actions::Dialog::Info { message, .. } = &dialog {
                     crate::actions::load_details(app, *message);
@@ -667,7 +674,9 @@ fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
     let index = chat.pinned_index.min(chat.pinned.len() - 1);
     let m = chat.pinned[index].clone();
     let mut jump = false;
+    let mut go = false;
     let mut unpin = false;
+    let mut all = false;
     egui::Panel::top("pinned-bar")
         .exact_size(48.)
         .show_separator_line(false)
@@ -698,22 +707,41 @@ fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
             job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 120.);
             let g = ui.fonts_mut(|f| f.layout_job(job));
             ui.painter().galley(Pos2::new(rect.left() + 56., rect.top() + 26.), g, palette.text_secondary);
-            let close = Rect::from_center_size(Pos2::new(rect.right() - 28., rect.center().y), Vec2::splat(28.));
-            let cr = ui.interact(close, ui.scope_id().with("unpin"), Sense::click()).on_hover_text("Unpin");
-            if cr.hovered() {
-                ui.painter().rect_filled(close, CornerRadius::same(8), palette.fill_pressed);
+            // Desktop's `PinnedMessagesBar` actions menu.
+            let more = Rect::from_center_size(Pos2::new(rect.right() - 28., rect.center().y), Vec2::splat(28.));
+            let mr = ui.interact(more, ui.scope_id().with("pinned-more"), Sense::click()).on_hover_text("More actions");
+            if mr.hovered() {
+                ui.painter().rect_filled(more, CornerRadius::same(8), palette.fill_pressed);
             }
-            Icon::XCompact.paint(ui, close, 16., palette.text_secondary);
-            if cr.clicked() {
-                unpin = true;
-            } else if r.clicked() {
+            theme::paint_symbol(ui.painter(), "more", more.center(), 18., palette.text_secondary);
+            let menu = ui.scope_id().with("pinned-menu");
+            if mr.clicked() {
+                crate::menu::open_at(ui.ctx(), menu, Pos2::new(more.left(), more.bottom() + 4.));
+            } else if r.clicked() && !crate::menu::is_open(ui.ctx(), menu) {
                 jump = true;
             }
+            crate::menu::show(ui.ctx(), menu, |m| {
+                if m.item(Some("pin-slash"), "Unpin") {
+                    unpin = true;
+                }
+                if m.item(Some("arrow-[end]"), "Go to message") {
+                    go = true;
+                }
+                if m.item(Some("list-bullet"), "See all messages") {
+                    all = true;
+                }
+            });
         });
+    if all {
+        chat.dialog = Some(crate::actions::Dialog::Pinned { messages: chat.pinned.clone() });
+    }
     if unpin {
         app.send(Command::UnpinMessage { message_id: m.id });
-    } else if jump {
-        chat.pinned_index = (index + 1) % chat.pinned.len();
+    } else if jump || go {
+        // Clicking the bar steps to the next pin; Go to message stays.
+        if jump {
+            chat.pinned_index = (index + 1) % chat.pinned.len();
+        }
         let id = chat.id.clone();
         let _ = id;
         if chat.messages.iter().any(|x| x.id == m.id) {
