@@ -375,16 +375,36 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                     ui.ctx().copy_text(url.clone());
                     app.toast("Call link copied.");
                 }
+                // Desktop's `CallLinkDetails__ShareLinkViaSignal`.
+                if menu_row(ui, Some(Icon::Forward), "Share link via Signal", false).clicked() {
+                    app.panes.share_text = Some((url.clone(), Vec::new(), String::new()));
+                }
                 let label = if admin { "Delete link" } else { "Remove link" };
                 if menu_row(ui, Some(Icon::Trash), label, true).clicked() {
-                    app.send(Command::DeleteCallLink { room_id: room.to_owned() });
-                    app.panes.link_details = None;
+                    app.panes.confirm_delete_link = Some(room.to_owned());
                 }
             });
             ui.add_space(12.);
             body(ui, palette, "Anyone with this link can join the call. Share it only with people you trust.");
         });
     });
+    // Desktop's `DeleteLinkModal`.
+    if app.panes.confirm_delete_link.as_deref() == Some(room) {
+        let (title, body_text, action) = if admin {
+            ("Delete link?", "This link will no longer work for anyone who has it.", "Delete")
+        } else {
+            ("Remove link?", "This link will be removed from your call history. You can join again if someone shares it with you.", "Remove")
+        };
+        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("delete-call-link"), title, body_text, action, crate::dialog::Variant::StrongDestructive) {
+            Some(crate::dialog::Choice::Action) => {
+                app.send(Command::DeleteCallLink { room_id: room.to_owned() });
+                app.panes.link_details = None;
+                app.panes.confirm_delete_link = None;
+            }
+            Some(crate::dialog::Choice::Cancel) => app.panes.confirm_delete_link = None,
+            None => {}
+        }
+    }
 }
 
 /// The in-call extras: raise hand, reactions, the participants list and

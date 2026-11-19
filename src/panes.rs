@@ -70,6 +70,11 @@ pub struct Panes {
     pub confirm_answer: Option<(ConversationId, MessageRequestResponse)>,
     /// "Cancel request" to join a group, waiting on its confirmation.
     pub confirm_cancel_join: Option<ConversationId>,
+    /// A link being shared in chats picked from a list: the text, the chats
+    /// chosen, the search.
+    pub share_text: Option<(String, Vec<ConversationId>, String)>,
+    /// A call link waiting on Delete link's confirmation.
+    pub confirm_delete_link: Option<String>,
     /// Who's in each group's call, from its last peek (empty: no call).
     pub active_calls: std::collections::HashMap<ConversationId, Vec<String>>,
 
@@ -330,6 +335,7 @@ pub fn menu_row(ui: &mut Ui, icon: Option<Icon>, label: &str, danger: bool) -> e
 
 /// Everything that floats over the window: dialogs and banners.
 pub fn overlays(app: &mut App, ui: &mut Ui) {
+    share_text_dialog(app, ui);
     group_link_dialog(app, ui);
     lobby_dialog(app, ui);
     crate::profile::show(app, ui);
@@ -1610,5 +1616,41 @@ mod compose_tests {
         assert!(super::probably_phone("(555) 010-0100"));
         assert!(!super::probably_phone("ma"));
         assert!(!super::probably_phone("5+5"));
+    }
+}
+
+/// Shares a text (a call link) to chats picked from a list, each sent it.
+fn share_text_dialog(app: &mut App, ui: &mut Ui) {
+    let Some((text, mut chosen, mut query)) = app.panes.share_text.take() else { return };
+    let mut answer = None;
+    let closed = modal(ui, "share-text", 400., |ui| {
+        title(ui, "Share via Signal");
+        widgets::text_field(ui, &mut query, "Search", false);
+        ui.add_space(6.);
+        let q = query.trim().to_lowercase();
+        egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
+            for chat in app.conversations.iter().filter(|x| !x.left && !x.blocked && !x.archived && (q.is_empty() || x.title.to_lowercase().contains(&q))) {
+                let mut on = chosen.contains(&chat.id);
+                if ui.checkbox(&mut on, &chat.title).changed() {
+                    if on {
+                        chosen.push(chat.id.clone());
+                    } else {
+                        chosen.retain(|x| *x != chat.id);
+                    }
+                }
+            }
+        });
+        answer = buttons(ui, &["Send", "Cancel"]);
+    });
+    match answer {
+        Some(0) if !chosen.is_empty() => {
+            for to in &chosen {
+                app.send(Command::SendText { conversation: to.clone(), body: text.clone(), quote: None, preview: None, mentions: Vec::new(), styles: Vec::new() });
+            }
+            app.toast(if chosen.len() == 1 { "Link sent.".to_owned() } else { format!("Link sent to {} chats.", chosen.len()) });
+        }
+        Some(_) => {}
+        None if closed => {}
+        None => app.panes.share_text = Some((text, chosen, query)),
     }
 }
