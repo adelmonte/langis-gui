@@ -14,8 +14,28 @@ use crate::panes::{body, buttons, menu_row, modal, title};
 use crate::theme::{self, Palette};
 use crate::widgets;
 
-/// How long a photo or text story stays up before the next.
-const STORY_TIME: Duration = Duration::from_secs(6);
+/// Desktop's `getStoryDuration`: 5 seconds for a photo; a text story 1
+/// more for each 15 characters past the first 15, and 2 more with a link
+/// preview; a video its own length, up to 30 seconds.
+const DEFAULT_TIME: Duration = Duration::from_secs(5);
+const MAX_VIDEO_TIME: f32 = 30.;
+
+fn story_time(s: &Story, player: Option<&crate::video::Player>) -> Duration {
+    match &s.content {
+        StoryContent::Text(t) => {
+            let chars = t.text.chars().count() as u64;
+            let extra = chars.div_ceil(15).saturating_sub(1);
+            DEFAULT_TIME + Duration::from_secs(extra) + if t.preview.is_some() { Duration::from_secs(2) } else { Duration::ZERO }
+        }
+        StoryContent::Media { attachment, .. } if !attachment.content_type.starts_with("image/") => {
+            match player.map(|p| p.duration()).filter(|d| *d > 0.) {
+                Some(d) => Duration::from_secs_f32(d.min(MAX_VIDEO_TIME)),
+                None => DEFAULT_TIME,
+            }
+        }
+        _ => DEFAULT_TIME,
+    }
+}
 
 /// Desktop's text story backgrounds (`BackgroundStyle`), ARGB.
 const BACKGROUNDS: [u32; 8] = [0xff688bd4, 0xff8687c1, 0xffb47f8c, 0xff899188, 0xff539383, 0xff2c5f45, 0xff4437d8, 0xffd35a2f];
@@ -34,6 +54,22 @@ pub struct StoriesView {
     pub privacy: bool,
     /// A story list being made or changed.
     pub editing: Option<StoryList>,
+    /// The video story playing, its sound on.
+    pub player: Option<crate::video::Player>,
+    /// Paused since, by the pause button (Desktop pauses while you reply).
+    pub paused: Option<Instant>,
+    /// The full emoji picker, for a reaction.
+    pub picker: Option<crate::emoji_picker::Picker>,
+    /// Our story whose views and replies are listed.
+    pub views_of: Option<i64>,
+    /// Chats whose stories are hidden (`stories_hidden`).
+    pub hidden: Vec<ConversationId>,
+    /// The Hidden stories section, opened.
+    pub show_hidden: bool,
+    /// Desktop's My Stories page, in place of the viewer.
+    pub my_stories: bool,
+    /// Groups' story send modes (New group story, Remove group story).
+    pub send_modes: Vec<(ConversationId, langis_store::StorySendMode)>,
 }
 
 pub struct Composer {
@@ -51,12 +87,16 @@ pub fn load(app: &App) {
             db.setting(langis_core::SETTING_STORY_LISTS).await.ok().flatten().and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
         let disabled = langis_core::setting_on(db.setting(langis_core::SETTING_STORIES_DISABLED).await.ok().flatten().as_deref());
         let receipts = db.setting(langis_core::SETTING_STORY_VIEW_RECEIPTS).await.ok().flatten().as_deref() != Some("false");
+        let hidden: Vec<ConversationId> = db.setting(langis_store::HIDDEN_STORIES).await.ok().flatten().and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok()).unwrap_or_default().into_iter().map(ConversationId).collect();
+        let send_modes = db.story_send_modes().await.unwrap_or_default();
         Some(Loaded::Apply(Box::new(move |app: &mut App| {
             let s = &mut app.panes.stories;
             s.list = list;
             s.lists = lists;
             s.disabled = disabled;
             s.receipts = receipts;
+            s.hidden = hidden;
+            s.send_modes = send_modes;
             s.loaded = true;
         })))
     });
@@ -335,27 +375,86 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
             app.send(Command::FetchStory { id: story.id });
         }
     }
+    // A video story plays with its sound; its player follows the story.
+    let video_path = match &story.content {
+        StoryContent::Media { attachment, .. } if !attachment.content_type.starts_with("image/") => attachment.local_path.clone(),
+        _ => None,
+    };
+    match &video_path {
+        Some(path) if app.panes.stories.player.as_ref().is_none_or(|p| p.path() != path) => {
+            let ppp = ui.ctx().pixels_per_point();
+            app.panes.stories.player = Some(crate::video::Player::new(path, ((full.width() * ppp) as u32, (full.height() * ppp) as u32), false, false));
+        }
+        None => app.panes.stories.player = None,
+        _ => {}
+    }
     // The story, 9:16, centered.
     let height = (full.height() - 140.).max(200.);
     let width = (height * 9. / 16.).min(full.width() - 120.);
     let rect = Rect::from_center_size(Pos2::new(full.center().x, full.top() + 24. + height / 2.), Vec2::new(width, height));
     paint_story(ui, &story, rect);
+    if let Some(player) = app.panes.stories.player.as_mut()
+        && let Some(texture) = player.texture(ui.ctx())
+    {
+        let size = texture.size_vec2();
+        let scale = (rect.width() / size.x).min(rect.height() / size.y);
+        let shown = Rect::from_center_size(rect.center(), size * scale);
+        egui::Image::new((texture.id(), shown.size())).corner_radius(CornerRadius::same(12)).paint_at(ui, shown);
+    }
+    // Paused by the button, while replying, or while picking a reaction;
+    // the clock (and a video) stand still meanwhile.
+    let replying = ui.memory(|m| m.focused() == Some(egui::Id::unique("story-reply-field"))) || !app.panes.stories.reply.is_empty();
+    let held = replying || app.panes.stories.picker.is_some() || app.panes.stories.views_of.is_some();
+    let paused = app.panes.stories.paused.is_some() || held;
+    let elapsed = match app.panes.stories.paused {
+        Some(at) => at.duration_since(since),
+        None => since.elapsed(),
+    };
+    if let Some(player) = app.panes.stories.player.as_mut() {
+        if paused && player.playing() {
+            player.pause();
+        } else if !paused && !player.playing() && !player.ended() {
+            player.resume();
+        }
+    }
+    let total = story_time(&story, app.panes.stories.player.as_ref());
+    let elapsed = match app.panes.stories.player.as_ref() {
+        Some(p) => Duration::from_secs_f32(p.position()),
+        None => elapsed,
+    };
     // Progress bars over the top.
-    let elapsed = since.elapsed();
-    let typing = !app.panes.stories.reply.is_empty();
     let seg = (rect.width() - 16. - 4. * (stories.len() as f32 - 1.)) / stories.len() as f32;
     for i in 0..stories.len() {
         let x = rect.left() + 8. + i as f32 * (seg + 4.);
         let bar = Rect::from_min_size(Pos2::new(x, rect.top() + 8.), Vec2::new(seg, 3.));
         ui.painter().rect_filled(bar, CornerRadius::same(2), Color32::from_white_alpha(80));
-        let done = if i < index { 1. } else if i == index { (elapsed.as_secs_f32() / STORY_TIME.as_secs_f32()).min(1.) } else { 0. };
+        let done = if i < index { 1. } else if i == index { (elapsed.as_secs_f32() / total.as_secs_f32()).min(1.) } else { 0. };
         ui.painter().rect_filled(Rect::from_min_size(bar.min, Vec2::new(seg * done, 3.)), CornerRadius::same(2), Color32::WHITE);
     }
-    // Who and when.
+    // Who and when, then pause and (for a video) mute.
     let name = who(app, k, stories);
     let author = if story.group.is_some() { story.author_name.clone().map(|a| format!("{a} · ")).unwrap_or_default() } else { String::new() };
     let header = format!("{author}{name}  {}", crate::format::short_timestamp(story.sent_at));
     ui.painter().text(rect.left_top() + Vec2::new(12., 20.), egui::Align2::LEFT_TOP, header, theme::medium(13.), Color32::WHITE);
+    let pause = Rect::from_center_size(Pos2::new(rect.right() - 22., rect.top() + 30.), Vec2::splat(28.));
+    let pause_hit = ui.interact(pause, ui.scope_id().with("story-pause"), Sense::click());
+    theme::paint_symbol(ui.painter(), if app.panes.stories.paused.is_some() { "play-fill" } else { "pause-fill" }, pause.center(), 18., Color32::WHITE);
+    if pause_hit.on_hover_text(if app.panes.stories.paused.is_some() { "Play" } else { "Pause" }).clicked() {
+        match app.panes.stories.paused.take() {
+            // Resuming moves the start on by the time paused.
+            Some(at) => app.panes.stories.viewer = Some((k.to_owned(), index, since + at.elapsed())),
+            None => app.panes.stories.paused = Some(Instant::now()),
+        }
+    }
+    if let Some(player) = app.panes.stories.player.as_mut() {
+        let mute = Rect::from_center_size(Pos2::new(pause.left() - 18., pause.center().y), Vec2::splat(28.));
+        let r = ui.interact(mute, ui.scope_id().with("story-mute"), Sense::click());
+        theme::paint_symbol(ui.painter(), if player.muted { "speaker-slash" } else { "speaker" }, mute.center(), 18., Color32::WHITE);
+        if r.on_hover_text(if player.muted { "Unmute" } else { "Mute" }).clicked() {
+            let muted = !player.muted;
+            player.set_muted(muted);
+        }
+    }
     // Close, and the arrows either side.
     let close = Rect::from_min_size(Pos2::new(full.right() - 52., full.top() + 12.), Vec2::splat(40.));
     let close_hit = ui.interact(close, ui.scope_id().with("story-close"), Sense::click());
@@ -364,48 +463,60 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     let next = Rect::from_center_size(Pos2::new(rect.right() + 36., rect.center().y), Vec2::splat(40.));
     let prev_hit = ui.interact(prev, ui.scope_id().with("story-prev"), Sense::click());
     let next_hit = ui.interact(next, ui.scope_id().with("story-next"), Sense::click());
-    for (r, hit, label) in [(prev, &prev_hit, "‹"), (next, &next_hit, "›")] {
+    for (r, hit, symbol) in [(prev, &prev_hit, "chevron-[start]"), (next, &next_hit, "chevron-[end]")] {
         ui.painter().circle_filled(r.center(), 20., Color32::from_white_alpha(if hit.hovered() { 50 } else { 25 }));
-        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, label, theme::semibold(24.), Color32::WHITE);
+        theme::paint_symbol(ui.painter(), symbol, r.center(), 22., Color32::WHITE);
     }
     let keys = ui.input(|i| (i.key_pressed(egui::Key::ArrowLeft), i.key_pressed(egui::Key::ArrowRight), i.key_pressed(egui::Key::Escape)));
     let mut go: Option<isize> = None;
-    if prev_hit.clicked() || (keys.0 && !typing) {
+    if prev_hit.clicked() || (keys.0 && !replying) {
         go = Some(-1);
     }
-    if next_hit.clicked() || (keys.1 && !typing) || (elapsed >= STORY_TIME && !typing) {
+    let finished = elapsed >= total || app.panes.stories.player.as_ref().is_some_and(|p| p.ended());
+    if next_hit.clicked() || (keys.1 && !replying) || (finished && !paused) {
         go = Some(1);
     }
-    if close_hit.clicked() || keys.2 {
+    if close_hit.clicked() || (keys.2 && app.panes.stories.picker.is_none() && app.panes.stories.views_of.is_none()) {
         app.panes.stories.viewer = None;
+        app.panes.stories.player = None;
+        app.panes.stories.paused = None;
         return;
     }
-    // Below: ours show views and delete; theirs take a reply.
+    // Below: ours show views and delete; theirs take a reaction or reply.
     let below = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() + 12.), Pos2::new(rect.right(), full.bottom() - 12.));
+    let mut open_picker = false;
     ui.scope_builder(egui::UiBuilder::new().max_rect(below), |ui| {
         ui.horizontal(|ui| {
             if mine {
                 let views = story.views.len();
                 let receipts = app.panes.stories.receipts;
-                let text = if receipts { format!("{views} views · {} replies", story.replies.len()) } else { "Views off".to_owned() };
-                ui.label(RichText::new(text).color(Color32::WHITE));
+                let text = if receipts { format!("{views} views · {} replies", story.replies.len()) } else { format!("Views off · {} replies", story.replies.len()) };
+                // Desktop's `StoryViewsNRepliesModal`, from the count.
+                if ui.add(egui::Button::new(RichText::new(text).color(Color32::WHITE)).frame(false)).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    app.panes.stories.views_of = Some(story.id);
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new(RichText::new("Delete").color(Color32::WHITE))).clicked() {
                         app.send(Command::DeleteStory { id: story.id });
                         app.panes.stories.viewer = None;
+                        app.panes.stories.player = None;
                     }
                 });
             } else if story.allows_replies {
-                for emoji in ["❤️", "👍", "😂"] {
+                // The chat's preferred reactions, then the full picker.
+                for emoji in app.reactions.clone() {
                     let mut job = egui::text::LayoutJob::default();
-                    crate::chat::append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::regular(20.), color: Color32::WHITE, ..Default::default() });
+                    crate::chat::append_with_emoji(&mut job, &emoji, egui::TextFormat { font_id: theme::regular(20.), color: Color32::WHITE, ..Default::default() });
                     if ui.add(egui::Button::new(job).frame(false)).on_hover_text("React").clicked() {
-                        app.send(Command::ReplyToStory { id: story.id, body: String::new(), emoji: Some(emoji.into()) });
+                        app.send(Command::ReplyToStory { id: story.id, body: String::new(), emoji: Some(emoji.clone()) });
                         app.toast("Reaction sent.");
                     }
                 }
+                if ui.add(egui::Button::new(RichText::new("+").font(theme::semibold(18.)).color(Color32::WHITE)).frame(false)).on_hover_text("More reactions").clicked() {
+                    open_picker = true;
+                }
                 let hint = if story.group.is_some() { "Reply to group" } else { "Reply" };
-                let field = ui.add(egui::TextEdit::singleline(&mut app.panes.stories.reply).hint_text(hint).desired_width(ui.available_width() - 70.));
+                let field = ui.add(egui::TextEdit::singleline(&mut app.panes.stories.reply).id(egui::Id::unique("story-reply-field")).hint_text(hint).desired_width(ui.available_width() - 70.));
                 let send = ui.button("Send").clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                 if send && !app.panes.stories.reply.trim().is_empty() {
                     let body = std::mem::take(&mut app.panes.stories.reply);
@@ -414,20 +525,41 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
                 }
             }
         });
-        // A group story's replies, under it.
+        // A group story's replies, under it; ours or theirs can go.
         if story.group.is_some() && !story.replies.is_empty() {
             egui::ScrollArea::vertical().max_height(120.).show(ui, |ui| {
                 for r in &story.replies {
                     let who = if r.author.is_none() { "You".to_owned() } else { r.author_name.clone().unwrap_or_default() };
                     let text = if r.deleted { "This message was deleted.".into() } else { r.emoji.clone().unwrap_or_else(|| r.body.clone()) };
-                    ui.label(RichText::new(format!("{who}: {text}")).color(Color32::from_white_alpha(220)));
+                    let label = ui.add(egui::Label::new(RichText::new(format!("{who}: {text}")).color(Color32::from_white_alpha(220))).sense(Sense::click()));
+                    if !r.deleted {
+                        reply_menu(app, &label, story.id, r);
+                    }
                 }
             });
         }
     });
+    if open_picker {
+        app.panes.stories.picker = Some(Default::default());
+    }
+    // The full emoji picker, for any reaction.
+    if let Some(mut picker) = app.panes.stories.picker.take() {
+        let mut open = true;
+        let recent = app.recent_emoji.clone();
+        if let Some(emoji) = picker.show(ui.ctx(), Pos2::new(below.left(), below.top()), &mut open, &recent) {
+            app.use_emoji(emoji);
+            app.send(Command::ReplyToStory { id: story.id, body: String::new(), emoji: Some(emoji.to_owned()) });
+            app.toast("Reaction sent.");
+        } else if open {
+            app.panes.stories.picker = Some(picker);
+        }
+    }
+    views_modal(app, ui, &story);
     if let Some(step) = go {
         let next = index as isize + step;
         app.panes.stories.reply.clear();
+        app.panes.stories.paused = None;
+        app.panes.stories.player = None;
         if next < 0 {
             if pos > 0 {
                 let len = all[pos - 1].1.len();
@@ -445,6 +577,82 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     }
     ui.ctx().request_repaint_after(Duration::from_millis(50));
     let _ = palette;
+}
+
+/// A group story reply's menu: Delete for me, and (ours) for everyone.
+fn reply_menu(app: &mut App, label: &egui::Response, story: i64, r: &langis_store::StoryReply) {
+    let menu = egui::Id::unique(("story-reply-menu", story, r.sent_at));
+    if label.secondary_clicked()
+        && let Some(at) = label.interact_pointer_pos()
+    {
+        crate::menu::open_at(&label.ctx, menu, at);
+    }
+    let mut todo = None;
+    crate::menu::show(&label.ctx, menu, |m| {
+        if m.item(Some("trash"), "Delete for me") {
+            todo = Some(false);
+        }
+        if r.author.is_none() && m.item(Some("trash"), "Delete for everyone") {
+            todo = Some(true);
+        }
+    });
+    if let Some(for_everyone) = todo {
+        app.send(Command::DeleteStoryReply { story, author: r.author.clone(), sent_at: r.sent_at, for_everyone });
+    }
+}
+
+/// Desktop's `StoryViewsNRepliesModal`: who viewed our story (when view
+/// receipts are on) and the replies to it.
+fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
+    if app.panes.stories.views_of != Some(story.id) {
+        return;
+    }
+    let palette = Palette::of(ui.ctx());
+    let mut done = false;
+    let receipts = app.panes.stories.receipts;
+    let closed = modal(ui, "story-views", 400., |ui| {
+        title(ui, if receipts { "Views and replies" } else { "Replies" });
+        egui::ScrollArea::vertical().max_height(420.).show(ui, |ui| {
+            if receipts {
+                ui.label(RichText::new(format!("Views ({})", story.views.len())).font(theme::semibold(14.)));
+                if story.views.is_empty() {
+                    body(ui, &palette, "No views yet");
+                }
+                for v in &story.views {
+                    ui.horizontal(|ui| {
+                        let name = app.name(&v.viewer);
+                        let color = v.viewer.bytes().fold(0u8, |a, b| a.wrapping_add(b));
+                        widgets::avatar(ui, &widgets::AvatarSpec::person(&name, color), 28.);
+                        ui.label(RichText::new(name).font(theme::regular(14.)));
+                        if let Some(at) = v.at {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(RichText::new(crate::format::short_timestamp(at)).font(theme::regular(12.)).color(palette.text_secondary));
+                            });
+                        }
+                    });
+                }
+                ui.add_space(12.);
+            } else {
+                body(ui, &palette, "View receipts are off. Turn them on in Story privacy to see who viewed your stories.");
+                ui.add_space(8.);
+            }
+            ui.label(RichText::new(format!("Replies ({})", story.replies.len())).font(theme::semibold(14.)));
+            for r in &story.replies {
+                let who = if r.author.is_none() { "You".to_owned() } else { r.author_name.clone().unwrap_or_default() };
+                let text = if r.deleted { "This message was deleted.".into() } else { r.emoji.clone().unwrap_or_else(|| r.body.clone()) };
+                let label = ui.add(egui::Label::new(RichText::new(format!("{who}: {text}")).font(theme::regular(14.))).sense(Sense::click()));
+                if !r.deleted {
+                    reply_menu(app, &label, story.id, r);
+                }
+            }
+        });
+        if buttons(ui, &["Done"]).is_some() {
+            done = true;
+        }
+    });
+    if done || closed {
+        app.panes.stories.views_of = None;
+    }
 }
 
 /// The composer and privacy dialogs.
