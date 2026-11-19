@@ -238,7 +238,8 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
             };
             if *full {
                 let mut open = true;
-                if let Some(picked) = picker.show(ctx, *at + Vec2::new(0., 420.), &mut open) {
+                if let Some(picked) = picker.show(ctx, *at + Vec2::new(0., 420.), &mut open, &app.recent_emoji) {
+                    app.use_emoji(picked);
                     out.push(Do::Command(react(picked)));
                     out.push(Do::Close);
                 } else if !open {

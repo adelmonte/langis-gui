@@ -9,6 +9,7 @@ use crate::theme::{self, Palette};
 #[derive(Default)]
 pub struct Picker {
     query: String,
+    /// The group tab chosen; `None` is Recents when there are any.
     group: Option<Group>,
 }
 
@@ -18,12 +19,16 @@ const COLUMNS: usize = 9;
 impl Picker {
     /// The picker's content: search, the grid and the group tabs. Returns
     /// the emoji picked.
-    pub fn body(&mut self, ui: &mut egui::Ui) -> Option<&'static str> {
+    pub fn body(&mut self, ui: &mut egui::Ui, recent: &[String]) -> Option<&'static str> {
         let palette = Palette::of(ui.ctx());
         let mut picked = None;
         crate::widgets::text_field(ui, &mut self.query, "Search emoji", false).request_focus();
         ui.add_space(6.);
-        let emoji: Vec<&'static langis_emoji::Emoji> = if self.query.trim().is_empty() {
+        let recents = self.query.trim().is_empty() && self.group.is_none() && !recent.is_empty();
+        let emoji: Vec<&'static langis_emoji::Emoji> = if recents {
+            ui.label(RichText::new("Recents").font(theme::semibold(13.)).color(palette.text_secondary));
+            recent.iter().filter_map(|e| langis_emoji::by_glyph(e).map(|(e, _)| e)).collect()
+        } else if self.query.trim().is_empty() {
             let group = self.group.unwrap_or(Group::SmileysEmotion);
             ui.label(RichText::new(group.label()).font(theme::semibold(13.)).color(palette.text_secondary));
             langis_emoji::in_group(group).collect()
@@ -57,9 +62,20 @@ impl Picker {
         ui.add_space(4.);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.;
+            if !recent.is_empty() {
+                let (rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
+                if recents || r.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(8), if recents { palette.fill_pressed } else { palette.fill });
+                }
+                theme::paint_symbol(ui.painter(), "recent", rect.center(), 18., palette.text);
+                if r.on_hover_text("Recents").clicked() {
+                    self.group = None;
+                    self.query.clear();
+                }
+            }
             for group in Group::PICKER {
                 let (rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
-                let selected = self.query.is_empty() && self.group.unwrap_or(Group::SmileysEmotion) == group;
+                let selected = self.query.is_empty() && !recents && self.group.unwrap_or(Group::SmileysEmotion) == group;
                 if selected || r.hovered() {
                     ui.painter().rect_filled(rect, CornerRadius::same(8), if selected { palette.fill_pressed } else { palette.fill });
                 }
@@ -74,7 +90,7 @@ impl Picker {
     }
 
     /// Shows the picker above `anchor`; returns the emoji picked.
-    pub fn show(&mut self, ctx: &egui::Context, anchor: Pos2, open: &mut bool) -> Option<&'static str> {
+    pub fn show(&mut self, ctx: &egui::Context, anchor: Pos2, open: &mut bool, recent: &[String]) -> Option<&'static str> {
         let palette = Palette::of(ctx);
         let mut picked = None;
         let size = Vec2::new(CELL * COLUMNS as f32 + 24., 400.);
@@ -90,7 +106,7 @@ impl Picker {
                     .inner_margin(12)
                     .show(ui, |ui| {
                         ui.set_width(size.x - 24.);
-                        picked = self.body(ui);
+                        picked = self.body(ui, recent);
                     });
             });
         let outside = ctx.input(|i| i.pointer.any_pressed())

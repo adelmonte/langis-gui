@@ -163,6 +163,8 @@ pub struct App {
     pub link_previews: bool,
     /// Missed calls not looked at yet: the Calls tab's badge.
     pub unseen_calls: u32,
+    /// Emoji most recently used, newest first: the pickers' Recents.
+    pub recent_emoji: Vec<String>,
     /// Stickers, GIFs and the sticker manager.
     pub fun: crate::fun::Fun,
 }
@@ -233,6 +235,7 @@ impl App {
             lightbox: None,
             link_previews: true,
             unseen_calls: 0,
+            recent_emoji: Vec::new(),
             fun: Default::default(),
         };
         let dir = &app.data_dir;
@@ -392,6 +395,7 @@ impl App {
                 self.load_me();
                 self.load_reactions();
                 self.load_link_previews();
+                self.load_recent_emoji();
                 self.send(Command::LoadCallDevices);
                 crate::panes::on_ready(self);
             }
@@ -589,6 +593,25 @@ impl App {
                 .map(|(i, d)| saved.get(i).filter(|e| !e.is_empty()).cloned().unwrap_or_else(|| d.to_string()))
                 .collect();
             Some(Loaded::Reactions(list))
+        });
+    }
+
+    /// Desktop keeps the last 32 emoji used for its pickers' Recents.
+    pub fn load_recent_emoji(&self) {
+        self.load(|db| async move {
+            let used: Vec<String> = db.emoji_usage().await.ok()?.into_iter().take(32).map(|u| u.emoji).collect();
+            Some(Loaded::Apply(Box::new(move |app: &mut App| app.recent_emoji = used)))
+        });
+    }
+
+    /// Notes an emoji was sent or reacted with, for Recents. The store
+    /// keeps this for frontends to write (langis's frontend guide).
+    pub fn use_emoji(&self, emoji: &str) {
+        let emoji = emoji.to_owned();
+        self.load(move |db| async move {
+            db.record_emoji_use(&emoji).await.ok()?;
+            let used: Vec<String> = db.emoji_usage().await.ok()?.into_iter().take(32).map(|u| u.emoji).collect();
+            Some(Loaded::Apply(Box::new(move |app: &mut App| app.recent_emoji = used)))
         });
     }
 

@@ -133,7 +133,7 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
                     tabs(ui, &palette, &mut fun.tab);
                     ui.add_space(8.);
                     match fun.tab {
-                        Tab::Emoji => picked = chat.emoji.body(ui),
+                        Tab::Emoji => picked = chat.emoji.body(ui, &app.recent_emoji),
                         Tab::Stickers => send = stickers(app, ui, &palette, &mut fun),
                         Tab::Gifs => send = gifs(app, ui, &palette, &mut fun),
                     }
@@ -155,6 +155,9 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
         chat.emoji_open = false;
         chat.scroll_to_bottom = 10;
         app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
+    }
+    if let Some(e) = picked {
+        app.use_emoji(e);
     }
     picked
 }
