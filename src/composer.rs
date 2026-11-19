@@ -655,7 +655,8 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             .inner_margin(egui::Margin::symmetric(12, 6))
             .show(ui, |ui| {
                 ui.set_width(width - 24.);
-                egui::ScrollArea::vertical().max_height(60.).min_scrolled_height(0.).stick_to_bottom(true).show(ui, |ui| {
+                let max_h = if chat.composer_large { (ui.ctx().content_rect().height() * 0.45).max(120.) } else { 60. };
+                egui::ScrollArea::vertical().max_height(max_h).min_scrolled_height(if chat.composer_large { max_h } else { 0. }).stick_to_bottom(true).show(ui, |ui| {
                     // The theme's 28px interact height would make one line
                     // taller than the input, and scroll it.
                     ui.spacing_mut().interact_size.y = 20.;
@@ -677,6 +678,20 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             });
         let response = framed.inner;
         input_rect = framed.response.rect;
+        // Desktop's expand toggle: centered over the input once it's more
+        // than a line, and while large.
+        if chat.composer_large || input_rect.height() > 44. {
+            let toggle = Rect::from_center_size(Pos2::new(input_rect.center().x, input_rect.top() - 14.), Vec2::new(48., 24.));
+            let r = ui.interact(toggle, ui.scope_id().with("toggle-large"), Sense::click());
+            ui.painter().rect_filled(toggle, CornerRadius::same(12), if r.hovered() { palette.fill_pressed } else { palette.fill });
+            theme::paint_symbol(ui.painter(), if chat.composer_large { "chevron-down" } else { "chevron-up" }, toggle.center(), 16., palette.text_secondary);
+            if r.on_hover_text(if chat.composer_large { "Make the composer smaller" } else { "Expand the composer" }).clicked() {
+                chat.composer_large = !chat.composer_large;
+            }
+        }
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::K)) {
+            chat.composer_large = !chat.composer_large;
+        }
         if (input_rect.height() - row_h).abs() > 0.5 {
             ui.data_mut(|d| d.insert_temp(height_id, input_rect.height()));
             ui.ctx().request_repaint();
@@ -929,6 +944,7 @@ pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversat
     chat.spans.clear();
     chat.preview.reset();
     chat.scroll_to_bottom = 10;
+    chat.composer_large = false;
     if chat.typing_sent {
         chat.typing_sent = false;
         chat.typing_refreshed = None;

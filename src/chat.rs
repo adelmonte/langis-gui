@@ -97,6 +97,8 @@ pub struct ChatView {
     pub preview: crate::composer::Preview,
     /// Which @mention suggestion is selected.
     pub mention_index: usize,
+    /// Desktop's large composer (`CompositionArea__toggle-large`).
+    pub composer_large: bool,
     pub attach_menu: bool,
     /// A voice message being recorded.
     pub recording: Option<crate::voice::Recording>,
@@ -203,6 +205,7 @@ impl ChatView {
             spans: Default::default(),
             preview: Default::default(),
             mention_index: 0,
+            composer_large: false,
             attach_menu: false,
             recording: None,
             find: None,
