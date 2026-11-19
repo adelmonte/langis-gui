@@ -1087,7 +1087,14 @@ fn message(
     });
     let mut content_w = text_w.max(if meta_inline { last_row_w + meta_w + 8. } else if show_meta { meta_w } else { 0. });
     if let Some(n) = &name_galley {
-        content_w = content_w.max(n.size().x.min(inner_max));
+        // Room for the member label's pill beside the name.
+        let label_w = m
+            .author
+            .as_deref()
+            .and_then(|a| ctx.app.conversation(ctx.chat_id)?.member_labels.get(a).cloned())
+            .map(|l| ui.painter().layout_no_wrap(format!("{} {}", l.emoji.unwrap_or_default(), l.text), theme::regular(12.), palette.text).size().x + 18.)
+            .unwrap_or(0.);
+        content_w = content_w.max((n.size().x + label_w).min(inner_max));
     }
     let all_audio = !files.is_empty() && files.iter().all(|(_, a)| is_audio(a));
     // Desktop draws no preview on a message with attachments.
@@ -1169,7 +1176,23 @@ fn message(
                 actions.push(Action::Contact(aci));
             }
         }
+        let name_w = n.size().x;
         ui.painter().galley(Pos2::new(left, y), n, palette.text);
+        // Desktop's `ContactName` label pill: their member label, if any.
+        let label = m.author.as_deref().and_then(|a| ctx.app.conversation(ctx.chat_id)?.member_labels.get(a).cloned());
+        if let Some(label) = label {
+            let color = m.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.text);
+            let mut job = egui::text::LayoutJob::default();
+            if let Some(emoji) = label.emoji.as_deref().filter(|e| !e.is_empty()) {
+                append_with_emoji(&mut job, &format!("{emoji} "), egui::TextFormat { font_id: theme::emoji(12.), color, ..Default::default() });
+            }
+            job.append(&label.text, 0., egui::TextFormat { font_id: theme::regular(12.), color, ..Default::default() });
+            job.wrap = egui::text::TextWrapping::truncate_at_width((bubble_w - pad.x * 2. - name_w - 20.).max(30.));
+            let g = ui.fonts_mut(|f| f.layout_job(job));
+            let pill = Rect::from_min_size(Pos2::new(left + name_w + 6., y - 1.), Vec2::new(g.size().x + 12., 18.));
+            ui.painter().rect_filled(pill, CornerRadius::same(9), color.gamma_multiply(0.14));
+            ui.painter().galley(Pos2::new(pill.left() + 6., pill.center().y - g.size().y / 2.), g, color);
+        }
         y += name_h;
     }
     if let Some(q) = &m.quote {
