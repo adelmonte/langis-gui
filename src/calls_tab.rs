@@ -181,6 +181,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         crate::panes::load_calls(app);
         // Desktop marks every call seen when the tab is viewed.
         app.send(Command::MarkCallsRead { conversation: None });
+        // Which groups in the list have a call going, for their Join.
+        let mut groups: Vec<ConversationId> = app.panes.calls.iter().map(|m| m.conversation_id.clone()).filter(|c| c.as_group().is_some()).collect();
+        groups.sort_by(|a, b| a.0.cmp(&b.0));
+        groups.dedup();
+        for group in groups.into_iter().take(20) {
+            app.send(Command::PeekGroupCall { conversation: group });
+        }
     }
     egui::Panel::left("calls-list")
         .resizable(true)
@@ -216,7 +223,19 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.add_space(6.);
             ui.horizontal(|ui| {
                 ui.add_space(16.);
-                ui.add(egui::TextEdit::singleline(&mut app.panes.call_search).hint_text("Search").desired_width(ui.available_width() - 16.));
+                ui.add(egui::TextEdit::singleline(&mut app.panes.call_search).hint_text("Search").desired_width(ui.available_width() - 16. - 36.));
+                // Desktop's missed-calls filter.
+                let (rect, r) = ui.allocate_exact_size(Vec2::splat(28.), Sense::click());
+                let on = app.panes.calls_missed_only;
+                if on {
+                    ui.painter().rect_filled(rect, CornerRadius::same(6), palette.accent);
+                } else if r.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(6), palette.fill_pressed);
+                }
+                theme::paint_symbol(ui.painter(), "filter", rect.center(), 16., if on { egui::Color32::WHITE } else { palette.text_secondary });
+                if r.on_hover_text(if on { "Show all calls" } else { "Show only missed calls" }).clicked() {
+                    app.panes.calls_missed_only = !on;
+                }
             });
             ui.add_space(8.);
             // "Create a call link", as Desktop's first row.
@@ -234,11 +253,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 app.toast("Creating a call link…");
             }
             let query = app.panes.call_search.trim().to_lowercase();
-            let list: Vec<Row> = rows(app).into_iter().filter(|r| query.is_empty() || r.title.to_lowercase().contains(&query)).collect();
+            let missed_only = app.panes.calls_missed_only;
+            let list: Vec<Row> = rows(app).into_iter().filter(|r| (query.is_empty() || r.title.to_lowercase().contains(&query)) && (!missed_only || r.missed)).collect();
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 if list.is_empty() {
                     ui.add_space(24.);
-                    ui.vertical_centered(|ui| body(ui, &palette, if query.is_empty() { "No recent calls" } else { "No results" }));
+                    ui.vertical_centered(|ui| body(ui, &palette, if !query.is_empty() { "No results" } else if missed_only { "No missed calls" } else { "No recent calls" }));
                 }
                 for (i, row) in list.iter().enumerate() {
                     if call_row(app, ui, &palette, row, i) {
@@ -296,9 +316,25 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
     let x = avatar.right() + 12.;
     let painter = ui.painter_at(rect);
     painter.text(Pos2::new(x, rect.top() + 12.), egui::Align2::LEFT_TOP, &row.title, theme::semibold(14.), palette.text);
-    let color = if row.missed { palette.destructive } else { palette.text_secondary };
-    let detail = format!("{} · {}", row.detail, crate::format::short_timestamp(row.at));
+    // A group whose call goes on now: Desktop's `ItemCallInfo--Active`.
+    let active = row.conversation.as_group().is_some()
+        && app.panes.active_calls.get(&row.conversation).is_some_and(|u| !u.is_empty())
+        && app.call.as_ref().is_none_or(|c| c.conversation != row.conversation);
+    let color = if row.missed && !active { palette.destructive } else { palette.text_secondary };
+    let detail = if active { "Active call".to_owned() } else { format!("{} · {}", row.detail, crate::format::short_timestamp(row.at)) };
     painter.text(Pos2::new(x, rect.top() + 32.), egui::Align2::LEFT_TOP, detail, theme::regular(12.), color);
+    if active {
+        let label = ui.painter().layout_no_wrap("Join".into(), theme::semibold(13.), egui::Color32::WHITE);
+        let pill = Rect::from_center_size(Pos2::new(rect.right() - 12. - (label.size().x + 24.) / 2., rect.center().y), label.size() + Vec2::new(24., 12.));
+        let hit = ui.interact(pill, ui.scope_id().with(("join-active", i)), Sense::click());
+        ui.painter().rect_filled(pill, CornerRadius::same(255), if hit.hovered() { palette.accent.gamma_multiply(0.85) } else { palette.accent });
+        ui.painter().galley(pill.center() - label.size() / 2., label, egui::Color32::WHITE);
+        if hit.clicked() {
+            crate::panes::open_lobby(app, row.conversation.clone(), true);
+            return false;
+        }
+        return response.clicked();
+    }
     // The call-back button on the right.
     let button = Rect::from_center_size(Pos2::new(rect.right() - 28., rect.center().y), Vec2::splat(32.));
     let hit = ui.interact(button, ui.scope_id().with(("call-back", i)), Sense::click());

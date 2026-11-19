@@ -73,6 +73,8 @@ pub struct Panes {
     /// A link being shared in chats picked from a list: the text, the chats
     /// chosen, the search.
     pub share_text: Option<(String, Vec<ConversationId>, String)>,
+    /// The Calls tab shows only missed calls (Desktop's filter).
+    pub calls_missed_only: bool,
     /// A call link waiting on Delete link's confirmation.
     pub confirm_delete_link: Option<String>,
     /// Who's in each group's call, from its last peek (empty: no call).
