@@ -1723,7 +1723,14 @@ fn grid_cells(n: usize, width: f32) -> (Vec<Rect>, f32) {
 fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rect, radius: CornerRadius, id: egui::Id) -> bool {
     let response = ui.interact(rect, id, Sense::click());
     let image = a.content_type.starts_with("image/");
-    match a.local_path.as_deref().filter(|_| image).or(a.thumbnail_path.as_deref()) {
+    // Desktop's `GIF`: a GIF plays muted and looping where it is.
+    let gif = a.gif && !image;
+    let playing = gif
+        && crate::thumbs::visible(ui, rect)
+        && a.local_path.as_deref().is_some_and(|path| crate::video::inline(ui, path, rect, radius));
+    // A video without a thumbnail shows its first frame once downloaded.
+    let poster = (!image && a.thumbnail_path.is_none()).then(|| a.local_path.as_deref().and_then(|p| crate::video::poster(ui.ctx(), p))).flatten();
+    match a.local_path.as_deref().filter(|_| image).or(a.thumbnail_path.as_deref()).or(poster.as_deref()).filter(|_| !playing) {
         Some(path) => {
             // `object-fit: cover`: fills the box, cropped evenly, never stretched.
             let mut uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
@@ -1753,6 +1760,12 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
         let at = Rect::from_min_size(rect.left_top() + Vec2::new(8., 8.), size.size() + Vec2::new(12., 4.));
         ui.painter().rect_filled(at, CornerRadius::same(9), Color32::from_black_alpha(140));
         ui.painter().galley(at.min + Vec2::new(6., 2.), size, Color32::WHITE);
+    } else if gif {
+        // Desktop's GIF badge in the corner.
+        let label = ui.painter().layout_no_wrap("GIF".into(), theme::semibold(11.), Color32::WHITE);
+        let at = Rect::from_min_size(rect.left_bottom() + Vec2::new(8., -26.), label.size() + Vec2::new(12., 6.));
+        ui.painter().rect_filled(at, CornerRadius::same(6), Color32::from_black_alpha(140));
+        ui.painter().galley(at.min + Vec2::new(6., 3.), label, Color32::WHITE);
     } else if !image {
         ui.painter().circle_filled(center.center(), 24., Color32::from_black_alpha(140));
         let tri = [center.center() + Vec2::new(-6., -9.), center.center() + Vec2::new(-6., 9.), center.center() + Vec2::new(10., 0.)];

@@ -41,6 +41,7 @@ mod stories;
 mod symbols;
 mod theme;
 mod view;
+mod video;
 mod voice;
 mod widgets;
 
