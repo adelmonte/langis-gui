@@ -43,6 +43,9 @@ pub struct Details {
     pub media_tab: crate::media_gallery::Tab,
     /// Opened for the nickname dialog, shown once their details arrive.
     pub nickname_on_load: bool,
+    /// The member list's search, and whether it shows everyone.
+    pub member_query: String,
+    pub all_members: bool,
 }
 
 impl Details {
@@ -60,6 +63,8 @@ impl Details {
             media: None,
             media_tab: Default::default(),
             nickname_on_load: false,
+            member_query: String::new(),
+            all_members: false,
         }
     }
 }
@@ -224,7 +229,16 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     let admin = c.admins.iter().any(|a| *a == me);
     // The header: photo, name, about or description, counts.
     ui.vertical_centered(|ui| {
-        widgets::avatar(ui, &widgets::AvatarSpec::of(c), 80.);
+        let photo = widgets::avatar(ui, &widgets::AvatarSpec::of(c), 80.);
+        // A photo held back in a message request: Desktop's tap to download.
+        if c.avatar_withheld {
+            if photo.on_hover_text("Download photo").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                app.send(Command::DownloadPhoto { conversation: c.id.clone() });
+            }
+            if ui.link("Download photo").clicked() {
+                app.send(Command::DownloadPhoto { conversation: c.id.clone() });
+            }
+        }
         ui.add_space(10.);
         let name = ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(20.))).sense(egui::Sense::click()));
         if c.can_edit_info && group && name.on_hover_text("Edit").clicked()
@@ -270,12 +284,19 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         if !values.contains(&c.expire_timer) {
             values.push(c.expire_timer);
         }
-        let labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
+        let mut labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
+        // Desktop's `DisappearingTimerSelect` ends with Custom time.
+        labels.push("Custom time…".to_owned());
         let options: Vec<&str> = labels.iter().map(String::as_str).collect();
         let chosen = values.iter().position(|v| *v == c.expire_timer);
         let item = Item::new("Disappearing messages").symbol("timer-slash").description(info).disabled(group && !c.can_edit_info);
         if let Some(i) = axo_list::select(ui, egui::Id::unique("details-timer").with(&c.id.0), item, &options, chosen) {
-            app.send(Command::SetExpireTimer { conversation: c.id.clone(), seconds: values[i] });
+            if i == values.len() {
+                let (value, unit) = crate::panes::custom_timer_start(if c.expire_timer > 0 { c.expire_timer } else { 3_600 });
+                app.panes.custom_timer = Some((c.id.clone(), value, unit));
+            } else {
+                app.send(Command::SetExpireTimer { conversation: c.id.clone(), seconds: values[i] });
+            }
         }
         if c.kind == ConversationKind::Direct && axo_list::item(ui, Item::new("Nickname").symbol("pencil"), End::Click).clicked() {
             let current = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()).and_then(|ct| ct.nickname.clone()).unwrap_or_default();
@@ -305,6 +326,82 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         }
     });
 
+    // `ConversationNotificationsSettings`: mute, and until when.
+    if c.kind != ConversationKind::NoteToSelf {
+        axo_list::gap(ui);
+        axo_list::list(ui, Some("Notifications"), None, |ui| {
+            let state = if !c.muted {
+                "Not muted".to_owned()
+            } else if c.muted_until == i64::MAX {
+                "Muted always".to_owned()
+            } else {
+                format!("Muted until {}", crate::format::short_timestamp(c.muted_until))
+            };
+            let r = axo_list::item(ui, Item::new("Mute notifications").symbol(if c.muted { "bell-slash" } else { "bell" }), End::Arrow(Some(&state)));
+            let menu = egui::Id::unique("details-mute").with(&c.id.0);
+            if r.clicked() {
+                crate::menu::open_at(ui.ctx(), menu, r.row.rect.right_bottom() - egui::vec2(220., 0.));
+            }
+            crate::menu::show(ui.ctx(), menu, |m| {
+                if c.muted {
+                    if m.item(Some("bell"), "Unmute") {
+                        app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(0) });
+                    }
+                } else {
+                    crate::panes::mute_items(app, m, &c.id);
+                }
+            });
+        });
+    }
+
+    // `ConversationDetailsGroups`: the groups they're in with us.
+    if c.kind == ConversationKind::Direct
+        && let Some(them) = c.id.as_direct()
+    {
+        let common: Vec<Conversation> = app.conversations.iter().filter(|g| g.kind == ConversationKind::Group && !g.left && g.members.iter().any(|m| m == them)).cloned().collect();
+        if !common.is_empty() {
+            axo_list::gap(ui);
+            let title = if common.len() == 1 { "1 group in common".to_owned() } else { format!("{} groups in common", common.len()) };
+            axo_list::list(ui, Some(&title), None, |ui| {
+                for g in &common {
+                    let row = group_row(ui, palette, g);
+                    if row.clicked() {
+                        app.panes.details = None;
+                        app.open(g.id.clone());
+                    }
+                }
+            });
+        }
+    }
+
+    // Recent calls with this chat (Desktop's `CallHistoryGroupPanelSection`),
+    // from its loaded messages.
+    let calls: Vec<(String, i64)> = app
+        .chat
+        .as_ref()
+        .filter(|chat| chat.id == c.id)
+        .map(|chat| {
+            chat.messages
+                .iter()
+                .rev()
+                .filter_map(|m| match &m.notice {
+                    Some(n @ (langis_store::Notice::Call { .. } | langis_store::Notice::GroupCall { .. })) => Some((crate::notices::notice_text(n, |sid| app.name(sid)), m.sent_at)),
+                    _ => None,
+                })
+                .take(5)
+                .collect()
+        })
+        .unwrap_or_default();
+    if !calls.is_empty() {
+        axo_list::gap(ui);
+        axo_list::list(ui, Some("Calls"), None, |ui| {
+            for (text, at) in &calls {
+                let when = crate::format::short_timestamp(*at);
+                axo_list::item(ui, Item::new(text).symbol("phone"), End::Arrow(Some(&when)));
+            }
+        });
+    }
+
     if group {
         // `ConversationDetailsMembershipList`.
         axo_list::gap(ui);
@@ -324,13 +421,29 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
             let mut everyone: Vec<String> = c.members.clone();
             everyone.insert(0, me.clone());
-            for m in everyone {
+            // Desktop's member search (`GroupMembersSearchDialog`) once the
+            // list is long, and its first few until View all.
+            const SHOWN: usize = 6;
+            let long = everyone.len() > SHOWN;
+            if long && let Some(d) = app.panes.details.as_mut() {
+                ui.horizontal(|ui| {
+                    ui.add_space(12.);
+                    ui.set_width(ui.available_width() - 12.);
+                    widgets::text_field(ui, &mut d.member_query, "Search members", false);
+                });
+                ui.add_space(4.);
+            }
+            let (query, all) = app.panes.details.as_ref().map(|d| (d.member_query.trim().to_lowercase(), d.all_members)).unwrap_or_default();
+            let names: Vec<(String, String)> = everyone.into_iter().map(|m| { let n = if m == me { "You".to_owned() } else { app.name(&m) }; (m, n) }).collect();
+            let matching: Vec<(String, String)> = names.into_iter().filter(|(_, n)| query.is_empty() || n.to_lowercase().contains(&query)).collect();
+            let hidden = if query.is_empty() && !all && long { matching.len().saturating_sub(SHOWN) } else { 0 };
+            for (m, name) in matching.into_iter().take(if hidden > 0 { SHOWN } else { usize::MAX }) {
                 let you = m == me;
-                let name = if you { "You".to_owned() } else { app.name(&m) };
                 let is_admin = c.admins.contains(&m);
                 let label = c.member_labels.get(&m).map(|l| format!("{} {}", l.emoji.clone().unwrap_or_default(), l.text).trim().to_owned());
                 let color = m.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
-                let row = member_row(ui, palette, &name, label.as_deref(), color, is_admin.then_some("Admin"));
+                let photo = if you { app.me.1.clone() } else { app.conversation(&ConversationId::direct(&m)).and_then(|p| p.avatar_path.clone()) };
+                let row = member_row(ui, palette, &name, label.as_deref(), color, photo.as_deref(), is_admin.then_some("Admin"));
                 if !you && row.clicked() {
                     crate::contact_modal::open(app, Some(c.id.clone()), m.clone());
                 }
@@ -350,6 +463,11 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                         }
                     });
                 }
+            }
+            if hidden > 0 && axo_list::item(ui, Item::new("View all").symbol("chevron-down"), End::Click).clicked()
+                && let Some(d) = app.panes.details.as_mut()
+            {
+                d.all_members = true;
             }
         });
     }
@@ -423,7 +541,23 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
 }
 
 /// A member: their avatar, name and label, and Admin at the end.
-fn member_row(ui: &mut Ui, palette: &Palette, name: &str, label: Option<&str>, color: u8, end: Option<&str>) -> egui::Response {
+/// A group in Groups in common: its photo, name and member count.
+fn group_row(ui: &mut Ui, palette: &Palette, g: &Conversation) -> egui::Response {
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 52.), egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(14), palette.fill);
+    }
+    let avatar = egui::Rect::from_min_size(egui::pos2(rect.left() + 12., rect.center().y - 18.), egui::vec2(36., 36.));
+    widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(g));
+    let x = avatar.right() + 12.;
+    ui.painter().text(egui::pos2(x, rect.center().y - 1.), egui::Align2::LEFT_BOTTOM, &g.title, theme::regular(13.), palette.text);
+    ui.painter().text(egui::pos2(x, rect.center().y + 1.), egui::Align2::LEFT_TOP, format!("{} members", g.members.len() + 1), theme::regular(12.), palette.text_secondary);
+    response
+}
+
+#[allow(clippy::too_many_arguments)]
+fn member_row(ui: &mut Ui, palette: &Palette, name: &str, label: Option<&str>, color: u8, photo: Option<&str>, end: Option<&str>) -> egui::Response {
     let width = ui.available_width();
     let h = if label.is_some() { 52. } else { 48. };
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::click());
@@ -431,7 +565,7 @@ fn member_row(ui: &mut Ui, palette: &Palette, name: &str, label: Option<&str>, c
         ui.painter().rect_filled(rect, CornerRadius::same(14), palette.fill);
     }
     let avatar = egui::Rect::from_min_size(egui::pos2(rect.left() + 12., rect.center().y - 18.), egui::vec2(36., 36.));
-    widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::person(name, color));
+    widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo, ..widgets::AvatarSpec::person(name, color) });
     let x = avatar.right() + 12.;
     match label {
         Some(label) => {
