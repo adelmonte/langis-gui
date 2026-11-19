@@ -396,6 +396,11 @@ impl App {
                 self.load_reactions();
                 self.load_link_previews();
                 self.load_recent_emoji();
+                self.load(|db| async move {
+                    let saved = db.setting("ui.recent_gifs").await.ok().flatten()?;
+                    let gifs = crate::fun::parse_recent_gifs(&saved);
+                    Some(Loaded::Apply(Box::new(move |app: &mut App| app.fun.recent_gifs = gifs)))
+                });
                 self.send(Command::LoadCallDevices);
                 crate::panes::on_ready(self);
             }

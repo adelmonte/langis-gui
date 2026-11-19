@@ -49,6 +49,11 @@ pub struct Fun {
     gif_next: Option<u32>,
     gif_error: Option<String>,
     gif_loading: bool,
+    /// GIFs sent lately, newest first (Desktop's Recents), kept in the
+    /// `ui.recent_gifs` setting.
+    pub recent_gifs: Vec<(Gif, PathBuf)>,
+    /// Showing Recents rather than a search.
+    gif_recents: bool,
     pub manager: Option<StickerManagerView>,
     pub manager_open: bool,
     /// A pack opened for its preview, and what came for it.
@@ -153,7 +158,10 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
         let quote = chat.quote.take();
         let command = match what {
             Send::Sticker(pack, sticker) => Command::SendSticker { conversation: c.id.clone(), pack, sticker, quote },
-            Send::Gif(gif) => Command::SendGif { conversation: c.id.clone(), gif, quote },
+            Send::Gif(gif) => {
+                remember_gif(app, &gif);
+                Command::SendGif { conversation: c.id.clone(), gif, quote }
+            }
         };
         chat.emoji_open = false;
         chat.scroll_to_bottom = 10;
@@ -163,6 +171,93 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
         app.use_emoji(e);
     }
     picked
+}
+
+/// Desktop's GIF categories (`FunPanelGifs`), each a search.
+const GIF_CATEGORIES: [(&str, &str); 7] = [
+    ("Celebrate", "celebrate"),
+    ("Love", "love"),
+    ("Thumbs up", "thumbs up"),
+    ("Surprised", "surprised"),
+    ("Excited", "excited"),
+    ("Sad", "sad"),
+    ("Angry", "angry"),
+];
+
+/// Most GIFs kept in Recents.
+const RECENT_GIFS: usize = 30;
+
+/// Recents, two columns like the results; a click sends one.
+fn recent_gifs(ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send> {
+    let mut send = None;
+    let col = (ui.available_width() - 6.) / 2.;
+    egui::ScrollArea::vertical().id_salt("recent-gifs").auto_shrink([false, false]).show(ui, |ui| {
+        let top = ui.cursor().top();
+        let mut heights = [0f32; 2];
+        for (gif, path) in &fun.recent_gifs {
+            let column = if heights[0] <= heights[1] { 0 } else { 1 };
+            let h = (col * gif.preview.height.max(1) as f32 / gif.preview.width.max(1) as f32).clamp(60., 240.);
+            let rect = Rect::from_min_size(Pos2::new(ui.max_rect().left() + column as f32 * (col + 6.), top + heights[column]), Vec2::new(col, h));
+            let r = ui.interact(rect, ui.scope_id().with(("recent-gif", &gif.id)), Sense::click());
+            if ui.is_rect_visible(rect) {
+                let file = path.to_string_lossy();
+                let radius = CornerRadius::same(8);
+                if !(r.hovered() && crate::video::inline(ui, &file, rect, radius)) {
+                    match crate::video::poster(ui.ctx(), &file) {
+                        Some(still) => crate::chat::cover_image(ui, &still, rect, radius),
+                        None => {
+                            ui.painter().rect_filled(rect, radius, palette.fill);
+                        }
+                    }
+                }
+            }
+            if r.on_hover_text(&gif.title).clicked() {
+                send = Some(Send::Gif(gif.clone()));
+            }
+            heights[column] += h + 6.;
+        }
+        ui.allocate_space(Vec2::new(ui.available_width(), heights[0].max(heights[1])));
+    });
+    send
+}
+
+/// Puts a sent GIF first in Recents and saves the list.
+fn remember_gif(app: &mut App, gif: &Gif) {
+    let path = app.fun.gifs.iter().chain(&app.fun.recent_gifs).find(|(g, _)| g.id == gif.id).map(|(_, p)| p.clone());
+    let Some(path) = path else { return };
+    app.fun.recent_gifs.retain(|(g, _)| g.id != gif.id);
+    app.fun.recent_gifs.insert(0, (gif.clone(), path));
+    app.fun.recent_gifs.truncate(RECENT_GIFS);
+    let saved = serde_json::Value::Array(app.fun.recent_gifs.iter().map(|(g, p)| gif_json(g, p)).collect()).to_string();
+    app.load(move |db| async move {
+        let _ = db.set_setting("ui.recent_gifs", &saved).await;
+        None
+    });
+}
+
+fn gif_json(g: &Gif, path: &std::path::Path) -> serde_json::Value {
+    let media = |m: &langis_core::giphy::GifMedia| serde_json::json!({ "url": m.url, "width": m.width, "height": m.height });
+    serde_json::json!({ "id": g.id, "title": g.title, "preview": media(&g.preview), "original": media(&g.original), "path": path.to_string_lossy() })
+}
+
+/// The saved Recents whose previews are still on disk.
+pub fn parse_recent_gifs(text: &str) -> Vec<(Gif, PathBuf)> {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(text) else { return Vec::new() };
+    let media = |v: &serde_json::Value| langis_core::giphy::GifMedia {
+        url: v["url"].as_str().unwrap_or_default().to_owned(),
+        width: v["width"].as_u64().unwrap_or(0) as u32,
+        height: v["height"].as_u64().unwrap_or(0) as u32,
+    };
+    items
+        .iter()
+        .filter_map(|v| {
+            let path = PathBuf::from(v["path"].as_str()?);
+            path.exists().then(|| {
+                let gif = Gif { id: v["id"].as_str().unwrap_or_default().to_owned(), title: v["title"].as_str().unwrap_or_default().to_owned(), preview: media(&v["preview"]), original: media(&v["original"]) };
+                (gif, path)
+            })
+        })
+        .collect()
 }
 
 enum Send {
@@ -308,6 +403,37 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
         ui.ctx().request_repaint_after(GIF_DELAY);
     }
     ui.add_space(6.);
+    // Desktop's sections: Recents, Trending, then its categories, which
+    // are searches.
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(4., 4.);
+        let chip = |ui: &mut Ui, label: &str, on: bool| {
+            let fill = if on { palette.fill_pressed } else { palette.fill };
+            ui.add(egui::Button::new(RichText::new(label).font(theme::regular(12.))).fill(fill).corner_radius(CornerRadius::same(12))).clicked()
+        };
+        if !fun.recent_gifs.is_empty() && chip(ui, "Recents", fun.gif_recents) {
+            fun.gif_recents = true;
+        }
+        if chip(ui, "Trending", !fun.gif_recents && wanted.is_empty()) {
+            fun.gif_recents = false;
+            fun.gif_query.clear();
+            fun.gif_typed = None;
+        }
+        for (label, term) in GIF_CATEGORIES {
+            if chip(ui, label, !fun.gif_recents && wanted == term) {
+                fun.gif_recents = false;
+                fun.gif_query = term.to_owned();
+                fun.gif_typed = None;
+            }
+        }
+    });
+    if field.changed() {
+        fun.gif_recents = false;
+    }
+    if fun.gif_recents {
+        return recent_gifs(ui, palette, fun);
+    }
+    ui.add_space(4.);
     ui.label(RichText::new(if wanted.is_empty() { "Trending" } else { "Search Results" }).font(theme::semibold(13.)).color(palette.text_secondary));
     if let Some(error) = fun.gif_error.clone() {
         ui.add_space(30.);
@@ -343,7 +469,21 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
             let h = (col * gif.preview.height.max(1) as f32 / gif.preview.width.max(1) as f32).clamp(60., 240.);
             let rect = Rect::from_min_size(Pos2::new(ui.max_rect().left() + column as f32 * (col + 6.), top + heights[column]), Vec2::new(col, h));
             let r = ui.interact(rect, ui.scope_id().with(("gif", &gif.id)), Sense::click());
-            egui::Image::new(format!("file://{}", path.display())).corner_radius(CornerRadius::same(8)).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+            // Giphy's previews are MP4s: the first frame still, playing
+            // while hovered (Desktop's `FunGif` plays them in <video>).
+            if ui.is_rect_visible(rect) {
+                let file = path.to_string_lossy();
+                let radius = CornerRadius::same(8);
+                let played = r.hovered() && crate::video::inline(ui, &file, rect, radius);
+                if !played {
+                    match crate::video::poster(ui.ctx(), &file) {
+                        Some(still) => crate::chat::cover_image(ui, &still, rect, radius),
+                        None => {
+                            ui.painter().rect_filled(rect, radius, palette.fill);
+                        }
+                    }
+                }
+            }
             if r.hovered() {
                 ui.painter().rect_stroke(rect, CornerRadius::same(8), Stroke::new(2., palette.badge), egui::StrokeKind::Inside);
             }
@@ -512,4 +652,21 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
         return Some(if pack.installed { PackAction::Uninstall } else { PackAction::Install });
     }
     r.clicked().then_some(PackAction::Open)
+}
+
+#[cfg(test)]
+mod gif_tests {
+    #[test]
+    fn recent_gifs_round_trip_and_drop_missing_previews() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().join("a.mp4");
+        std::fs::write(&here, b"x").unwrap();
+        let media = |w| langis_core::giphy::GifMedia { url: "https://example.org/a.mp4".into(), width: w, height: 100 };
+        let gif = |id: &str| langis_core::giphy::Gif { id: id.into(), title: "t".into(), preview: media(200), original: media(480) };
+        let saved = serde_json::Value::Array(vec![super::gif_json(&gif("a"), &here), super::gif_json(&gif("b"), &dir.path().join("gone.mp4"))]).to_string();
+        let back = super::parse_recent_gifs(&saved);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].0, gif("a"));
+        assert_eq!(back[0].1, here);
+    }
 }
