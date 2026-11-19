@@ -32,6 +32,12 @@ pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
         Notice::NumberChanged { who } => format!("{} changed their phone number", name(who)),
         // `icu:ChatRefresh--notification`.
         Notice::SessionRefreshed => "Chat session refreshed".into(),
+        Notice::JoinedSignal { who } => format!("{} is on Signal", name(who)),
+        Notice::SessionEnded => "Secure session reset".into(),
+        Notice::Merged { who, phone: Some(phone) } => format!("Your message history with {} and their number {phone} has been merged.", name(who)),
+        Notice::Merged { who, phone: None } => format!("Your message history with {} and another chat that belonged to them has been merged.", name(who)),
+        Notice::NumberIsTheirs { who, phone } => format!("{phone} belongs to {}", name(who)),
+        Notice::StartedWith { who, previous } => format!("You started this chat with {previous}, now {}", name(who)),
         // `icu:DeliveryIssue--notification`.
         Notice::DeliveryIssue { who } => format!("A message from {} couldn\u{2019}t be delivered", name(who)),
         // `icu:Message--unsupported-message` and `--from-me-unsupported-message`.
