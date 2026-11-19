@@ -287,6 +287,22 @@ fn screenshots_media() {
     wait(&mut harness, "viewed", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == once && m.view_once == Some(langis_store::ViewOnce::Viewed))));
     save(&mut harness, "view-once-viewed");
 
+    // Several photos in one message: Desktop's grid.
+    let notes = open_chat(&mut harness, langis_store::ConversationKind::NoteToSelf);
+    let images: Vec<langis_core::OutgoingImage> = (0..4u8)
+        .map(|k| {
+            let img = image::RgbImage::from_fn(400, 300, |x, y| image::Rgb([(x / 2) as u8, (y / 2) as u8, 60 + k * 45]));
+            let mut png = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+            langis_core::OutgoingImage { bytes: std::sync::Arc::new(png.into_inner()), file_name: Some(format!("photo-{k}.png")) }
+        })
+        .collect();
+    harness.state().send(langis_core::Command::SendImages { conversation: notes.clone(), images, caption: "Four from the ridge".into(), quote: None, mentions: Vec::new(), styles: Vec::new() });
+    wait(&mut harness, "four photos", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.attachments.len() == 4 && m.attachments.iter().all(|a| a.local_path.is_some()))));
+    harness.state_mut().chat.as_mut().unwrap().scroll_to_bottom = 10;
+    wait(&mut harness, "scrolled", |_| true);
+    save(&mut harness, "image-grid");
+
     // A shared contact, a payment and a gift badge.
     let ids: Vec<_> = harness.state().conversations.iter().map(|c| c.id.clone()).collect();
     let (with, card) = ids
