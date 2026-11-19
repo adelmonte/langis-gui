@@ -155,6 +155,15 @@ fn offers(app: &App, m: &Message, c: &langis_store::Conversation, pinned: bool) 
     }
 }
 
+/// A sticker's pack id, key and sticker id, from the hex its message keeps.
+fn sticker_ref(pack: &langis_store::StickerPackRef) -> Option<(Vec<u8>, Vec<u8>, u32)> {
+    let hex = |s: &str| -> Option<Vec<u8>> {
+        (s.len() % 2 == 0).then_some(())?;
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+    };
+    Some((hex(&pack.id)?, hex(&pack.key)?, pack.sticker_id?))
+}
+
 /// Whether langis will forward `m` (its rule in `Command::Forward`, after
 /// Desktop's `canForward`): not deleted, a poll, view-once or a notice, and
 /// every attachment downloaded and not a sticker.
@@ -190,6 +199,14 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
                 }
                 if offer.reply && ui.item(Some("reply"), "Reply") {
                     out.push(Do::Reply(id));
+                }
+                // Desktop's sticker favorite, from the sticker's pack.
+                if let Some((pack_id, pack_key, sticker_id)) = m.attachments.iter().find(|a| a.sticker).and_then(|a| a.sticker_pack.as_ref()).and_then(sticker_ref).filter(|_| !m.deleted) {
+                    let favorite = app.fun.favorite_ids.iter().any(|(p, s)| *p == pack_id && *s == sticker_id);
+                    let (symbol, label) = if favorite { ("star-slash", "Remove from Favorites") } else { ("star", "Add to Favorites") };
+                    if ui.item(Some(symbol), label) {
+                        out.push(Do::Command(Command::SetStickerFavorite { pack_id, pack_key, sticker_id, favorite: !favorite }));
+                    }
                 }
                 if offer.react && ui.item(Some("heart-plus"), "React") {
                     out.push(Do::ReactBar(id));

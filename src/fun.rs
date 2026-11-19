@@ -34,6 +34,8 @@ pub struct Fun {
     pub tab: Tab,
     pub packs: Vec<Arc<StickerPackView>>,
     pub favorites: Vec<FavoriteStickerView>,
+    /// Every favorite by (pack id, sticker id), image here or not.
+    pub favorite_ids: Vec<(Vec<u8>, u32)>,
     asked: bool,
     /// The pack shown; `None` for favorites.
     pack: Option<Vec<u8>>,
@@ -64,6 +66,7 @@ impl Fun {
                 }
             }
             Event::FavoriteStickers(favorites) => self.favorites = favorites.clone(),
+            Event::FavoriteStickerIds(ids) => self.favorite_ids = ids.clone(),
             Event::StickerManager(view) => self.manager = Some(view.clone()),
             Event::StickerPackPreview { id, result } => {
                 if let Some((open, _, slot)) = self.preview.as_mut()
@@ -268,7 +271,8 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                         ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                     }
                     sticker_image(ui, &sticker.path, rect.shrink(6.));
-                    let favorite = fun.favorites.iter().any(|f| f.pack_id == pack.id && f.sticker.id == sticker.id);
+                    let favorite = fun.favorite_ids.iter().any(|(p, s)| *p == pack.id && *s == sticker.id)
+                        || fun.favorites.iter().any(|f| f.pack_id == pack.id && f.sticker.id == sticker.id);
                     if favorite {
                         ui.painter().text(rect.right_top() + Vec2::new(-8., 6.), Align2::RIGHT_TOP, "★", theme::regular(13.), palette.badge);
                     }
