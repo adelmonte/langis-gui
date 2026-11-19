@@ -159,7 +159,7 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, conversation: &Conver
     let count = sections.len();
     for (s, (name, items)) in sections.iter().enumerate() {
         if tab == Tab::Media {
-            media_section(app, ui, palette, pad, width, name, items);
+            media_section(app, ui, palette, pad, width, name, items, conversation);
         } else {
             list_section(app, ui, palette, pad, width, name, items, tab, conversation);
             if s + 1 < count {
@@ -179,7 +179,8 @@ fn heading(ui: &mut Ui, palette: &Palette, x: f32, top: f32, bottom: f32, name: 
 }
 
 /// A grid of 3 to 5 square tiles, 100 to 120 each, 4 apart (`px-5`).
-fn media_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: f32, name: &str, items: &[&Entry]) {
+#[allow(clippy::too_many_arguments)]
+fn media_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: f32, name: &str, items: &[&Entry], conversation: &ConversationId) {
     heading(ui, palette, pad + 20. + 4., 16., 8., name);
     let inner = width - 40.;
     let columns = if inner >= 560. { 5 } else if inner >= 455. { 4 } else { 3 };
@@ -195,7 +196,10 @@ fn media_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width:
         let radius = CornerRadius::same(7);
         ui.painter().rect_filled(rect, radius, palette.fill);
         let video = a.content_type.starts_with("video/");
-        let image = if video { a.thumbnail_path.as_ref() } else { a.local_path.as_ref().or(a.thumbnail_path.as_ref()) };
+        // A video's thumbnail, else its first frame once downloaded.
+        let poster = if video && a.thumbnail_path.is_none() { a.local_path.as_deref().and_then(|p| crate::video::poster(ui.ctx(), p)) } else { None };
+        let image = if video { a.thumbnail_path.as_ref().or(poster.as_ref()) } else { a.local_path.as_ref().or(a.thumbnail_path.as_ref()) };
+        item_menu(app, ui, &response, e.message, Some(index), Tab::Media, conversation);
         if let Some(path) = image {
             // `object-cover`: the middle square of the picture.
             let uv = match (a.width, a.height) {
@@ -271,6 +275,7 @@ fn list_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: 
         let (full, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
         let row = Rect::from_min_max(Pos2::new(full.left() + pad + 10., full.top()), Pos2::new(full.left() + pad + width - 10., full.bottom()));
         let response = ui.interact(row, egui::Id::unique("media-row").with((m.id, e.index)), Sense::click());
+        item_menu(app, ui, &response, m, e.index, tab, conversation);
         if response.hovered() {
             let fill = if response.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill };
             ui.painter().rect_filled(row, CornerRadius::same(9), fill);
@@ -331,12 +336,74 @@ fn list_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: 
                         crate::chat::open_externally(&p.url);
                     }
                 }
+                // Desktop plays audio in its mini player and saves files.
+                (Tab::Audio, Some(a)) => match &a.local_path {
+                    Some(path) => {
+                        let duration = app.audio.peaks(ui.ctx(), path).map(|p| p.duration).unwrap_or(0.);
+                        let title = match &m.author { None => "You".to_owned(), Some(sid) => app.name(sid) };
+                        let path = path.clone();
+                        app.audio.toggle(m.id, conversation, title, &path, duration, None);
+                    }
+                    None => app.send(Command::FetchAttachment { message_id: m.id, index: e.index.unwrap_or(0) }),
+                },
                 (_, Some(a)) => match &a.local_path {
-                    Some(path) => crate::chat::open_externally(path),
+                    Some(_) => crate::actions::save_attachment(app, m, e.index.unwrap_or(0)),
                     None => app.send(Command::FetchAttachment { message_id: m.id, index: e.index.unwrap_or(0) }),
                 },
                 _ => {}
             }
         }
+    }
+}
+
+/// Desktop's `MediaContextMenu` on a right-click: show it in the chat,
+/// forward, save, copy a link, delete it here.
+fn item_menu(app: &mut App, ui: &Ui, response: &egui::Response, m: &Message, index: Option<usize>, tab: Tab, conversation: &ConversationId) {
+    let menu = egui::Id::unique("media-menu").with((m.id, index));
+    if response.secondary_clicked()
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        crate::menu::open_at(ui.ctx(), menu, at);
+    }
+    let mut todo = None;
+    crate::menu::show(ui.ctx(), menu, |menu| {
+        if menu.item(Some("arrow-[end]"), "View in chat") {
+            todo = Some(0);
+        }
+        if crate::actions::can_forward(m) && menu.item(Some("forward"), "Forward") {
+            todo = Some(1);
+        }
+        if tab == Tab::Links {
+            if menu.item(Some("copy"), "Copy link") {
+                todo = Some(4);
+            }
+        } else if index.is_some() && menu.item(Some("download"), "Save") {
+            todo = Some(2);
+        }
+        if menu.item(Some("trash"), "Delete") {
+            todo = Some(3);
+        }
+    });
+    match todo {
+        Some(0) => {
+            app.panes.details = None;
+            app.open_at(conversation.clone(), m.id);
+        }
+        Some(1) => {
+            app.panes.details = None;
+            app.open_at(conversation.clone(), m.id);
+            if let Some(chat) = app.chat.as_mut() {
+                chat.dialog = Some(crate::actions::Dialog::Forward { messages: vec![m.id], query: String::new(), chosen: Vec::new() });
+            }
+        }
+        Some(2) => crate::actions::save_attachment(app, m, index.unwrap_or(0)),
+        Some(3) => app.send(Command::DeleteForMe { message_ids: vec![m.id] }),
+        Some(4) => {
+            if let Some(p) = &m.link_preview {
+                ui.ctx().copy_text(p.url.clone());
+                app.toast("Copied to clipboard");
+            }
+        }
+        _ => {}
     }
 }
