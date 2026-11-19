@@ -453,7 +453,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             Action::FetchLongText(message_id) => app.send(Command::FetchLongText { message_id }),
             Action::Jump(message_id) => app.open_at(id.clone(), message_id),
             Action::Notice(button) => match button {
-                NoticeButton::Call { video } => app.send(Command::StartCall { conversation: id.clone(), video }),
+                NoticeButton::Call { video } => crate::panes::open_lobby(app, id.clone(), video),
                 NoticeButton::Join => crate::panes::open_lobby(app, id.clone(), true),
                 NoticeButton::Safety(who) => crate::details::open_safety(app, ConversationId::direct(&who)),
                 NoticeButton::Go { author, sent_at } => {
@@ -662,18 +662,12 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                     if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
                         let group = c.kind == ConversationKind::Group;
                         if widgets::icon_button(ui, Icon::Phone, 20., "Start a voice call").clicked() {
-                            if group {
-                                crate::panes::open_lobby(app, c.id.clone(), false);
-                            } else {
-                                app.send(Command::StartCall { conversation: c.id.clone(), video: false });
-                            }
+                            // Desktop shows the lobby before every call.
+                            crate::panes::open_lobby(app, c.id.clone(), false);
+                            let _ = group;
                         }
                         if widgets::icon_button(ui, Icon::Video, 20., "Start a video call").clicked() {
-                            if group {
-                                crate::panes::open_lobby(app, c.id.clone(), true);
-                            } else {
-                                app.send(Command::StartCall { conversation: c.id.clone(), video: true });
-                            }
+                            crate::panes::open_lobby(app, c.id.clone(), true);
                         }
                     }
                 });

@@ -250,7 +250,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.call_view.pip = app.call.is_some();
             app.open(direct);
         }
-        Do::Call(video) => app.send(Command::StartCall { conversation: direct, video }),
+        Do::Call(video) => crate::panes::open_lobby(app, direct, video),
         Do::Nickname => {
             app.open(direct.clone());
             crate::details::open_nickname(app, direct);

@@ -288,11 +288,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
 /// Calls a chat (a group's lobby first) or joins a link's call.
 fn call(app: &mut App, conversation: &ConversationId, video: bool) {
-    if conversation.is_group() || conversation.as_call_link().is_some() {
-        crate::panes::open_lobby(app, conversation.clone(), video);
-    } else {
-        app.send(Command::StartCall { conversation: conversation.clone(), video });
-    }
+    crate::panes::open_lobby(app, conversation.clone(), video);
 }
 
 /// One history row: avatar, name, what happened, when, and a call button.

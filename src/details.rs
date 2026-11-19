@@ -651,11 +651,8 @@ fn header_buttons(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversatio
 }
 
 fn start_call(app: &mut App, c: &Conversation, video: bool) {
-    if c.kind == ConversationKind::Group {
-        crate::panes::open_lobby(app, c.id.clone(), video);
-    } else {
-        app.send(Command::StartCall { conversation: c.id.clone(), video });
-    }
+    // Desktop's lobby comes first, for 1:1 calls too.
+    crate::panes::open_lobby(app, c.id.clone(), video);
 }
 
 fn set_page(app: &mut App, page: Page) {

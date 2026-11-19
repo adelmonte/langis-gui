@@ -95,6 +95,10 @@ pub struct Lobby {
     /// Who's in the call now (ACIs).
     pub users: Vec<String>,
     pub video: bool,
+    /// Our microphone, on when the call starts.
+    pub audio: bool,
+    /// The camera preview langis was asked for (SetCallVideo).
+    pub preview: bool,
 }
 
 /// Desktop's "New chat" and "New group" flows.
@@ -152,7 +156,7 @@ pub fn on_event(app: &mut App, event: Event) {
             load_calls(app);
             let conversation = ConversationId::call_link(&room);
             app.send(Command::PeekGroupCall { conversation: conversation.clone() });
-            app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video: false });
+            app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video: false, audio: true, preview: false });
         }
         Event::CallLinkRefused { removed } => {
             app.toast(if removed { "You were removed from the call." } else { "Your request to join this call was declined." });
@@ -1460,50 +1464,126 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     let palette = Palette::of(ui.ctx());
     let conversation = lobby.conversation.clone();
     let users = lobby.users.clone();
-    let mut video = lobby.video;
+    let (mut video, mut audio, preview) = (lobby.video, lobby.audio, lobby.preview);
+    // The camera runs for the preview while it's on (langis's SetCallVideo
+    // works before a call, for the lobby).
+    if video != preview {
+        app.send(Command::SetCallVideo(video));
+        if let Some(l) = app.panes.lobby.as_mut() {
+            l.preview = video;
+        }
+    }
+    let group = conversation.is_group() || conversation.as_call_link().is_some();
+    let chat = app.conversation(&conversation).cloned();
     let title_text = match conversation.as_call_link() {
         Some(room) => app.panes.links.iter().find(|l| l.room_id == room).map(|l| if l.name.is_empty() { "Signal call".to_owned() } else { l.name.clone() }).unwrap_or_else(|| "Signal call".into()),
-        None => app.conversation(&conversation).map(|c| c.title.clone()).unwrap_or_default(),
+        None => chat.as_ref().map(|c| c.title.clone()).unwrap_or_default(),
     };
     let mut answer = None;
-    let closed = modal(ui, "lobby", 380., |ui| {
+    let mut settings = false;
+    let closed = modal(ui, "lobby", 420., |ui| {
         ui.vertical_centered(|ui| {
+            // Desktop's `CallingLobby`: our camera (or our photo), 16:9.
+            let (frame, _) = ui.allocate_exact_size(Vec2::new(372., 210.), Sense::hover());
+            ui.painter().rect_filled(frame, CornerRadius::same(12), egui::Color32::from_gray(32));
+            let slot = app.backend.as_ref().map(|b| b.call_video().local.clone());
+            let shown = video
+                && slot.and_then(|slot| app.call_view.texture(ui.ctx(), "lobby-local", &slot)).is_some_and(|(texture, size)| {
+                    let scale = (frame.width() / size.x).max(frame.height() / size.y);
+                    let shown = size * scale;
+                    let uv_w = (frame.width() / shown.x).min(1.);
+                    let uv_h = (frame.height() / shown.y).min(1.);
+                    let uv = Rect::from_center_size(egui::pos2(0.5, 0.5), Vec2::new(uv_w, uv_h));
+                    egui::Image::new((texture.id(), frame.size())).uv(uv).corner_radius(CornerRadius::same(12)).paint_at(ui, frame);
+                    true
+                });
+            if !shown {
+                let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
+                widgets::paint_avatar(ui, Rect::from_center_size(frame.center(), Vec2::splat(72.)), &spec);
+                if video {
+                    ui.painter().text(frame.center() + Vec2::new(0., 56.), egui::Align2::CENTER_CENTER, "Starting camera…", theme::regular(12.), egui::Color32::from_white_alpha(200));
+                }
+            }
+            ui.add_space(12.);
             ui.label(RichText::new(&title_text).font(theme::semibold(18.)));
-            ui.add_space(6.);
-            let who = match users.len() {
-                0 => "No one else is here".to_owned(),
-                1 => format!("{} is in this call", app.name(&users[0])),
-                2 => format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])),
-                n => format!("{}, {} and {} others are in this call", app.name(&users[0]), app.name(&users[1]), n - 2),
+            ui.add_space(4.);
+            // `CallingPreCallInfo`.
+            let who = if group {
+                match users.len() {
+                    0 => "No one else is here".to_owned(),
+                    1 => format!("{} is in this call", app.name(&users[0])),
+                    2 => format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])),
+                    n => format!("{}, {} and {} others are in this call", app.name(&users[0]), app.name(&users[1]), n - 2),
+                }
+            } else {
+                format!("Signal will ring {}", title_text)
             };
             body(ui, &palette, &who);
             ui.add_space(12.);
+            // Camera, microphone, settings: Desktop's `CallingButton`s.
             ui.horizontal(|ui| {
-                ui.label("Camera");
-                widgets::switch(ui, &mut video);
+                ui.add_space((ui.available_width() - 3. * 56.) / 2.);
+                for (symbol_on, symbol_off, label, on) in [
+                    ("videocamera", "videocamera-slash", "Camera", Some(&mut video)),
+                    ("mic", "mic-slash", "Microphone", Some(&mut audio)),
+                    ("settings", "settings", "Settings", None),
+                ] {
+                    let (rect, r) = ui.allocate_exact_size(Vec2::new(56., 44.), Sense::click());
+                    let lit = on.as_ref().is_none_or(|v| **v);
+                    let fill = if lit { palette.fill } else { palette.text };
+                    let ink = if lit { palette.text } else { palette.background };
+                    ui.painter().circle_filled(rect.center(), 20., if r.hovered() { fill.gamma_multiply(0.85) } else { fill });
+                    theme::paint_symbol(ui.painter(), if lit { symbol_on } else { symbol_off }, rect.center(), 20., ink);
+                    if r.on_hover_text(label).clicked() {
+                        match on {
+                            Some(v) => *v = !*v,
+                            None => settings = true,
+                        }
+                    }
+                }
             });
         });
-        answer = buttons(ui, &[if users.is_empty() { "Start call" } else { "Join call" }, "Cancel"]);
+        answer = buttons(ui, &[if group && !users.is_empty() { "Join call" } else { "Start call" }, "Cancel"]);
     });
     if let Some(l) = app.panes.lobby.as_mut() {
         l.video = video;
+        l.audio = audio;
+    }
+    if settings {
+        app.send(Command::LoadCallDevices);
+        app.call_view.settings_open = true;
     }
     match answer {
         Some(0) => {
             app.call_view.video_on = Some(video);
+            app.call_view.audio_on = audio;
             app.send(Command::StartCall { conversation, video });
+            if !audio {
+                app.send(Command::SetCallAudio(false));
+            }
             app.panes.lobby = None;
         }
-        Some(_) => app.panes.lobby = None,
-        None if closed => app.panes.lobby = None,
+        Some(_) => close_lobby(app),
+        None if closed => close_lobby(app),
         None => {}
     }
 }
 
-/// Opens the lobby for a group's call (Desktop shows it before joining).
+/// Leaves the lobby without calling: its camera preview goes off.
+fn close_lobby(app: &mut App) {
+    if app.panes.lobby.as_ref().is_some_and(|l| l.preview) {
+        app.send(Command::SetCallVideo(false));
+    }
+    app.panes.lobby = None;
+}
+
+/// Opens Desktop's `CallingLobby`, before any call: a group's or a call
+/// link's is peeked for who's there.
 pub fn open_lobby(app: &mut App, conversation: ConversationId, video: bool) {
-    app.send(Command::PeekGroupCall { conversation: conversation.clone() });
-    app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video });
+    if conversation.is_group() || conversation.as_call_link().is_some() {
+        app.send(Command::PeekGroupCall { conversation: conversation.clone() });
+    }
+    app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video, audio: true, preview: false });
 }
 
 /// Desktop's captcha dialog: the challenge opens in the browser, which

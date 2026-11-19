@@ -168,7 +168,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         let callable = app.conversation(&id).is_some_and(|c| c.kind == langis_store::ConversationKind::Direct && !c.blocked);
         for (key, video) in [(Key::C, false), (Key::Y, true)] {
             if pressed(ctx, ALT_SHIFT, key) && callable {
-                app.send(Command::StartCall { conversation: id.clone(), video });
+                crate::panes::open_lobby(app, id.clone(), video);
             }
         }
     }

@@ -48,7 +48,7 @@ const PIP_PADDING: f32 = 15.;
 
 impl CallView {
     /// The slot's latest frame as a texture, uploaded only when it's new.
-    fn texture(&mut self, ctx: &egui::Context, key: &str, slot: &FrameSlot) -> Option<(TextureHandle, Vec2)> {
+    pub fn texture(&mut self, ctx: &egui::Context, key: &str, slot: &FrameSlot) -> Option<(TextureHandle, Vec2)> {
         let frame: Frame = slot.latest()?;
         let size = Vec2::new(frame.width as f32, frame.height as f32);
         if let Some((seq, texture)) = self.textures.get(key)
@@ -484,7 +484,8 @@ pub fn pip(app: &mut App, ctx: &egui::Context) {
 /// Desktop's `CallingDeviceSelection`: an `sm` AxoDialog, "Call Settings",
 /// with the camera, microphone and speakers to choose from.
 pub fn settings_dialog(app: &mut App, ctx: &egui::Context) {
-    if !app.call_view.settings_open || app.call.is_none() {
+    // From a call, or from the lobby before one.
+    if !app.call_view.settings_open || (app.call.is_none() && app.panes.lobby.is_none()) {
         app.call_view.settings_open = false;
         return;
     }
