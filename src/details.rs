@@ -143,12 +143,16 @@ pub const TIMERS: [(u32, &str); 9] = [
 ];
 
 /// A drop-down of [`TIMERS`]; true when it changed.
-pub fn timer_picker(ui: &mut Ui, id: &str, seconds: &mut u32) -> bool {
+pub fn timer_picker(ui: &mut Ui, id: &str, seconds: &mut u32, custom: &mut bool) -> bool {
     let before = *seconds;
     let label = TIMERS.iter().find(|(s, _)| s == seconds).map(|(_, l)| (*l).to_owned()).unwrap_or_else(|| crate::format::timer_long(*seconds));
     egui::ComboBox::from_id_salt(id).selected_text(label).show_ui(ui, |ui| {
         for (s, l) in TIMERS.iter().filter(|(s, _)| *s != u32::MAX) {
             ui.selectable_value(seconds, *s, *l);
+        }
+        // Desktop's `DisappearingTimerSelect` ends with Custom time.
+        if ui.selectable_label(false, "Custom time…").clicked() {
+            *custom = true;
         }
     });
     *seconds != before
@@ -306,7 +310,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         if let Some(i) = axo_list::select(ui, egui::Id::unique("details-timer").with(&c.id.0), item, &options, chosen) {
             if i == values.len() {
                 let (value, unit) = crate::panes::custom_timer_start(if c.expire_timer > 0 { c.expire_timer } else { 3_600 });
-                app.panes.custom_timer = Some((c.id.clone(), value, unit));
+                app.panes.custom_timer = Some((crate::panes::TimerTarget::Chat(c.id.clone()), value, unit));
             } else {
                 app.send(Command::SetExpireTimer { conversation: c.id.clone(), seconds: values[i] });
             }

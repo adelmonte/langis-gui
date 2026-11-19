@@ -989,13 +989,20 @@ fn privacy(app: &mut App, ui: &mut Ui, s: &Snapshot) {
         if !values.contains(&s.universal_timer) {
             values.push(s.universal_timer);
         }
-        let labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
+        let mut labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
+        labels.push("Custom time…".to_owned());
         let options: Vec<&str> = labels.iter().map(String::as_str).collect();
         let chosen = values.iter().position(|v| *v == s.universal_timer);
         let item = Item::new("Default timer for new chats").description("Set a default disappearing message timer for all new chats started by you.");
         if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("universal-timer"), item, &options, chosen) {
-            app.send(Command::SetUniversalExpireTimer(values[i]));
-            app.settings.stale = true;
+            if i == values.len() {
+                // Desktop's Custom time, for the default too.
+                let (value, unit) = crate::panes::custom_timer_start(if s.universal_timer > 0 { s.universal_timer } else { 3_600 });
+                app.panes.custom_timer = Some((crate::panes::TimerTarget::Universal, value, unit));
+            } else {
+                app.send(Command::SetUniversalExpireTimer(values[i]));
+                app.settings.stale = true;
+            }
         }
     });
     axo_list::gap(ui);

@@ -2720,7 +2720,7 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
                 let label = if custom { format!("Custom time ({})", crate::format::timer_long(c.expire_timer)) } else { "Custom time...".to_owned() };
                 if m.check(custom, &label) {
                     let (value, unit) = crate::panes::custom_timer_start(if custom { c.expire_timer } else { 3_600 });
-                    app.panes.custom_timer = Some((id.clone(), value, unit));
+                    app.panes.custom_timer = Some((crate::panes::TimerTarget::Chat(id.clone()), value, unit));
                 }
             });
         }

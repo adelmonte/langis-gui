@@ -129,7 +129,7 @@ fn screenshots_panes() {
     wait(&mut harness, "block confirm", |_| true);
     save(&mut harness, "confirm-block");
     harness.state_mut().panes.chat_confirm = None;
-    harness.state_mut().panes.custom_timer = Some((direct.clone(), 2, 3));
+    harness.state_mut().panes.custom_timer = Some((crate::panes::TimerTarget::Chat(direct.clone()), 2, 3));
     wait(&mut harness, "custom timer", |_| true);
     save(&mut harness, "custom-timer");
     harness.state_mut().panes.custom_timer = None;

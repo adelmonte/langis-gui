@@ -31,7 +31,7 @@ pub struct Panes {
     /// A chat action waiting on its confirmation (`chat_confirm_dialog`).
     pub chat_confirm: Option<(ConversationId, ChatConfirm)>,
     /// Desktop's `DisappearingTimeDialog`: the chat, the number and unit.
-    pub custom_timer: Option<(ConversationId, u32, usize)>,
+    pub custom_timer: Option<(TimerTarget, u32, usize)>,
     /// Desktop's `MuteUntilDialog`: the chat, and the date and time typed.
     pub mute_until: Option<(ConversationId, String, String)>,
     /// Asking before clearing the call history.
@@ -654,6 +654,15 @@ pub fn chat_confirm_dialog(app: &mut App, ctx: &egui::Context) {
 const TIME_UNITS: [(&str, u32, u32); 5] = [("Seconds", 1, 60), ("Minutes", 60, 60), ("Hours", 3600, 24), ("Days", 86_400, 7), ("Weeks", 604_800, 5)];
 
 /// A timer as Desktop's dialog starts it: the largest unit it fills.
+/// What a Custom Time is for: a chat's timer, the default for new chats,
+/// or the group being made.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TimerTarget {
+    Chat(ConversationId),
+    Universal,
+    NewGroup,
+}
+
 pub fn custom_timer_start(seconds: u32) -> (u32, usize) {
     let mut out = (1, 0);
     for (i, (_, unit, _)) in TIME_UNITS.iter().enumerate() {
@@ -688,7 +697,19 @@ pub fn custom_time_dialogs(app: &mut App, ctx: &egui::Context) {
         });
         match answer {
             Some(Answer::Action(_)) => {
-                app.send(Command::SetExpireTimer { conversation: id, seconds: value * TIME_UNITS[unit].1 });
+                let seconds = value * TIME_UNITS[unit].1;
+                match id {
+                    TimerTarget::Chat(conversation) => app.send(Command::SetExpireTimer { conversation, seconds }),
+                    TimerTarget::Universal => {
+                        app.send(Command::SetUniversalExpireTimer(seconds));
+                        app.settings.stale = true;
+                    }
+                    TimerTarget::NewGroup => {
+                        if let Some(Compose::Group { timer, .. }) = app.panes.compose.as_mut() {
+                            *timer = seconds;
+                        }
+                    }
+                }
                 app.panes.custom_timer = None;
             }
             Some(Answer::Cancel) => app.panes.custom_timer = None,
@@ -1108,6 +1129,8 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
 /// chat list. False when there's no compose step open.
 pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
     let Some(mut compose) = app.panes.compose.take() else { return false };
+    // A Custom time picked for the new group, opened once the pane's done.
+    let mut custom_for_group: Option<(u32, usize)> = None;
     let palette = Palette::of(ui.ctx());
     let mut keep = true;
     let mut next: Option<Compose> = None;
@@ -1167,7 +1190,12 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                     ui.label(RichText::new("Disappearing messages").font(theme::regular(14.)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(16.);
-                        crate::details::timer_picker(ui, "new-group-timer", timer);
+                        let mut custom = false;
+                        crate::details::timer_picker(ui, "new-group-timer", timer, &mut custom);
+                        if custom {
+                            let (value, unit) = custom_timer_start(if *timer > 0 { *timer } else { 3_600 });
+                            custom_for_group = Some((value, unit));
+                        }
                     });
                 });
                 ui.add_space(8.);
@@ -1359,6 +1387,9 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
         app.panes.compose = Some(n);
     } else if keep {
         app.panes.compose = Some(compose);
+    }
+    if let Some((value, unit)) = custom_for_group {
+        app.panes.custom_timer = Some((TimerTarget::NewGroup, value, unit));
     }
     true
 }
