@@ -123,6 +123,8 @@ enum Action {
     Open(String),
     /// A person's `ContactModal`.
     Contact(String),
+    /// Opens a 1:1 chat (a shared contact's Message).
+    Chat(langis_store::ConversationId),
     /// Read more: 3000 more characters of a long message.
     ReadMore(i64),
     /// Play or pause a message's audio, or (at, 0 to 1) play from a point.
@@ -397,6 +399,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             Action::AudioRate => app.audio.cycle_rate(),
             Action::Contact(aci) => crate::contact_modal::open(app, Some(id.clone()), aci),
+            Action::Chat(chat) => app.open(chat),
             Action::ReadMore(message_id) => {
                 if let Some(chat) = app.chat.as_mut() {
                     let limit = chat.expanded.entry(message_id).or_insert(READ_MORE_LENGTH);
@@ -973,6 +976,7 @@ fn message(
     let media_w = images.first().map(|(_, a)| media_size(a, None).x.min(max_bubble)).unwrap_or(0.);
     let inner_max = if images.is_empty() { max_bubble - 24. } else { media_w - 24. };
     let poll_view = m.poll.as_ref().filter(|_| !m.deleted).map(|p| crate::polls::layout(ui, p, inner_max.min(300.), in_color));
+    let content = m.content.as_ref().filter(|_| !m.deleted);
     let galley = rich.as_ref().map(|r| {
         let mut job = r.job.clone();
         job.wrap.max_width = inner_max;
@@ -1046,7 +1050,7 @@ fn message(
     let all_audio = !files.is_empty() && files.iter().all(|(_, a)| is_audio(a));
     // Desktop draws no preview on a message with attachments.
     let preview = m.link_preview.as_ref().filter(|_| m.attachments.is_empty());
-    if m.quote.is_some() || preview.is_some() || (!files.is_empty() && !all_audio) || poll_view.is_some() {
+    if m.quote.is_some() || preview.is_some() || (!files.is_empty() && !all_audio) || poll_view.is_some() || content.is_some() {
         content_w = content_w.max(inner_max.min(300.));
     }
     if all_audio {
@@ -1069,6 +1073,7 @@ fn message(
     let preview_card = preview.map(|p| PreviewCard::layout(ui, palette, p, bubble_w));
     let preview_h = preview_card.as_ref().map(|c| c.height + 5. + if preview_first { 0. } else { 4. }).unwrap_or(0.);
     let poll_h = poll_view.as_ref().map(|p| p.height).unwrap_or(0.);
+    let content_h = content.map(content_height).unwrap_or(0.);
     // Desktop's line under a long message's start, while the rest isn't here.
     let long_line = m.long_text.as_ref().filter(|_| !m.deleted).map(|l| match l.state {
         langis_store::LongTextState::Downloading => ("Downloading the rest…", false),
@@ -1080,7 +1085,7 @@ fn message(
     let meta_h = if show_meta && !meta_inline { 16. } else { 0. };
     let media_only = !images.is_empty() && galley.is_none() && m.quote.is_none() && name_galley.is_none() && files.is_empty();
     let top_pad = if media_only || (images.first().is_some() && name_galley.is_none() && m.quote.is_none()) || (preview_card.is_some() && preview_first) { 0. } else { pad.y };
-    let text_block = name_h + quote_h + files_h + preview_h + poll_h + text_h + meta_h;
+    let text_block = name_h + quote_h + files_h + preview_h + poll_h + content_h + text_h + meta_h;
     let bubble_h = top_pad + media_h + if media_only && meta_h > 0. { 0. } else if text_block > 0. { text_block + pad.y + if media_h > 0. { pad.y } else { 0. } } else { 0. };
     let bubble_h = bubble_h.max(if media_only { media_h } else { 36. });
 
@@ -1185,6 +1190,14 @@ fn message(
             None => {}
         }
         y += poll_h;
+    }
+    if let Some(content) = content {
+        let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., content_h));
+        let sender = (!outgoing).then(|| m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into()));
+        if let Some(action) = content_block(ui, palette, content, sender.as_deref(), rect, outgoing, in_color, meta_color, ui.scope_id().with(("content", m.id))) {
+            actions.push(action);
+        }
+        y += content_h;
     }
     let mut revealed_now = None;
     if let (Some(g), Some(rich)) = (galley, rich.as_ref()) {
@@ -1578,6 +1591,100 @@ fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, re
     job.wrap = egui::text::TextWrapping::truncate_at_width(inner.width() - thumb_w - 4.);
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     ui.painter().galley(Pos2::new(inner.left() + 2., inner.top() + 19.), galley, text_color);
+}
+
+/// How tall a message's contact card, payment or gift badge is.
+fn content_height(content: &langis_store::MessageContent) -> f32 {
+    use langis_store::MessageContent;
+    match content {
+        // `EmbeddedContact`: 4 above, the 52px row, 12, the button, 6 under.
+        MessageContent::Contact(c) => 4. + 52. + if c.aci.is_some() { 12. + 32. } else { 0. } + 6.,
+        MessageContent::Payment(_) => 48.,
+        MessageContent::GiftBadge(_) => 64.,
+    }
+}
+
+/// Desktop's `EmbeddedContact` (the photo, the name and a chevron, then
+/// Message for someone on Signal), its payment notification and its gift
+/// badge, which are redeemed on the phone.
+#[allow(clippy::too_many_arguments)]
+fn content_block(
+    ui: &Ui,
+    palette: &Palette,
+    content: &langis_store::MessageContent,
+    sender: Option<&str>,
+    rect: Rect,
+    outgoing: bool,
+    text: Color32,
+    secondary: Color32,
+    id: egui::Id,
+) -> Option<Action> {
+    use langis_store::{GiftBadgeState, MessageContent};
+    let mut action = None;
+    let line = |y: f32, s: String, font: egui::FontId, color: Color32| {
+        let mut job = egui::text::LayoutJob::simple_singleline(s, font, color);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width());
+        let g = ui.fonts_mut(|f| f.layout_job(job));
+        ui.painter().galley(Pos2::new(rect.left(), y), g, color);
+    };
+    match content {
+        MessageContent::Contact(c) => {
+            let name = c.display_nickname().or_else(|| c.display_name()).or_else(|| c.organization.clone()).unwrap_or_else(|| "Unknown contact".into());
+            let row = Rect::from_min_size(Pos2::new(rect.left(), rect.top() + 4.), Vec2::new(rect.width(), 52.));
+            let spec = widgets::AvatarSpec { name: &name, color: 0, photo: c.avatar.as_ref().and_then(|a| a.local_path.as_deref()), group: false, note_to_self: false };
+            widgets::paint_avatar(ui, Rect::from_min_size(row.min, Vec2::splat(52.)), &spec);
+            let mut job = egui::text::LayoutJob::simple_singleline(name.clone(), theme::medium(16.), text);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(row.width() - 52. - 12. - 32.);
+            let g = ui.fonts_mut(|f| f.layout_job(job));
+            ui.painter().galley(Pos2::new(row.left() + 64., row.center().y - g.size().y / 2.), g, text);
+            theme::paint_symbol(ui.painter(), "chevron-[end]", Pos2::new(row.right() - 10., row.center().y), 20., secondary);
+            // The row opens who they are: their Signal profile when known.
+            let response = ui.interact(row, id.with("row"), Sense::click());
+            if let Some(aci) = &c.aci {
+                if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    action = Some(Action::Contact(aci.clone()));
+                }
+                let button = Rect::from_min_size(Pos2::new(rect.left(), row.bottom() + 12.), Vec2::new(rect.width(), 32.));
+                let b = ui.interact(button, id.with("message"), Sense::click());
+                let fill = if outgoing { Color32::from_white_alpha(if b.hovered() { 70 } else { 50 }) } else if b.hovered() { palette.fill_pressed } else { palette.fill };
+                ui.painter().rect_filled(button, CornerRadius::same(16), fill);
+                ui.painter().text(button.center(), Align2::CENTER_CENTER, "Message", theme::semibold(14.), text);
+                if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    action = Some(Action::Chat(langis_store::ConversationId::direct(aci)));
+                }
+            } else {
+                // Without a Signal account, the card lists how to reach them.
+                let how: Vec<String> = c.numbers.iter().chain(&c.emails).map(|m| m.value.clone()).collect();
+                if !how.is_empty() {
+                    response.on_hover_text(how.join("\n"));
+                }
+            }
+        }
+        MessageContent::Payment(p) => {
+            line(rect.top() + 4., "Payment".into(), theme::semibold(14.), text);
+            let note = match p {
+                langis_store::PaymentEvent::Notification { note: Some(n) } if !n.is_empty() => n.clone(),
+                _ => p.description(sender, None),
+            };
+            line(rect.top() + 24., note, theme::regular(13.), secondary);
+        }
+        MessageContent::GiftBadge(g) => {
+            line(rect.top() + 4., if outgoing { "Gift badge you sent".into() } else { "Gift badge".into() }, theme::semibold(14.), text);
+            let state = match g.state {
+                GiftBadgeState::Unopened if outgoing => "Sent",
+                GiftBadgeState::Unopened => "Open it on your phone to redeem it",
+                GiftBadgeState::Opened => "Opened",
+                GiftBadgeState::Redeemed => "Redeemed",
+                GiftBadgeState::Failed => "Couldn't be redeemed",
+            };
+            line(rect.top() + 24., state.into(), theme::regular(13.), secondary);
+            let left = chrono::DateTime::from_timestamp_millis(g.expiration).map(|t| t.with_timezone(&chrono::Local).format("Expires %b %-d, %Y").to_string());
+            if let Some(left) = left {
+                line(rect.top() + 42., left, theme::regular(12.), secondary);
+            }
+        }
+    }
+    action
 }
 
 /// Desktop's `module-message__link-preview`: a full-width image on top when
