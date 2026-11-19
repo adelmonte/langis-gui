@@ -20,6 +20,7 @@ mod details;
 mod diag;
 mod dialog;
 mod emoji_picker;
+mod export;
 mod format;
 mod fun;
 mod glyphs;

@@ -521,6 +521,23 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::gap(ui);
     let synced = s.contacts_synced_at.map(|at| format!("Import all Signal groups and contacts from your mobile device. Last import at {}", crate::format::short_timestamp(at)));
     axo_list::list(ui, None, None, |ui| {
+        // Desktop's Export chat history (plain text): each chat a text file,
+        // its files beside it.
+        let item = Item::new("Export chat history").description("Save every chat as a text file, with its downloaded files, to a folder you choose.");
+        if axo_list::item(ui, item, End::Action("Export", false)).clicked()
+            && let Some(folder) = rfd::FileDialog::new().set_title("Export chat history to").pick_folder()
+        {
+            let dir = folder.join(format!("Signal chats {}", chrono::Local::now().format("%Y-%m-%d %H%M")));
+            let names = app.names.clone();
+            app.toast("Exporting your chats…");
+            app.load(move |db| async move {
+                let result = crate::export::export_all(&db, &dir, &names).await;
+                Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| match result {
+                    Ok((chats, messages)) => app.toast(format!("Exported {chats} chats ({messages} messages) to {}", dir.display())),
+                    Err(error) => app.toast(format!("Couldn't export: {error}")),
+                })))
+            });
+        }
         let item = Item::new("Import contacts").description(synced.as_deref().unwrap_or("Import all Signal groups and contacts from your mobile device."));
         if axo_list::item(ui, item, End::Action("Import now", false)).clicked() {
             app.send(Command::SyncContacts);
