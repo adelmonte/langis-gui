@@ -200,6 +200,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let mut close = false;
     let mut go: Option<usize> = None;
     let mut save = false;
+    let mut forward = false;
     let mut fetch = false;
     let mut play = None;
     let neighbors: Vec<(usize, Item)> = lightbox
@@ -239,6 +240,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         x -= 44.;
         if !view_once && button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::Save, "Save") {
             save = true;
+        }
+        // Desktop's Lightbox Forward, for a message langis will forward.
+        let forwardable = !view_once && forward_target(app, &item).is_some();
+        x -= 44.;
+        if forwardable && button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::Forward, "Forward") {
+            forward = true;
         }
         ui.set_opacity(previous);
 
@@ -364,6 +371,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         if i.key_pressed(egui::Key::Escape) {
             close = true;
         }
+        // Desktop's `$mod+S`.
+        if i.modifiers.command && i.key_pressed(egui::Key::S) && !view_once {
+            save = true;
+        }
         if i.key_pressed(egui::Key::ArrowLeft) && index > 0 {
             go = Some(index - 1);
         }
@@ -389,9 +400,25 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             lightbox.zoomed = false;
         }
     }
+    if forward && let Some(chat) = forward_target(app, &item) {
+        let messages = vec![item.message_id];
+        app.close_lightbox();
+        if let Some(view) = app.chat.as_mut().filter(|_| app.selected.as_ref() == Some(&chat)) {
+            view.dialog = Some(crate::actions::Dialog::Forward { messages, query: String::new(), chosen: Vec::new() });
+        }
+        return;
+    }
     if close {
         app.close_lightbox();
     }
+}
+
+/// The open chat the item's message is in, if langis will forward it.
+fn forward_target(app: &App, item: &Item) -> Option<ConversationId> {
+    let chat = app.selected.clone()?;
+    let view = app.chat.as_ref()?;
+    let m = view.messages.iter().find(|m| m.id == item.message_id)?;
+    (m.conversation_id == chat && crate::actions::can_forward(m)).then_some(chat)
 }
 
 fn save_item(app: &mut App, item: &Item) {
