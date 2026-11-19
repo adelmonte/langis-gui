@@ -22,6 +22,7 @@ use crate::widgets;
 /// How long after the last keystroke "typing" stops (Desktop's
 /// `TYPING_IDLE_TIMEOUT`, a little under its 15s pause timer).
 const TYPING_IDLE: Duration = Duration::from_secs(3);
+const TYPING_REFRESH: Duration = Duration::from_secs(10);
 
 /// How long the text must rest before a link's preview is fetched
 /// (Desktop's `LINK_PREVIEW_DEBOUNCE`-like pause).
@@ -616,8 +617,12 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
         chat.spans.follow(&chat.composer);
         if response.changed() {
             chat.last_typed = Some(Instant::now());
-            if !chat.typing_sent && !chat.composer.is_empty() && chat.editing.is_none() {
+            // Desktop's typingRefreshTimer: "typing" again every 10 seconds,
+            // since other clients drop the indicator after 15 without one.
+            let refresh = chat.typing_refreshed.is_none_or(|t| t.elapsed() >= TYPING_REFRESH);
+            if (!chat.typing_sent || refresh) && !chat.composer.is_empty() && chat.editing.is_none() {
                 chat.typing_sent = true;
+                chat.typing_refreshed = Some(Instant::now());
                 app.send(Command::Typing { conversation: c.id.clone(), started: true });
             }
         }
@@ -741,6 +746,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
     }
     if chat.typing_sent && chat.last_typed.is_some_and(|t| t.elapsed() > TYPING_IDLE) {
         chat.typing_sent = false;
+        chat.typing_refreshed = None;
         app.send(Command::Typing { conversation: c.id.clone(), started: false });
     }
     if chat.typing_sent {
@@ -823,6 +829,7 @@ pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversat
     chat.scroll_to_bottom = 10;
     if chat.typing_sent {
         chat.typing_sent = false;
+        chat.typing_refreshed = None;
         app.send(Command::Typing { conversation: c.id.clone(), started: false });
     }
     // The draft went out with the message.

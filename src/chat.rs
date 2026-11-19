@@ -36,6 +36,8 @@ pub struct ChatView {
     pub composer: String,
     pub quote: Option<i64>,
     pub typing_sent: bool,
+    /// When "typing" last went out; resent every 10s while typing.
+    pub typing_refreshed: Option<Instant>,
     pub last_typed: Option<Instant>,
     pub emoji_open: bool,
     pub emoji: crate::emoji_picker::Picker,
@@ -155,6 +157,7 @@ impl ChatView {
             composer: draft.clone(),
             quote: None,
             typing_sent: false,
+            typing_refreshed: None,
             last_typed: None,
             emoji_open: false,
             emoji: Default::default(),
