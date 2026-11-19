@@ -1753,9 +1753,15 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
                 egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).corner_radius(radius).uv(uv).fit_to_exact_size(rect.size()).paint_at(ui, rect);
             }
         }
-        None => {
-            ui.painter().rect_filled(rect, radius, if palette.dark { Color32::from_gray(40) } else { Color32::from_gray(200) });
-        }
+        None => match a.blurhash.as_deref().and_then(|h| crate::blurhash::texture(ui.ctx(), h)) {
+            // Desktop draws the sender's blurhash until the file is here.
+            Some(blur) => {
+                egui::Image::new((blur.id(), rect.size())).corner_radius(radius).paint_at(ui, rect);
+            }
+            None => {
+                ui.painter().rect_filled(rect, radius, if palette.dark { Color32::from_gray(40) } else { Color32::from_gray(200) });
+            }
+        },
     }
     let center = Rect::from_center_size(rect.center(), Vec2::splat(48.));
     if a.local_path.is_none() {

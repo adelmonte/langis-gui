@@ -8,6 +8,7 @@ mod thumbs;
 mod shortcuts;
 mod contact_modal;
 mod audio;
+mod blurhash;
 mod axo_list;
 mod media_gallery;
 mod call;
