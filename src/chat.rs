@@ -1715,12 +1715,21 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
         }
     }
     counts.sort_by(|a, b| b.1.cmp(&a.1));
-    counts.truncate(3);
+    // Over 3 kinds, Desktop shows 2 and a "+N" pill counting the rest.
+    let more = (counts.len() > 3).then(|| counts[2..].iter().map(|c| c.1).sum::<usize>());
+    counts.truncate(if more.is_some() { 2 } else { 3 });
+    if let Some(rest) = more {
+        counts.push((String::new(), rest, false));
+    }
     let mut pills = Vec::new();
     for (emoji, count, mine) in &counts {
         let mut job = egui::text::LayoutJob::default();
-        append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::emoji(14.), color: palette.text, ..Default::default() });
-        if *count > 1 {
+        if emoji.is_empty() {
+            job.append(&format!("+{count}"), 0., egui::TextFormat { font_id: theme::semibold(11.), color: palette.text, valign: egui::Align::Center, ..Default::default() });
+        } else {
+            append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::emoji(14.), color: palette.text, ..Default::default() });
+        }
+        if *count > 1 && !emoji.is_empty() {
             job.append(&format!(" {count}"), 0., egui::TextFormat { font_id: theme::semibold(11.), color: palette.text, valign: egui::Align::Center, ..Default::default() });
         }
         let g = ui.fonts_mut(|f| f.layout_job(job));
