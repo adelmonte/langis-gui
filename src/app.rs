@@ -417,7 +417,9 @@ impl App {
             Event::MessageChanged { conversation, message_id } => {
                 if self.selected.as_ref() == Some(&conversation) {
                     self.load(move |db| async move { db.message(message_id).await.ok().flatten().map(Loaded::Message) });
-                    if self.focused {
+                    // Only while the newest messages are in view, as Desktop
+                    // marks read what's been scrolled to.
+                    if self.focused && self.chat.as_ref().is_none_or(|c| !c.scrolled_up) {
                         self.send(Command::MarkRead { conversation });
                     }
                 }

@@ -84,7 +84,7 @@ pub struct ChatView {
     scroll_to_unread: bool,
     highlight: Option<(i64, Instant)>,
     /// Scrolled up from the bottom (for the jump-down button).
-    scrolled_up: bool,
+    pub scrolled_up: bool,
     /// Reload the newest page (the jump-down button, away from the end).
     want_latest: bool,
     /// A message to load around and jump to, once the frame is drawn.
@@ -799,7 +799,12 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
     if from_bottom < 80. && chat.loaded && !chat.at_end && !chat.loading_newer && chat.scroll_target.is_none() {
         chat.want_newer = true;
     }
+    let was_up = chat.scrolled_up;
     chat.scrolled_up = from_bottom > 400. || !chat.at_end;
+    // Back at the newest messages: what arrived meanwhile is read now.
+    if was_up && !chat.scrolled_up && app.focused && (c.unread_count > 0 || c.marked_unread) {
+        app.send(Command::MarkRead { conversation: c.id.clone() });
+    }
     // `TimelineFloatingHeader`: the oldest visible message's date, in a
     // pill 10 from the top, for 3 seconds after scrolling (not while the
     // chat's very first message shows).
