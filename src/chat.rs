@@ -785,8 +785,8 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         if !chat.at_end && chat.loaded {
             ui.vertical_centered(|ui| ui.spinner());
         }
-        for author in &typing {
-            typing_bubble(ui, &ctx, author);
+        if !typing.is_empty() {
+            typing_bubble(ui, &ctx, &typing);
         }
         ui.add_space(16.);
         ui.allocate_response(Vec2::new(1., 1.), Sense::hover());
@@ -1915,16 +1915,36 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
 }
 
 /// Desktop's typing bubble: three dots pulsing in an incoming bubble.
-fn typing_bubble(ui: &mut Ui, ctx: &Ctx<'_>, author: &str) {
+fn typing_bubble(ui: &mut Ui, ctx: &Ctx<'_>, authors: &[String]) {
     let palette = ctx.palette;
     ui.add_space(10.);
-    let avatar_col = if ctx.group { 36. } else { 0. };
+    // Desktop's `TypingBubble`: one bubble for everyone, after the last 3
+    // typists' avatars overlapping, and a +N for the rest.
+    let shown: Vec<&String> = authors.iter().rev().take(3).rev().collect();
+    let more = authors.len().saturating_sub(3);
+    let step = 20.;
+    let avatars = if ctx.group { shown.len() + (more > 0) as usize } else { 0 };
+    let avatar_col = if avatars > 0 { 28. + (avatars - 1) as f32 * step + 8. } else { 0. };
     let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, 36.), Sense::hover());
     let bubble = Rect::from_min_size(Pos2::new(row.left() + 16. + avatar_col, row.top()), Vec2::new(60., 36.));
     if ctx.group {
-        let name = ctx.app.name(author);
-        let color = author.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
-        widgets::paint_avatar(ui, Rect::from_min_size(Pos2::new(row.left() + 16., row.top() + 8.), Vec2::splat(28.)), &widgets::AvatarSpec::person(&name, color));
+        let mut x = row.left() + 16.;
+        for author in &shown {
+            let name = ctx.app.name(author);
+            let color = author.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+            let at = Rect::from_min_size(Pos2::new(x, row.top() + 8.), Vec2::splat(28.));
+            ui.painter().circle_filled(at.center(), 15.5, palette.background);
+            widgets::paint_avatar(ui, at, &widgets::AvatarSpec::person(&name, color));
+            x += step;
+        }
+        if more > 0 {
+            let at = Rect::from_min_size(Pos2::new(x, row.top() + 8.), Vec2::splat(28.));
+            ui.painter().circle_filled(at.center(), 15.5, palette.background);
+            ui.painter().circle_filled(at.center(), 14., palette.fill);
+            ui.painter().text(at.center(), Align2::CENTER_CENTER, format!("+{more}"), theme::semibold(11.), palette.text);
+        }
+        let names: Vec<String> = authors.iter().map(|a| ctx.app.name(a)).collect();
+        ui.interact(row, ui.scope_id().with("typing"), Sense::hover()).on_hover_text(format!("{} typing", names.join(", ")));
     }
     ui.painter().rect_filled(bubble, CornerRadius::same(18), palette.bubble_in);
     let t = ui.input(|i| i.time) as f32;
