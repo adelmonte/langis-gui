@@ -17,6 +17,11 @@ pub struct Contact {
     pub group: Option<ConversationId>,
     pub aci: String,
     confirm: Option<Confirm>,
+    /// Their about, number and verification, for the About view.
+    about: Option<langis_core::ContactDetails>,
+    about_open: bool,
+    /// Add to a group: the groups' search, while picking.
+    add_to_group: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -29,11 +34,23 @@ pub fn open(app: &mut App, group: Option<ConversationId>, aci: String) {
     if aci == app.aci {
         return;
     }
-    app.panes.contact = Some(Contact { group, aci, confirm: None });
+    app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, about: None, about_open: false, add_to_group: None });
+    app.load(move |db| async move {
+        let details = langis_core::contact_details(&db, &aci).await;
+        Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
+            if let Some(c) = app.panes.contact.as_mut().filter(|c| c.aci == aci) {
+                c.about = Some(details);
+            }
+        })))
+    });
 }
 
 enum Do {
     Close,
+    About,
+    AddToGroup,
+    MuteInCall(u32),
+    RemoveFromCall(u32),
     Message,
     Call(bool),
     Nickname,
@@ -112,7 +129,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             job.wrap = egui::text::TextWrapping::truncate_at_width(width - 48.);
             let galley = ui.fonts_mut(|f| f.layout_job(job));
             let (row, _) = ui.allocate_exact_size(Vec2::new(width, galley.size().y), Sense::hover());
-            ui.painter().galley(Pos2::new(row.center().x - galley.size().x / 2., row.top()), galley, palette.text);
+            let name_rect = Rect::from_min_size(Pos2::new(row.center().x - galley.size().x / 2., row.top()), galley.size());
+            ui.painter().galley(name_rect.min, galley, palette.text);
+            // Desktop's name opens `AboutContactModal`.
+            if ui.interact(name_rect, ui.scope_id().with("contact-name"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                todo = Some(Do::About);
+            }
             if let Some(label) = group.as_ref().and_then(|g| g.member_labels.get(&aci)) {
                 // The member's label in the group, a pill under the name.
                 ui.add_space(6.);
@@ -167,6 +189,22 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 items.push(("key", if is_admin { "Remove as admin" } else { "Make admin" }.into(), Do::Confirm(Confirm::Admin)));
                 items.push(("minus-circle", "Remove from group".into(), Do::Confirm(Confirm::Remove)));
             }
+            // `ContactModal--add-to-group`, when some group can take them.
+            let can_add = app.conversations.iter().any(|g| g.kind == langis_store::ConversationKind::Group && g.can_add_members && !g.left && !g.members.contains(&aci));
+            if can_add {
+                items.push(("group", "Add to a group".into(), Do::AddToGroup));
+            }
+            // In a call with them: mute them, or (a call link's admin) remove.
+            if let Some(call) = app.call.as_ref()
+                && let Some(p) = call.participants.iter().find(|p| p.aci == aci)
+            {
+                if p.audio {
+                    items.push(("mic-slash", "Mute audio".into(), Do::MuteInCall(p.demux_id)));
+                }
+                if call.conversation.as_call_link().is_some() {
+                    items.push(("minus-circle", "Remove from call".into(), Do::RemoveFromCall(p.demux_id)));
+                }
+            }
             for (symbol, label, action) in items {
                 let (row, response) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::click());
                 if response.hovered() {
@@ -183,8 +221,23 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     if modal.should_close() && todo.is_none() {
         todo = Some(Do::Close);
     }
+    about_and_add(app, ctx, &aci, &name);
     let Some(todo) = todo else { return };
     match todo {
+        Do::About => {
+            if let Some(c) = app.panes.contact.as_mut() {
+                c.about_open = true;
+            }
+            return;
+        }
+        Do::AddToGroup => {
+            if let Some(c) = app.panes.contact.as_mut() {
+                c.add_to_group = Some(String::new());
+            }
+            return;
+        }
+        Do::MuteInCall(demux_id) => app.send(Command::RemoteMute { demux_id }),
+        Do::RemoveFromCall(demux_id) => app.send(Command::RemoveFromCall { demux_id }),
         Do::Confirm(which) => {
             if let Some(c) = app.panes.contact.as_mut() {
                 c.confirm = Some(which);
@@ -209,4 +262,84 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
     }
     app.panes.contact = None;
+}
+
+/// Desktop's `AboutContactModal` and the Add to a group picker, over the
+/// contact card.
+fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
+    let palette = Palette::of(ctx);
+    let Some(contact) = app.panes.contact.as_ref() else { return };
+    if contact.about_open {
+        let details = contact.about.clone();
+        let mut done = false;
+        egui::Modal::new(egui::Id::unique("about-contact")).frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24)).show(ctx, |ui| {
+            ui.set_width(340.);
+            ui.label(egui::RichText::new("About").font(theme::semibold(18.)));
+            ui.add_space(12.);
+            let row = |ui: &mut egui::Ui, symbol: &str, text: &str| {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(24.), Sense::hover());
+                    theme::paint_symbol(ui.painter(), symbol, r.center(), 18., palette.text_secondary);
+                    ui.add(egui::Label::new(egui::RichText::new(text).font(theme::regular(14.))).wrap());
+                });
+                ui.add_space(6.);
+            };
+            row(ui, "person", name);
+            if let Some(d) = &details {
+                if d.verified {
+                    row(ui, "shield-check", "Verified");
+                }
+                if let Some(p) = &d.profile {
+                    if !p.about.is_empty() {
+                        row(ui, "pencil", &format!("{} {}", p.about_emoji, p.about).trim().to_owned());
+                    }
+                    if let Some(u) = &p.username {
+                        row(ui, "at", u);
+                    }
+                }
+                if let Some(note) = d.nickname.as_ref().map(|n| n.note.as_str()).filter(|n| !n.is_empty()) {
+                    row(ui, "note", note);
+                }
+            }
+            if let Some(phone) = app.conversation(&ConversationId::direct(aci)).and_then(|c| c.phone.clone()) {
+                row(ui, "phone", &phone);
+            }
+            ui.add_space(8.);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                done = widgets::pill_button(ui, "Done", true).clicked();
+            });
+        });
+        if done && let Some(c) = app.panes.contact.as_mut() {
+            c.about_open = false;
+        }
+    }
+    let Some(mut query) = app.panes.contact.as_mut().and_then(|c| c.add_to_group.take()) else { return };
+    let mut picked = None;
+    let mut cancel = false;
+    egui::Modal::new(egui::Id::unique("add-to-group")).frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24)).show(ctx, |ui| {
+        ui.set_width(360.);
+        ui.label(egui::RichText::new(format!("Add {name} to a group")).font(theme::semibold(18.)));
+        ui.add_space(8.);
+        widgets::text_field(ui, &mut query, "Search", false);
+        ui.add_space(6.);
+        let q = query.trim().to_lowercase();
+        egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
+            for g in app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && g.can_add_members && !g.left && !g.members.iter().any(|m| m == aci) && (q.is_empty() || g.title.to_lowercase().contains(&q))) {
+                let r = crate::panes::contact_row(ui, &palette, &g.title, Some(&format!("{} members", g.members.len() + 1)), g.color, None);
+                if r.clicked() {
+                    picked = Some(g.id.clone());
+                }
+            }
+        });
+        ui.add_space(8.);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            cancel = widgets::pill_button(ui, "Cancel", false).clicked();
+        });
+    });
+    if let Some(group) = picked {
+        app.send(Command::AddGroupMembers { conversation: group, members: vec![aci.to_owned()] });
+        app.toast(format!("Adding {name} to the group"));
+    } else if !cancel && let Some(c) = app.panes.contact.as_mut() {
+        c.add_to_group = Some(query);
+    }
 }
