@@ -536,8 +536,40 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             }
         }
     }
-    if mention.is_none() {
+    // Desktop's `:shortcode` completion, when no mention list is open.
+    let mut emoji_list: Option<(std::ops::Range<usize>, Vec<&'static langis_emoji::Emoji>)> = None;
+    if mention.is_none() && focused && selection.is_empty()
+        && let Some(found) = langis_emoji::completion_at(&chat.composer, cursor)
+    {
+        let options = langis_emoji::SearchOptions { limit: 8, ..Default::default() };
+        let hits: Vec<_> = langis_emoji::search(&found.query, &options).into_iter().map(|m| m.emoji).collect();
+        if !hits.is_empty() {
+            emoji_list = Some((found.range, hits));
+        }
+    }
+    if mention.is_none() && emoji_list.is_none() {
         chat.mention_index = 0;
+    }
+    let mut picked_emoji = None;
+    if let Some((_, hits)) = &emoji_list {
+        let (down, up, enter) = ui.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) || i.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
+            )
+        });
+        let n = hits.len();
+        if down {
+            chat.mention_index = (chat.mention_index + 1) % n;
+        }
+        if up {
+            chat.mention_index = (chat.mention_index + n - 1) % n;
+        }
+        chat.mention_index = chat.mention_index.min(n - 1);
+        if enter {
+            picked_emoji = Some(chat.mention_index);
+        }
     }
     let mut picked_mention = None;
     if let Some((_, found)) = &mention {
@@ -661,7 +693,17 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                 app.send(Command::Typing { conversation: c.id.clone(), started: true });
             }
         }
-        if response.has_focus() && picked_mention.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) {
+        // A complete `:shortcode:` turns into its emoji as it's typed.
+        if response.changed()
+            && let Some(c) = egui::TextEdit::load_state(ui.ctx(), id).and_then(|s| s.cursor.char_range()).map(|r| byte_of(&chat.composer, r.primary.index.0))
+            && let Some((range, emoji)) = langis_emoji::shortcode_replacement_at(&chat.composer, c)
+        {
+            let start_char = chat.composer[..range.start].chars().count();
+            chat.composer.replace_range(range, emoji.glyph);
+            chat.spans.follow(&chat.composer);
+            set_cursor(ui.ctx(), id, start_char + emoji.glyph.chars().count());
+        }
+        if response.has_focus() && picked_mention.is_none() && picked_emoji.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) {
             send = true;
         }
         if !response.has_focus() && app.safety.is_none() && app.lightbox.is_none() && chat.dialog.is_none() && ui.memory(|m| m.focused().is_none()) {
@@ -712,6 +754,31 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
         }
     });
 
+    if let Some((replace, hits)) = emoji_list {
+        let mut chosen = picked_emoji.map(|i| hits[i.min(hits.len() - 1)]);
+        let at = Pos2::new(input_rect.left(), input_rect.top() - 8. - hits.len() as f32 * 36. - 24.);
+        crate::actions::popover(ui.ctx(), "emoji-completion", at, 260., Some(input_rect), |ui| {
+            for (i, e) in hits.iter().enumerate() {
+                let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.), Sense::click());
+                if i == chat.mention_index || r.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                }
+                ui.painter().text(Pos2::new(rect.left() + 22., rect.center().y), Align2::CENTER_CENTER, e.glyph, theme::emoji(20.), palette.text);
+                let code = e.shortcode().map(|s| format!(":{s}:")).unwrap_or_default();
+                ui.painter().text(Pos2::new(rect.left() + 44., rect.center().y), Align2::LEFT_CENTER, code, theme::regular(14.), palette.text);
+                if r.clicked() {
+                    chosen = Some(*e);
+                }
+            }
+        });
+        if let Some(e) = chosen {
+            let start_char = chat.composer[..replace.start].chars().count();
+            chat.composer.replace_range(replace, e.glyph);
+            chat.spans.follow(&chat.composer);
+            set_cursor(ui.ctx(), id, start_char + e.glyph.chars().count());
+            app.use_emoji(e.glyph);
+        }
+    }
     if let Some((replace, found)) = mention {
         let index = picked_mention.unwrap_or(usize::MAX);
         let mut chosen = (index != usize::MAX).then(|| found[index.min(found.len() - 1)].clone());
