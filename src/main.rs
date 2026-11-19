@@ -70,6 +70,9 @@ pub struct Args {
     /// Made-up chats in a scratch directory; never connects to Signal.
     pub demo: bool,
     pub data_dir: Option<PathBuf>,
+    /// Start in the background (Desktop's "Start minimized to tray", used
+    /// when opened at login).
+    pub minimized: bool,
 }
 
 impl Args {
@@ -80,9 +83,10 @@ impl Args {
             match arg.as_str() {
                 "--demo" => args.demo = true,
                 "--data-dir" => args.data_dir = Some(it.next().ok_or("--data-dir needs a directory")?.into()),
+                "--minimized" => args.minimized = true,
                 "-h" | "--help" => {
                     println!(
-                        "langis-gui [--demo] [--data-dir DIR]\n\n  --demo          made-up chats in a scratch directory, no network\n  --data-dir DIR  where the account lives (default ~/.local/share/langis-gui)"
+                        "langis-gui [--demo] [--data-dir DIR] [--minimized]\n\n  --demo          made-up chats in a scratch directory, no network\n  --data-dir DIR  where the account lives (default ~/.local/share/langis-gui)\n  --minimized     start minimized"
                     );
                     std::process::exit(0);
                 }

@@ -178,6 +178,9 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, args: crate::Args) -> Self {
         let ctx = cc.egui_ctx.clone();
+        if args.minimized {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
         egui_extras::install_image_loaders(&ctx);
         let thumbs = crate::thumbs::Thumbs::install(&ctx);
         crate::theme::install(&ctx);

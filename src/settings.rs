@@ -363,6 +363,32 @@ fn general(app: &mut App, ui: &mut Ui) {
         }
         axo_list::item(ui, Item::new("Device Name"), End::Value(&crate::app::device_name()));
     });
+    // Desktop's Open at login and Start minimized, as an XDG autostart
+    // entry (~/.config/autostart/langis.desktop).
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        let entry = autostart_path();
+        let current = entry.as_ref().and_then(|p| std::fs::read_to_string(p).ok());
+        let mut at_login = current.is_some();
+        let mut minimized = current.as_deref().is_some_and(|t| t.contains("--minimized"));
+        let mut changed = axo_list::switch(ui, Item::new("Open at computer login"), &mut at_login);
+        changed |= axo_list::switch(ui, Item::new("Start minimized").description("When opened at login, start in the background").disabled(!at_login), &mut minimized);
+        if changed && let Some(entry) = entry {
+            let result = if at_login {
+                let exec = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "langis-gui".into());
+                let text = format!(
+                    "[Desktop Entry]\nType=Application\nName=langis\nExec={exec}{}\nIcon=langis\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+                    if minimized { " --minimized" } else { "" }
+                );
+                entry.parent().map(std::fs::create_dir_all).transpose().and_then(|_| std::fs::write(&entry, text))
+            } else {
+                std::fs::remove_file(&entry).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
+            };
+            if let Err(error) = result {
+                app.toast(format!("Couldn't change the login item: {error}"));
+            }
+        }
+    });
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
         let item = Item::new("Delete application data").description("This will delete all data in the application, removing all messages and saved account information.");
@@ -370,6 +396,10 @@ fn general(app: &mut App, ui: &mut Ui) {
             app.settings.ask = Some(Ask::DeleteData);
         }
     });
+}
+
+fn autostart_path() -> Option<std::path::PathBuf> {
+    Some(dirs::config_dir()?.join("autostart").join("langis.desktop"))
 }
 
 fn appearance(app: &mut App, ui: &mut Ui) {
