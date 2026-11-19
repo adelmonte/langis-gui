@@ -751,7 +751,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                 ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
                 if c.left || c.ended {
                     if ui.link("Delete chat").clicked() {
-                        app.send(Command::DeleteConversation { conversation: c.id.clone() });
+                        app.panes.delete_chat = Some((c.id.clone(), false));
                     }
                     return;
                 }
