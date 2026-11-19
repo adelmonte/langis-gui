@@ -144,6 +144,8 @@ enum Action {
     Jump(i64),
     /// Opens a message's Info (its recipients' send states).
     Info(i64),
+    /// Downloads every attachment of a message not here yet.
+    FetchAll(i64),
     /// Opens a message's edit history.
     EditHistory(i64),
     /// A notice's button.
@@ -465,6 +467,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     chat.dialog = Some(crate::actions::Dialog::EditHistory { message: message_id, details: None });
                 }
             }
+            Action::FetchAll(message_id) => app.send(Command::FetchAttachments { message_id }),
             Action::Info(message_id) => {
                 crate::actions::load_details(app, message_id);
                 if let Some(chat) = app.chat.as_mut() {
@@ -1097,7 +1100,9 @@ fn message(
 
     // Desktop's `getWidth`: a photo's bubble is as wide as the photo, and
     // its text wraps inside.
-    let media_w = images.first().map(|(_, a)| media_size(a, None).x.min(max_bubble)).unwrap_or(0.);
+    // Several photos or videos go in Desktop's `ImageGrid`, 302 wide.
+    let grid = images.len() >= 2;
+    let media_w = if grid { GRID_W.min(max_bubble) } else { images.first().map(|(_, a)| media_size(a, None).x.min(max_bubble)).unwrap_or(0.) };
     let inner_max = if images.is_empty() { max_bubble - 24. } else { media_w - 24. };
     let poll_view = m.poll.as_ref().filter(|_| !m.deleted).map(|p| crate::polls::layout(ui, p, inner_max.min(300.), in_color));
     let content = m.content.as_ref().filter(|_| !m.deleted);
@@ -1235,7 +1240,7 @@ fn message(
     // Heights.
     let name_h = name_galley.as_ref().map(|g| g.size().y + 2.).unwrap_or(0.);
     let quote_h = m.quote.as_ref().map(|q| quote_height(ui, q, bubble_w - pad.x * 2.) + 6.).unwrap_or(0.);
-    let media_h: f32 = images.iter().map(|(_, a)| media_size(a, Some(bubble_w)).y + 2.).sum();
+    let media_h: f32 = if grid { grid_cells(images.len(), bubble_w).1 + 2. } else { images.iter().map(|(_, a)| media_size(a, Some(bubble_w)).y + 2.).sum() };
     // `MessageAudio`'s countdown shares the line with the time when the
     // audio is all there is.
     let audio_shares_meta = files.len() == 1 && all_audio && galley.is_none() && preview.is_none() && poll_view.is_none() && show_meta && !meta_inline;
@@ -1329,7 +1334,44 @@ fn message(
         }
         y += quote_h;
     }
-    for (index, a) in &images {
+    if grid {
+        let (cells, h) = grid_cells(images.len(), bubble_w);
+        let top = y;
+        let at_top = y <= bubble.top() + 1.;
+        for (k, ((index, a), cell)) in images.iter().zip(&cells).enumerate() {
+            let rect = cell.translate(Vec2::new(bubble.left(), top));
+            // Corners follow the bubble's where a cell meets them.
+            let r = |on: bool, v: u8| if on { v } else { 0 };
+            let (l, rt, t, b) = (cell.left() < 1., cell.right() > bubble_w - 1., at_top && cell.top() < 1., media_only && cell.bottom() > h - 1.);
+            let mr = CornerRadius { nw: r(l && t, radius.nw), ne: r(rt && t, radius.ne), sw: r(l && b, radius.sw), se: r(rt && b, radius.se) };
+            if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
+                match &a.local_path {
+                    Some(_) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
+                    None => actions.push(Action::Fetch { message_id: m.id, index: *index }),
+                }
+            }
+            // The fifth of more than five says how many more.
+            if k == 4 && images.len() > 5 {
+                ui.painter().rect_filled(rect, mr, Color32::from_black_alpha(140));
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, format!("+{}", images.len() - 5), theme::semibold(20.), Color32::WHITE);
+            }
+        }
+        // Desktop's "Download N items" while any isn't here.
+        let missing = images.iter().filter(|(_, a)| a.local_path.is_none()).count();
+        if missing > 0 {
+            let grid_rect = Rect::from_min_size(Pos2::new(bubble.left(), top), Vec2::new(bubble_w, h));
+            let label = ui.painter().layout_no_wrap(format!("Download {} items", images.len()), theme::semibold(13.), Color32::WHITE);
+            let pill = Rect::from_center_size(grid_rect.center(), label.size() + Vec2::new(24., 14.));
+            let pr = ui.interact(pill, ui.scope_id().with(("download-all", m.id)), Sense::click());
+            ui.painter().rect_filled(pill, CornerRadius::same(255), Color32::from_black_alpha(if pr.hovered() { 200 } else { 160 }));
+            ui.painter().galley(pill.center() - label.size() / 2., label, Color32::WHITE);
+            if pr.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                actions.push(Action::FetchAll(m.id));
+            }
+        }
+        y += h + 2.;
+    }
+    for (index, a) in images.iter().filter(|_| !grid) {
         let size = media_size(a, Some(bubble_w));
         let rect = Rect::from_min_size(Pos2::new(bubble.left(), y), Vec2::new(bubble_w, size.y));
         let mr = if media_only { radius } else if y <= bubble.top() + 1. { CornerRadius { nw: radius.nw, ne: radius.ne, sw: 0, se: 0 } } else { CornerRadius::ZERO };
@@ -1633,6 +1675,42 @@ fn media_size(a: &langis_store::AttachmentMeta, width: Option<f32>) -> Vec2 {
     };
     let target = width.unwrap_or((w as f32).clamp(200., 300.));
     Vec2::new(target, (target * h as f32 / w as f32).round().clamp(50., 450.))
+}
+
+/// Desktop's `ImageGrid` width: two 150px cells and the gap.
+const GRID_W: f32 = 302.;
+
+/// Desktop's `ImageGrid` cells for `n` photos at `width` (laid out at 302
+/// and scaled): 2 side by side at 150, 3 as a 200 and two 100s, 4 as two
+/// rows of 150, 5 and more as two 150s over three 100s. The cells, from
+/// the grid's top left, and its height.
+fn grid_cells(n: usize, width: f32) -> (Vec<Rect>, f32) {
+    let k = width / GRID_W;
+    let gap = 2.;
+    let cell = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(Pos2::new(x * k, y * k), Vec2::new(w * k, h * k));
+    let (cells, h) = match n {
+        0 | 1 => (vec![cell(0., 0., GRID_W, 150.)], 150.),
+        2 => (vec![cell(0., 0., 150., 150.), cell(150. + gap, 0., 150., 150.)], 150.),
+        3 => (vec![cell(0., 0., 200., 200.), cell(200. + gap, 0., 100., 99.), cell(200. + gap, 99. + gap, 100., 99.)], 200.),
+        4 => (
+            vec![cell(0., 0., 150., 150.), cell(150. + gap, 0., 150., 150.), cell(0., 150. + gap, 150., 150.), cell(150. + gap, 150. + gap, 150., 150.)],
+            300. + gap,
+        ),
+        _ => {
+            let third = (GRID_W - gap * 2.) / 3.;
+            (
+                vec![
+                    cell(0., 0., 150., 150.),
+                    cell(150. + gap, 0., 150., 150.),
+                    cell(0., 150. + gap, third, 100.),
+                    cell(third + gap, 150. + gap, third, 100.),
+                    cell((third + gap) * 2., 150. + gap, third, 100.),
+                ],
+                250. + gap,
+            )
+        }
+    };
+    (cells, h * k)
 }
 
 /// A photo or video. True when clicked.
