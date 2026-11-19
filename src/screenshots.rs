@@ -309,6 +309,13 @@ fn screenshots_composer() {
     let id = crate::composer::input_id(&group);
     let ctx = harness.state().ctx.clone();
 
+    // Replying to a photo, then to plain text.
+    let photo = message_id(&harness, |m| m.attachments.iter().any(|a| a.content_type.starts_with("image/")) || m.quote.as_ref().is_some_and(|q| q.thumbnail.is_some()));
+    harness.state_mut().chat.as_mut().unwrap().quote = Some(photo);
+    wait(&mut harness, "reply bar", |_| true);
+    save(&mut harness, "composer-reply");
+    harness.state_mut().chat.as_mut().unwrap().quote = None;
+
     harness.state_mut().chat.as_mut().unwrap().composer = "Who has the map? @".into();
     wait(&mut harness, "composer", |_| true);
     crate::composer::set_cursor(&ctx, id, 18);
