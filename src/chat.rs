@@ -386,7 +386,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     chat.quote = Some(message_id);
                 }
             }
-            Action::Open(path) => open_externally(&path),
+            Action::Open(path) => open_link(app, &path),
             Action::Audio { message_id, title, path, duration, at, voice } => {
                 let starting = app.audio.active(message_id).is_none_or(|p| !p.playing());
                 app.audio.toggle(message_id, &id, title, &path, duration, at);
@@ -1945,6 +1945,29 @@ pub fn find_links(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
     out
 }
 
+
+/// Opens a link from a message: Signal's own links in the app, as Desktop
+/// routes them (`ts/util/signalRoutes`), anything else in the browser.
+pub fn open_link(app: &mut App, url: &str) {
+    use langis_core::routes::Route;
+    match langis_core::routes::parse(url) {
+        Some(Route::GroupInvite(_)) => app.send(Command::OpenGroupLink { url: url.to_owned() }),
+        Some(Route::LinkCall(_)) => app.send(Command::OpenCallLink { url: url.to_owned() }),
+        Some(Route::AddStickers { .. }) => match langis_core::stickers::parse_pack_link(url) {
+            Some((id, key)) => {
+                app.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
+                app.fun.preview = Some((id, key, None));
+            }
+            None => app.toast("This sticker pack link isn't valid."),
+        },
+        // signal.me: looked up as New chat does, which offers to message them.
+        Some(Route::ContactByPhoneNumber(_) | Route::ContactByEncryptedUsername(_)) => {
+            app.send(Command::FindRecipient { query: url.to_owned() });
+            app.panes.compose = Some(crate::panes::Compose::Chat { query: url.to_owned(), searching: true, found: None });
+        }
+        _ => open_externally(url),
+    }
+}
 
 /// How much of a disappearing message's time is left (1 to 0), or `None`
 /// for one that doesn't disappear. Its countdown starts once sent or read.
