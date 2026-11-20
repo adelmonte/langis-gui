@@ -315,7 +315,23 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
         }
         let center = Rect::from_center_size(media.center(), Vec2::splat(64.));
-        if item.path.is_none() {
+        let progress = app.downloads.get(&(item.message_id, item.index)).copied();
+        if item.path.is_none()
+            && let Some((received, total)) = progress
+        {
+            // Desktop's `Lightbox__toast-container`: "Downloading X of Y".
+            ui.painter().circle_filled(center.center(), 32., Color32::from_black_alpha(160));
+            crate::widgets::paint_spinner(ui, center.center(), 36., Color32::WHITE);
+            let text = crate::i18n::tf(
+                "icu:lightBoxDownloading",
+                &format!("Downloading {} of {}", crate::format::file_size(received), crate::format::file_size(total)),
+                &[("downloaded", crate::i18n::Arg::from(&crate::format::file_size(received))), ("total", crate::i18n::Arg::from(&crate::format::file_size(total)))],
+            );
+            let g = ui.painter().layout_no_wrap(text, theme::regular(13.), Color32::WHITE);
+            let pill = Rect::from_center_size(Pos2::new(media.center().x, media.top() + 28.), g.size() + Vec2::new(24., 14.));
+            ui.painter().rect_filled(pill, CornerRadius::same(8), Color32::from_rgba_unmultiplied(0x3b, 0x3b, 0x3b, 235));
+            ui.painter().galley(pill.center() - g.size() / 2., g, Color32::WHITE);
+        } else if item.path.is_none() {
             ui.painter().circle_filled(center.center(), 32., Color32::from_black_alpha(160));
             Icon::ArrowDown.paint(ui, center, 30., Color32::WHITE);
             if ui.interact(center, ui.scope_id().with("lightbox-fetch"), Sense::click()).on_hover_text("Download").clicked() {
@@ -334,7 +350,16 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.painter().circle_filled(center.center(), 32., Color32::from_black_alpha(160));
                 Icon::PlayFill.paint(ui, center, 30., Color32::WHITE);
             }
-            video_controls(ui, player, media, view_once);
+            if view_once {
+                // Desktop's view-once video: no controls, the time left
+                // under it.
+                let left = (player.duration() - player.position()).max(0.);
+                if player.duration() > 0. {
+                    ui.painter().text(Pos2::new(media.center().x, media.bottom() + 20.), egui::Align2::CENTER_CENTER, crate::audio::playback_text(left), theme::regular(14.), Color32::WHITE);
+                }
+            } else {
+                video_controls(ui, player, media, view_once);
+            }
         }
 
         ui.multiply_opacity(chrome);
