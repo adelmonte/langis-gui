@@ -25,12 +25,23 @@ const URI_LIST: &str = "text/uri-list";
 pub struct Drops {
     dropped: Arc<Mutex<Vec<PathBuf>>>,
     hovering: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    thread: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 
 impl Drops {
     /// The files dropped since last asked.
     pub fn take(&self) -> Vec<PathBuf> {
         self.dropped.lock().map(|mut d| std::mem::take(&mut *d)).unwrap_or_default()
+    }
+
+    /// Ends the listener and waits for it, before the window's Wayland
+    /// connection closes (its thread uses that connection).
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.lock().ok().and_then(|mut t| t.take()) {
+            let _ = thread.join();
+        }
     }
 
     /// Files are being dragged over the window now.
@@ -65,14 +76,35 @@ pub fn start(cc: &eframe::CreationContext<'_>) -> Option<Drops> {
     let _device = manager.get_data_device(&seat, &qh, ());
     let drops = Drops::default();
     let mut state = State { conn: conn.clone(), drops: drops.clone(), ctx: cc.egui_ctx.clone(), offer: None, pending: Vec::new() };
-    std::thread::Builder::new()
+    let stop = drops.stop.clone();
+    let thread = std::thread::Builder::new()
         .name("wayland-dnd".into())
         .spawn(move || {
             let _keep = (manager, seat, _device);
-            while queue.blocking_dispatch(&mut state).is_ok() {}
+            // Read with a timeout rather than block for good, so `stop`
+            // can end it while the connection is still open.
+            while !stop.load(Ordering::Relaxed) {
+                if queue.dispatch_pending(&mut state).is_err() || conn.flush().is_err() {
+                    break;
+                }
+                let Some(guard) = queue.prepare_read() else { continue };
+                let mut fd = libc::pollfd { fd: std::os::fd::AsRawFd::as_raw_fd(&guard.connection_fd()), events: libc::POLLIN, revents: 0 };
+                // SAFETY: one pollfd we own, for the connection's live fd.
+                let ready = unsafe { libc::poll(&mut fd, 1, 200) };
+                if ready > 0 {
+                    if guard.read().is_err() {
+                        break;
+                    }
+                } else {
+                    drop(guard);
+                }
+            }
             tracing::debug!("wayland drag and drop listener ended");
         })
         .ok()?;
+    if let Ok(mut slot) = drops.thread.lock() {
+        *slot = Some(thread);
+    }
     tracing::info!("listening for files dropped on the window (Wayland)");
     Some(drops)
 }

@@ -1111,6 +1111,9 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         self.shutdown();
+        if let Some(drops) = &self.drops {
+            drops.stop();
+        }
         crate::video::clear_posters();
     }
 }

@@ -101,10 +101,19 @@ pub fn misspelled(text: &str) -> Vec<Range<usize>> {
 
 /// Up to five suggestions for a word.
 pub fn suggestions(word: &str) -> Vec<String> {
+    // Asked every frame while the menu is open; Hunspell's suggest is slow,
+    // so the last word's answer is kept.
+    static LAST: std::sync::Mutex<Option<(String, Vec<String>)>> = std::sync::Mutex::new(None);
+    if let Some((w, out)) = LAST.lock().unwrap().as_ref()
+        && w == word
+    {
+        return out.clone();
+    }
     let Some(Some(dictionary)) = DICTIONARY.get() else { return Vec::new() };
     let mut out = Vec::new();
     dictionary.suggest(word, &mut out);
     out.truncate(5);
+    *LAST.lock().unwrap() = Some((word.to_owned(), out.clone()));
     out
 }
 

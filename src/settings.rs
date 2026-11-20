@@ -385,7 +385,15 @@ fn general(app: &mut App, ui: &mut Ui) {
         changed |= axo_list::switch(ui, Item::new("Start minimized").description("When opened at login, start in the background").disabled(!at_login), &mut minimized);
         if changed && let Some(entry) = entry {
             let result = if at_login {
-                let exec = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "langis-gui".into());
+                // The Desktop Entry spec's quoting: the path in double quotes,
+                // with `"`, `` ` ``, `$` and `\\` escaped, and `%` doubled.
+                let path = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "langis-gui".into());
+                let quoted: String = path.chars().flat_map(|c| match c {
+                    '"' | '`' | '$' | '\\' => vec!['\\', c],
+                    '%' => vec!['%', '%'],
+                    c => vec![c],
+                }).collect();
+                let exec = format!("\"{quoted}\"");
                 let text = format!(
                     "[Desktop Entry]\nType=Application\nName=langis\nExec={exec}{}\nIcon=langis\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
                     if minimized { " --minimized" } else { "" }
