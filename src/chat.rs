@@ -672,7 +672,13 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
         .frame(egui::Frame::new().fill(palette.background))
         .show(ui, |ui| {
             let rect = ui.max_rect();
-            ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1., palette.border));
+            // Desktop's shadow-elevation-1 under the header instead of a
+            // line: drawn above the timeline, which paints after this.
+            let shadow = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("conversation-header-shadow")));
+            let dark = palette.dark;
+            for (i, a) in [(0., if dark { 60 } else { 30 }), (1., if dark { 30 } else { 14 }), (2., if dark { 14 } else { 6 })] {
+                shadow.hline(rect.x_range(), rect.bottom() + i + 0.5, Stroke::new(1., Color32::from_black_alpha(a)));
+            }
             ui.horizontal_centered(|ui| {
                 ui.add_space(16.);
                 if widgets::avatar(ui, &widgets::AvatarSpec::of(c), 32.).on_hover_text("Chat settings").clicked() {
@@ -680,43 +686,73 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 }
                 ui.add_space(4.);
                 ui.vertical(|ui| {
-                    ui.add_space(if c.kind == ConversationKind::Group || c.expire_timer > 0 { 8. } else { 16. });
+                    // Desktop's subtitle: only the timer (with its icon).
+                    ui.add_space(if c.expire_timer > 0 { 8. } else { 16. });
                     if ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(14.))).sense(egui::Sense::click())).clicked() {
                         crate::details::open(app, c.id.clone());
                     }
-                    let mut sub = Vec::new();
-                    if c.kind == ConversationKind::Group {
-                        sub.push(format!("{} members", c.members.len() + 1));
-                    }
                     if c.expire_timer > 0 {
-                        sub.push(crate::format::timer_long(c.expire_timer));
-                    }
-                    if !sub.is_empty() {
                         ui.add_space(-4.);
-                        ui.label(RichText::new(sub.join(" · ")).font(theme::regular(12.)).color(palette.text_secondary));
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.;
+                            let (at, _) = ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
+                            theme::paint_symbol(ui.painter(), "timer", at.center(), 14., palette.text_secondary);
+                            ui.label(RichText::new(crate::format::timer_long(c.expire_timer)).font(theme::regular(13.)).color(palette.text_secondary));
+                        });
                     }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(12.);
-                    let more = widgets::icon_button(ui, Icon::More, 20., "More");
+                    // AxoIconButton md circles, 4px apart (12 on a wide header).
+                    ui.add_space(16.);
+                    ui.spacing_mut().item_spacing.x = if rect.width() >= 500. { 12. } else { 4. };
+                    let more = widgets::axo_icon_button(ui, "more", "More");
                     header_menu(app, ui, &more, c);
-                    if widgets::icon_button(ui, Icon::Search, 20., "Search in chat").clicked() {
+                    if widgets::axo_icon_button(ui, "search", "Search in chat").clicked() {
                         app.find_requested = true;
                     }
                     if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
                         let group = c.kind == ConversationKind::Group;
-                        if widgets::icon_button(ui, Icon::Phone, 20., "Start a voice call").clicked() {
-                            // Desktop shows the lobby before every call.
-                            crate::panes::open_lobby(app, c.id.clone(), false);
-                            let _ = group;
-                        }
-                        if widgets::icon_button(ui, Icon::Video, 20., "Start a video call").clicked() {
-                            crate::panes::open_lobby(app, c.id.clone(), true);
-                        }
+                        let in_other = app.call.as_ref().is_some_and(|call| call.conversation != c.id);
+                        let going = group && app.panes.active_calls.get(&c.id).is_some_and(|u| !u.is_empty());
+                        let tip = |t: &'static str| if in_other { "You are already in a call" } else { t };
+                        ui.add_enabled_ui(!in_other, |ui| {
+                            if going {
+                                // Desktop's strong-affirmative "Join" button.
+                                if join_button(ui).on_hover_text(tip("Join")).clicked() {
+                                    crate::panes::open_lobby(app, c.id.clone(), true);
+                                }
+                                return;
+                            }
+                            // Groups get video only (OutgoingCallButtonStyle.JustVideo).
+                            if !group && widgets::axo_icon_button(ui, "phone", tip("Start a voice call")).clicked() {
+                                crate::panes::open_lobby(app, c.id.clone(), false);
+                            }
+                            if widgets::axo_icon_button(ui, "videocamera", tip("Start a video call")).clicked() {
+                                crate::panes::open_lobby(app, c.id.clone(), true);
+                            }
+                        });
                     }
                 });
             });
         });
+}
+
+/// AxoButton md, strong-affirmative, with the videocamera-fill symbol:
+/// Desktop's header "Join" while a group call is on.
+fn join_button(ui: &mut Ui) -> egui::Response {
+    let font = theme::medium(13.);
+    let galley = ui.painter().layout_no_wrap("Join".to_owned(), font, Color32::WHITE);
+    let size = Vec2::new(12. + 16. + 6. + galley.size().x + 12., 30.);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let dark = ui.visuals().dark_mode;
+    let mut fill = if dark { Color32::from_rgb(0x07, 0xab, 0x23) } else { Color32::from_rgb(0x09, 0xa5, 0x23) };
+    if response.hovered() {
+        fill = fill.gamma_multiply(0.92);
+    }
+    ui.painter().rect_filled(rect, CornerRadius::same(15), fill);
+    theme::paint_symbol(ui.painter(), "videocamera-fill", Pos2::new(rect.left() + 12. + 8., rect.center().y), 16., Color32::WHITE);
+    ui.painter().galley(Pos2::new(rect.left() + 12. + 16. + 6., rect.center().y - galley.size().y / 2.), galley, Color32::WHITE);
+    response
 }
 
 /// Desktop's `PinnedMessagesBar`: the pinned message under the header;
