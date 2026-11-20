@@ -393,6 +393,7 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             edit_bar(ui, palette, chat);
             reply_bar(app, ui, palette, chat);
             take_dropped_and_pasted(app, ui, chat);
+            media_editor(ui, chat);
             if chat.staged.is_empty() {
                 preview_card(ui, palette, chat);
             } else {
@@ -1150,6 +1151,19 @@ fn stage_path(app: &mut App, chat: &mut ChatView, path: &std::path::Path) {
     }
 }
 
+/// The media editor while it's open; Done puts the edited picture in the
+/// staged one's place, as a PNG.
+fn media_editor(ui: &Ui, chat: &mut ChatView) {
+    let Some(editor) = chat.media_editor.as_mut() else { return };
+    let Some(result) = editor.show(ui.ctx()) else { return };
+    let index = editor.index;
+    chat.media_editor = None;
+    if let (Some(png), Some(staged)) = (result, chat.staged.get_mut(index)) {
+        let stem = std::path::Path::new(&staged.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "photo".into());
+        *staged = Staged::new(png, format!("{stem}.png"));
+    }
+}
+
 /// Files dropped on the window, and an image pasted with Ctrl+V, go to
 /// the list (Desktop's drop zone and paste handler).
 fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
@@ -1192,6 +1206,7 @@ fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
 fn staged_list(ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_store::Conversation) {
     let tile = 64.;
     let mut remove = None;
+    let mut edit = None;
     let mut add = false;
     egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -1199,7 +1214,11 @@ fn staged_list(ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_s
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.;
                     for (i, s) in chat.staged.iter().enumerate() {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(tile), Sense::hover());
+                        let (rect, tile_response) = ui.allocate_exact_size(Vec2::splat(tile), Sense::click());
+                        // A photo opens Desktop's media editor.
+                        if s.kind == StagedKind::Image && tile_response.on_hover_text("Edit").clicked() {
+                            edit = Some(i);
+                        }
                         ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                         match s.kind {
                             StagedKind::Image => {
@@ -1256,6 +1275,11 @@ fn staged_list(ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_s
     });
     if let Some(i) = remove {
         chat.staged.remove(i);
+    } else if let Some(i) = edit {
+        match crate::media_editor::Editor::open(i, &chat.staged[i].bytes) {
+            Some(editor) => chat.media_editor = Some(editor),
+            None => tracing::warn!("couldn't open a staged photo to edit"),
+        }
     }
     if add {
         let Some(paths) = rfd::FileDialog::new().set_title("Add attachment").pick_files() else { return };

@@ -107,6 +107,8 @@ pub struct ChatView {
     /// Files picked, pasted or dropped, waiting to go with the next send
     /// (Desktop's `AttachmentList`), and its view-once toggle.
     pub staged: Vec<crate::composer::Staged>,
+    /// Desktop's media editor, open on a staged photo.
+    pub media_editor: Option<crate::media_editor::Editor>,
     pub view_once: bool,
     pub attach_menu: bool,
     /// A voice message being recorded.
@@ -222,6 +224,7 @@ impl ChatView {
             mention_index: 0,
             composer_large: false,
             staged: Vec::new(),
+            media_editor: None,
             view_once: false,
             attach_menu: false,
             recording: None,
