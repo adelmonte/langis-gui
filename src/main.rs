@@ -36,6 +36,8 @@ mod profile;
 mod screenshots;
 #[cfg(test)]
 mod screenshots_b;
+#[cfg(test)]
+mod screenshot_readme;
 mod scroll;
 mod search;
 mod settings;

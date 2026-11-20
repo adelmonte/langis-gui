@@ -13,6 +13,11 @@ keyboard shortcuts work (Ctrl+/ lists them).
 
 Unofficial, and not affiliated with Signal.
 
+![langis-gui in dark mode: the chat list and a group chat](docs/screenshot.png)
+
+The picture is the demo account with made-up chats
+(`cargo test readme_screenshot -- --ignored` renders it).
+
 ## Not there yet
 
 Checked against Signal Desktop 8.38's source in November 2026. Items
