@@ -153,6 +153,8 @@ enum Action {
     Chat(langis_store::ConversationId),
     /// Desktop's ContactDetail for a message's shared contact.
     ContactDetail(i64),
+    /// Starts selecting, with this message (Desktop's Ctrl-click).
+    Select(i64),
     /// The hover bar's extra: Download, or a sticker's favorite star.
     Extra(i64),
     /// "Retry failed delete?" for a delete for everyone that failed.
@@ -437,6 +439,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     for action in actions {
         match action {
             Action::Retry(message_id) => app.send_checked(id.clone(), PendingSend::Retry(message_id)),
+            Action::Select(message_id) => {
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.selected = Some(vec![message_id]);
+                }
+            }
             Action::Extra(message_id) => {
                 let m = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == message_id).cloned());
                 if let Some(m) = m {
@@ -970,6 +977,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         let mut reached = None;
         let view_top = ui.clip_rect().top();
         let mut oldest_visible: Option<(i64, i64)> = None;
+        let order: Vec<i64> = messages.iter().filter(|m| m.notice.is_none()).map(|m| m.id).collect();
         for (i, m) in messages.iter().enumerate() {
             let prev = i.checked_sub(1).map(|p| &messages[p]);
             let next = messages.get(i + 1);
@@ -1069,7 +1077,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             if let Some(selected) = chat.selected.as_mut()
                 && m.notice.is_none()
             {
-                select_row(ui, palette, area, m.id, selected);
+                select_row(ui, palette, area, m.id, selected, &order);
             }
             if chat.scroll_target == Some(m.id) {
                 ui.scroll_to_rect_animation(area, Some(egui::Align::Center), egui::style::ScrollAnimation::none());
@@ -2078,9 +2086,12 @@ fn message(
         let at = response.interact_pointer_pos().unwrap_or(bubble.center());
         actions.push(Action::Menu { message_id: m.id, at });
     }
-    // Desktop's double-click replies.
+    // Desktop's double-click replies; Ctrl-click starts selecting.
     if !ctx.selecting && !m.deleted && response.double_clicked() {
         actions.push(Action::Reply(m.id));
+    }
+    if !ctx.selecting && response.clicked() && ui.input(|i| i.modifiers.command) {
+        actions.push(Action::Select(m.id));
     }
     revealed_now
 }
@@ -3247,7 +3258,7 @@ mod tests {
 
 /// A message in select mode: the whole row toggles it, with Desktop's
 /// checkbox (`module-message__select-checkbox`) and tint.
-fn select_row(ui: &mut Ui, palette: &Palette, area: Rect, id: i64, selected: &mut Vec<i64>) {
+fn select_row(ui: &mut Ui, palette: &Palette, area: Rect, id: i64, selected: &mut Vec<i64>, order: &[i64]) {
     let on = selected.contains(&id);
     let response = ui.interact(area, egui::Id::unique("select-row").with(id), Sense::click());
     if on {
@@ -3262,11 +3273,22 @@ fn select_row(ui: &mut Ui, palette: &Palette, area: Rect, id: i64, selected: &mu
         ui.painter().circle_stroke(center, 9.5, egui::Stroke::new(1., if palette.dark { theme::rgb(0x5e5e5e) } else { theme::rgb(0xdedede) }));
     }
     if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-        if on {
-            selected.retain(|x| *x != id);
-        } else {
-            selected.push(id);
+        // Desktop's Shift-click: everything from the last one clicked.
+        let last_id = egui::Id::unique("select-last");
+        let last: Option<i64> = ui.ctx().data(|d| d.get_temp(last_id));
+        let shift = ui.input(|i| i.modifiers.shift);
+        match last.and_then(|l| order.iter().position(|x| *x == l)).zip(order.iter().position(|x| *x == id)) {
+            Some((a, b)) if shift => {
+                for x in &order[a.min(b)..=a.max(b)] {
+                    if !selected.contains(x) {
+                        selected.push(*x);
+                    }
+                }
+            }
+            _ if on => selected.retain(|x| *x != id),
+            _ => selected.push(id),
         }
+        ui.ctx().data_mut(|d| d.insert_temp(last_id, id));
     }
 }
 

@@ -69,6 +69,8 @@ pub struct StoriesView {
     pub info_of: Option<i64>,
     /// "Hide story?" waiting for this story's answer.
     pub confirm_hide: Option<i64>,
+    /// The stories list's search.
+    pub search: String,
     /// "Delete this story?" waiting for this story's answer.
     pub confirm_delete: Option<i64>,
     /// The list's "Hide story?" (or Unhide) for a chat and its name.
@@ -290,6 +292,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 });
                 return;
             }
+            // Desktop's StoriesPane search.
+            ui.horizontal(|ui| {
+                ui.add_space(16.);
+                ui.set_width(ui.available_width() - 16.);
+                widgets::text_field(ui, &mut app.panes.stories.search, tr("Search"), false);
+            });
+            ui.add_space(6.);
+            let q = app.panes.stories.search.trim().to_lowercase();
+            let all: Vec<(String, Vec<Story>)> = all.iter().filter(|(k, s)| q.is_empty() || k == "me" || who(app, k, s).to_lowercase().contains(&q)).cloned().collect();
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 // Ours first: "My Stories", or the prompt to add one.
                 let mine = all.iter().find(|(k, _)| k == "me");
