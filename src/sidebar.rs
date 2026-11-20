@@ -273,10 +273,17 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                         });
                     }
                 }
-                if rows.is_empty() && app.message_search.hits.is_empty() && !query.is_empty() {
+                let nothing = app.message_search.hits.is_empty() && app.message_search.contacts.is_empty() && !app.message_search.loading;
+                if rows.is_empty() && nothing && !query.is_empty() {
                     ui.add_space(24.);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new(format!("No results for \u{201c}{}\u{201d}", app.search.trim())).color(palette.text_secondary));
+                        // Desktop's `noSearchResults` and its unread-filter form.
+                        let text = if app.unread_only {
+                            format!("No results for \"{}\" in unread chats", app.search.trim())
+                        } else {
+                            format!("No results for \"{}\"", app.search.trim())
+                        };
+                        ui.label(RichText::new(text).color(palette.text_secondary));
                     });
                 }
             });
@@ -285,7 +292,13 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                 app.open(id);
             }
             if let Some((conversation, message_id)) = open_at {
-                app.open_at(conversation, message_id);
+                // A contact (no message): their chat, made if need be.
+                if message_id == 0 {
+                    app.panes.details = None;
+                    app.open(conversation);
+                } else {
+                    app.open_at(conversation, message_id);
+                }
             }
         });
 }

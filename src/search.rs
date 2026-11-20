@@ -26,6 +26,10 @@ pub struct Global {
     searched: Option<String>,
     typed: Option<(String, Instant)>,
     pub hits: Vec<SearchHit>,
+    /// People matching who have no chat in the list (Desktop's Contacts).
+    pub contacts: Vec<langis_store::DirectoryEntry>,
+    /// Searched, not answered yet.
+    pub loading: bool,
 }
 
 /// Search in the open chat.
@@ -59,16 +63,18 @@ impl Find {
 
 /// Results for a query, to whichever search asked.
 pub enum Found {
-    Global { query: String, hits: Vec<SearchHit> },
+    Global { query: String, hits: Vec<SearchHit>, contacts: Vec<langis_store::DirectoryEntry> },
     Chat { conversation: ConversationId, query: String, hits: Vec<SearchHit> },
 }
 
 impl App {
     pub fn on_found(&mut self, found: Found) {
         match found {
-            Found::Global { query, hits } => {
+            Found::Global { query, hits, contacts } => {
                 if self.message_search.searched.as_deref() == Some(query.as_str()) {
                     self.message_search.hits = hits;
+                    self.message_search.contacts = contacts;
+                    self.message_search.loading = false;
                 }
             }
             Found::Chat { conversation, query, hits } => {
@@ -103,9 +109,23 @@ pub fn follow_global(app: &mut App, ctx: &egui::Context) {
     }
     if app.message_search.searched.as_deref() != Some(query.as_str()) {
         app.message_search.searched = Some(query.clone());
+        app.message_search.loading = true;
+        // People without a chat yet: those with one show under Chats.
+        let listed: std::collections::HashSet<ConversationId> = app.conversations.iter().filter(|c| c.last_message_at > 0).map(|c| c.id.clone()).collect();
         app.load(move |db| async move {
             let hits = db.search_messages(&query, LIMIT).await.unwrap_or_default();
-            Some(Loaded::Found(Found::Global { query, hits }))
+            let q = query.to_lowercase();
+            let digits: String = query.chars().filter(char::is_ascii_digit).collect();
+            let contacts = db
+                .people()
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| !listed.contains(&p.id))
+                .filter(|p| p.title.to_lowercase().contains(&q) || (digits.len() >= 3 && p.phone.as_deref().is_some_and(|ph| ph.contains(&digits))))
+                .take(20)
+                .collect();
+            Some(Loaded::Found(Found::Global { query, hits, contacts }))
         });
     }
 }
@@ -134,34 +154,85 @@ fn snippet(text: &str, color: Color32, width: f32) -> egui::text::LayoutJob {
 
 /// The "Messages" results under the chat list's matches. Returns a hit
 /// clicked.
+/// Desktop's search results after Chats: Contacts (people with no chat
+/// yet), then Messages, each under its list header; spinner rows while
+/// searching. Returns a message to open, or a person to start a chat with
+/// (message id 0).
 pub fn message_results(app: &App, ui: &mut Ui, palette: &Palette) -> Option<(ConversationId, i64)> {
-    let hits = &app.message_search.hits;
-    if hits.is_empty() {
-        return None;
-    }
     let mut open = None;
-    ui.add_space(10.);
-    ui.horizontal(|ui| {
-        ui.add_space(24.);
-        ui.label(RichText::new("Messages").font(theme::semibold(14.)));
-    });
-    ui.add_space(4.);
+    let heading = |ui: &mut Ui, text: &str| {
+        let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::hover());
+        ui.painter().text(Pos2::new(row.left() + 11. + 16., row.bottom() - 8.), egui::Align2::LEFT_BOTTOM, text, theme::semibold(14.), palette.text);
+    };
+    let search = &app.message_search;
+    if !search.contacts.is_empty() {
+        heading(ui, "Contacts");
+        for p in &search.contacts {
+            let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 64.), Sense::click());
+            let row = rect.shrink2(Vec2::new(11., 2.));
+            if r.hovered() {
+                ui.painter().rect_filled(row, CornerRadius::same(10), palette.fill);
+            }
+            let sid = p.id.as_direct().unwrap_or_default();
+            let color = sid.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+            widgets::paint_avatar(ui, Rect::from_min_size(Pos2::new(row.left() + 14., row.center().y - 18.), Vec2::splat(36.)), &widgets::AvatarSpec::person(&p.title, color));
+            ui.painter().text(Pos2::new(row.left() + 62., row.center().y - 1.), egui::Align2::LEFT_BOTTOM, &p.title, theme::semibold(14.), palette.text);
+            if let Some(phone) = &p.phone {
+                ui.painter().text(Pos2::new(row.left() + 62., row.center().y + 1.), egui::Align2::LEFT_TOP, phone, theme::regular(13.), palette.text_secondary);
+            }
+            if r.clicked() {
+                open = Some((p.id.clone(), 0));
+            }
+        }
+    }
+    let hits = &search.hits;
+    if search.loading && hits.is_empty() {
+        // Desktop's loading rows.
+        heading(ui, "Messages");
+        for _ in 0..3 {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 72.), Sense::hover());
+            let row = rect.shrink2(Vec2::new(11., 2.));
+            ui.painter().circle_filled(Pos2::new(row.left() + 38., row.center().y), 24., palette.fill);
+            ui.painter().rect_filled(Rect::from_min_size(Pos2::new(row.left() + 74., row.top() + 16.), Vec2::new(120., 12.)), CornerRadius::same(6), palette.fill);
+            ui.painter().rect_filled(Rect::from_min_size(Pos2::new(row.left() + 74., row.top() + 38.), Vec2::new(row.width() - 100., 12.)), CornerRadius::same(6), palette.fill);
+        }
+        return open;
+    }
+    if hits.is_empty() {
+        return open;
+    }
+    heading(ui, "Messages");
     for hit in hits {
         let Some(c) = app.conversation(&hit.conversation_id) else { continue };
         let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 72.), Sense::click());
-        let row = rect.shrink2(Vec2::new(10., 2.));
+        let row = rect.shrink2(Vec2::new(11., 2.));
         if r.hovered() {
             ui.painter().rect_filled(row, CornerRadius::same(10), palette.fill);
         }
-        widgets::paint_avatar(ui, Rect::from_min_size(Pos2::new(row.left() + 12., row.center().y - 24.), Vec2::splat(48.)), &widgets::AvatarSpec::of(c));
-        let left = row.left() + 72.;
+        // Desktop's `MessageSearchResult`: the sender's avatar, and
+        // "X to Y" (`searchResultHeader--*`).
+        let group = c.kind == langis_store::ConversationKind::Group;
+        let avatar = Rect::from_min_size(Pos2::new(row.left() + 14., row.center().y - 24.), Vec2::splat(48.));
+        let who = match (&hit.author, c.kind) {
+            (None, langis_store::ConversationKind::NoteToSelf) => {
+                widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
+                "Note to Self".to_owned()
+            }
+            (None, _) => {
+                widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo: app.me.1.as_deref(), ..widgets::AvatarSpec::person(&app.me.0, 0) });
+                format!("You to {}", c.title)
+            }
+            (Some(a), _) => {
+                let name = app.name(a);
+                let photo = app.conversation(&ConversationId::direct(a)).and_then(|p| p.avatar_path.clone());
+                let color = a.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo: photo.as_deref(), ..widgets::AvatarSpec::person(&name, color) });
+                if group { format!("{name} to {}", c.title) } else { format!("{name} to You") }
+            }
+        };
+        let left = row.left() + 74.;
         let time = ui.painter().layout_no_wrap(crate::format::short_timestamp(hit.sent_at), theme::regular(12.), palette.text_secondary);
         let title_w = row.right() - 12. - time.size().x - 8. - left;
-        let who = match (&hit.author, c.kind == langis_store::ConversationKind::Group) {
-            (None, _) => format!("You in {}", c.title),
-            (Some(a), true) => format!("{} in {}", app.name(a), c.title),
-            (Some(_), false) => c.title.clone(),
-        };
         let mut job = egui::text::LayoutJob::simple_singleline(who, theme::semibold(14.), palette.text);
         job.wrap = egui::text::TextWrapping::truncate_at_width(title_w);
         let title = ui.fonts_mut(|f| f.layout_job(job));
