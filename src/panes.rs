@@ -1607,70 +1607,104 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     };
     let mut answer = None;
     let mut settings = false;
-    let closed = modal(ui, "lobby", 420., |ui| {
-        ui.vertical_centered(|ui| {
-            // Desktop's `CallingLobby`: our camera (or our photo), 16:9.
-            let (frame, _) = ui.allocate_exact_size(Vec2::new(372., 210.), Sense::hover());
-            ui.painter().rect_filled(frame, CornerRadius::same(12), egui::Color32::from_gray(32));
-            let slot = app.backend.as_ref().map(|b| b.call_video().local.clone());
-            let shown = video
-                && slot.and_then(|slot| app.call_view.texture(ui.ctx(), "lobby-local", &slot)).is_some_and(|(texture, size)| {
-                    let scale = (frame.width() / size.x).max(frame.height() / size.y);
-                    let shown = size * scale;
-                    let uv_w = (frame.width() / shown.x).min(1.);
-                    let uv_h = (frame.height() / shown.y).min(1.);
-                    let uv = Rect::from_center_size(egui::pos2(0.5, 0.5), Vec2::new(uv_w, uv_h));
-                    egui::Image::new((texture.id(), frame.size())).uv(uv).corner_radius(CornerRadius::same(12)).paint_at(ui, frame);
-                    true
-                });
-            if !shown {
-                let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
-                widgets::paint_avatar(ui, Rect::from_center_size(frame.center(), Vec2::splat(72.)), &spec);
-                if video {
-                    ui.painter().text(frame.center() + Vec2::new(0., 56.), egui::Align2::CENTER_CENTER, "Starting camera…", theme::regular(12.), egui::Color32::from_white_alpha(200));
-                }
-            }
-            ui.add_space(12.);
-            ui.label(RichText::new(&title_text).font(theme::semibold(18.)));
-            ui.add_space(4.);
-            // `CallingPreCallInfo`.
-            let who = if group {
-                match users.len() {
-                    0 => "No one else is here".to_owned(),
-                    1 => format!("{} is in this call", app.name(&users[0])),
-                    2 => format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])),
-                    n => format!("{}, {} and {} others are in this call", app.name(&users[0]), app.name(&users[1]), n - 2),
-                }
-            } else {
-                format!("Signal will ring {}", title_text)
-            };
-            body(ui, &palette, &who);
-            ui.add_space(12.);
-            // Camera, microphone, settings: Desktop's `CallingButton`s.
-            ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 3. * 56.) / 2.);
-                for (symbol_on, symbol_off, label, on) in [
-                    ("videocamera", "videocamera-slash", "Camera", Some(&mut video)),
-                    ("mic", "mic-slash", "Microphone", Some(&mut audio)),
-                    ("settings", "settings", "Settings", None),
-                ] {
-                    let (rect, r) = ui.allocate_exact_size(Vec2::new(56., 44.), Sense::click());
-                    let lit = on.as_ref().is_none_or(|v| **v);
-                    let fill = if lit { palette.fill } else { palette.text };
-                    let ink = if lit { palette.text } else { palette.background };
-                    ui.painter().circle_filled(rect.center(), 20., if r.hovered() { fill.gamma_multiply(0.85) } else { fill });
-                    theme::paint_symbol(ui.painter(), if lit { symbol_on } else { symbol_off }, rect.center(), 20., ink);
-                    if r.on_hover_text(label).clicked() {
-                        match on {
-                            Some(v) => *v = !*v,
-                            None => settings = true,
-                        }
-                    }
-                }
+    // Desktop's `CallingLobbyJoinButton`: Start, Join, or Ask to join for a
+    // link that needs an admin's approval.
+    let link = conversation.as_call_link().and_then(|room| app.panes.links.iter().find(|l| l.room_id == room)).cloned();
+    let asks = link.as_ref().is_some_and(|l| l.admin_key.is_none() && l.restrictions == langis_store::CallLinkRestrictions::AdminApproval);
+    let join_label = if asks { "Ask to join" } else if group && !users.is_empty() { "Join" } else { "Start" };
+    // Desktop's `CallingLobby`, the whole window on gray-95: the close X and
+    // settings above, our camera (or photo) 16:9 in the middle, the chat's
+    // name and who's there, then camera, microphone and the green button.
+    let screen = ui.ctx().content_rect();
+    let white = egui::Color32::WHITE;
+    let mut closed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    egui::Area::new(egui::Id::unique("call-lobby")).fixed_pos(screen.min).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        ui.set_min_size(screen.size());
+        ui.painter().rect_filled(screen, 0, theme::rgb(0x121212));
+        // Header: close and settings.
+        let close = Rect::from_min_size(screen.min + Vec2::new(16., 16.), Vec2::splat(32.));
+        let cr = ui.interact(close, ui.scope_id().with("lobby-close"), Sense::click());
+        if cr.hovered() {
+            ui.painter().circle_filled(close.center(), 16., egui::Color32::from_white_alpha(30));
+        }
+        theme::paint_symbol(ui.painter(), "x", close.center(), 20., white);
+        if cr.on_hover_text("Close").clicked() {
+            closed = true;
+        }
+        let gear = Rect::from_min_size(Pos2::new(screen.right() - 48., screen.top() + 16.), Vec2::splat(32.));
+        let gr = ui.interact(gear, ui.scope_id().with("lobby-settings"), Sense::click());
+        if gr.hovered() {
+            ui.painter().circle_filled(gear.center(), 16., egui::Color32::from_white_alpha(30));
+        }
+        theme::paint_symbol(ui.painter(), "settings", gear.center(), 20., white);
+        if gr.on_hover_text("Settings").clicked() {
+            settings = true;
+        }
+        // The preview.
+        let w = (screen.width() - 64.).min(640.).max(240.);
+        let h = (w * 9. / 16.).min(screen.height() - 300.).max(120.);
+        let frame = Rect::from_center_size(Pos2::new(screen.center().x, screen.top() + 72. + h / 2.), Vec2::new(w, h));
+        ui.painter().rect_filled(frame, CornerRadius::same(18), theme::rgb(0x2e2e2e));
+        let slot = app.backend.as_ref().map(|b| b.call_video().local.clone());
+        let shown = video
+            && slot.and_then(|slot| app.call_view.texture(ui.ctx(), "lobby-local", &slot)).is_some_and(|(texture, size)| {
+                let scale = (frame.width() / size.x).max(frame.height() / size.y);
+                let shown = size * scale;
+                let uv = Rect::from_center_size(egui::pos2(0.5, 0.5), Vec2::new((frame.width() / shown.x).min(1.), (frame.height() / shown.y).min(1.)));
+                egui::Image::new((texture.id(), frame.size())).uv(uv).corner_radius(CornerRadius::same(18)).paint_at(ui, frame);
+                true
             });
-        });
-        answer = buttons(ui, &[if group && !users.is_empty() { "Join call" } else { "Start call" }, "Cancel"]);
+        if !shown {
+            let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
+            widgets::paint_avatar(ui, Rect::from_center_size(frame.center(), Vec2::splat(96.)), &spec);
+            let note = if video { "Starting camera\u{2026}" } else { "Your camera is off" };
+            ui.painter().text(frame.center() + Vec2::new(0., 72.), egui::Align2::CENTER_CENTER, note, theme::regular(13.), egui::Color32::from_white_alpha(200));
+        }
+        // `CallingPreCallInfo`.
+        let who = if group {
+            match users.len() {
+                0 => "No one else is here".to_owned(),
+                1 => format!("{} is in this call", app.name(&users[0])),
+                2 => format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])),
+                3 => format!("{}, {}, and {} are in this call", app.name(&users[0]), app.name(&users[1]), app.name(&users[2])),
+                n => format!("{}, {}, and {} others are in this call", app.name(&users[0]), app.name(&users[1]), n - 2),
+            }
+        } else {
+            format!("Signal will ring {}", title_text)
+        };
+        let mut y = frame.bottom() + 24.;
+        ui.painter().text(Pos2::new(screen.center().x, y), egui::Align2::CENTER_TOP, &title_text, theme::semibold(20.), white);
+        y += 30.;
+        ui.painter().text(Pos2::new(screen.center().x, y), egui::Align2::CENTER_TOP, &who, theme::regular(14.), egui::Color32::from_white_alpha(200));
+        y += 40.;
+        // Controls: camera, microphone, then the join button.
+        let label = ui.painter().layout_no_wrap(join_label.to_owned(), theme::semibold(14.), white);
+        let pill_w = label.size().x + 48.;
+        let total = 56. + 16. + 56. + 24. + pill_w;
+        let mut x = screen.center().x - total / 2.;
+        for (symbol_on, symbol_off, tip, on) in [("videocamera-fill", "videocamera-slash-fill", "Camera", &mut video), ("mic-fill", "mic-slash-fill", "Microphone", &mut audio)] {
+            let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::splat(56.));
+            let r = ui.interact(rect, ui.scope_id().with(("lobby-toggle", tip)), Sense::click());
+            let fill = if *on { theme::rgb(0x5e5e5e) } else { white };
+            let ink = if *on { white } else { theme::rgb(0x121212) };
+            ui.painter().circle_filled(rect.center(), 28., if r.hovered() { fill.gamma_multiply(0.85) } else { fill });
+            theme::paint_symbol(ui.painter(), if *on { symbol_on } else { symbol_off }, rect.center(), 24., ink);
+            if r.on_hover_text(tip).clicked() {
+                *on = !*on;
+            }
+            x += 56. + 16.;
+        }
+        x += 8.;
+        let pill = Rect::from_min_size(Pos2::new(x, y + 8.), Vec2::new(pill_w, 40.));
+        let r = ui.interact(pill, ui.scope_id().with("lobby-join"), Sense::click());
+        let green = palette.green;
+        ui.painter().rect_filled(pill, CornerRadius::same(20), if r.hovered() { green.gamma_multiply(0.85) } else { green });
+        ui.painter().galley(pill.center() - label.size() / 2., label, white);
+        if r.clicked() {
+            answer = Some(0);
+        }
     });
+    let closed = closed;
     if let Some(l) = app.panes.lobby.as_mut() {
         l.video = video;
         l.audio = audio;
