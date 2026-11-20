@@ -263,9 +263,13 @@ pub fn on_event(app: &mut App, event: Event) {
         }
         Event::KeyTransparencyFailed => app.panes.key_transparency_failed = true,
         Event::ProfileSaved(result) => match result {
+            // Saved: the page reads it again, back from a name or About edit.
             Ok(()) => {
                 app.panes.profile = None;
                 app.load_me();
+                if matches!(app.settings.page, crate::settings::Page::ProfileName | crate::settings::Page::ProfileAbout) {
+                    app.settings.page = crate::settings::Page::Profile;
+                }
             }
             Err(why) => app.toast(format!("Your profile could not be updated. {why}")),
         },

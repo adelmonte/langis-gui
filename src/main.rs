@@ -10,6 +10,7 @@ mod contact_modal;
 mod audio;
 mod blurhash;
 mod axo_list;
+mod avatar_editor;
 mod countries;
 mod media_editor;
 mod media_gallery;

@@ -33,6 +33,11 @@ const ZOOMS: [(f32, &str); 7] = [(0.75, "75%"), (0.9, "90%"), (1., "100%"), (1.1
 /// Desktop's `SettingsPage`s that langis has.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum Page {
+    /// Desktop's ProfileEditor, from the profile chip, and its name and
+    /// About editors.
+    Profile,
+    ProfileName,
+    ProfileAbout,
     Account,
     #[default]
     General,
@@ -68,12 +73,16 @@ impl Page {
             Page::ChatFolders => Page::Chats,
             Page::WhileMuted => Page::Notifications,
             Page::PhoneNumber | Page::Blocked => Page::Privacy,
+            Page::ProfileName | Page::ProfileAbout => Page::Profile,
             other => other,
         }
     }
 
     fn title(self) -> &'static str {
         match self {
+            Page::Profile => "Profile",
+            Page::ProfileName => "Your name",
+            Page::ProfileAbout => "About",
             Page::ChatColor => "Chat Color",
             Page::ChatFolders => "Chat folders",
             Page::WhileMuted => "While muted",
@@ -260,6 +269,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         };
         egui::ScrollArea::vertical().id_salt(("settings-page", page as u8)).auto_shrink(false).show(ui, |ui| {
             axo_list::container(ui, |ui| match page {
+                Page::Profile => crate::profile::page(app, ui),
+                Page::ProfileName => crate::profile::name_page(app, ui),
+                Page::ProfileAbout => crate::profile::about_page(app, ui),
                 Page::Account => account(app, ui),
                 Page::General => general(app, ui),
                 Page::Appearance => appearance(app, ui),
@@ -469,6 +481,7 @@ fn nav(app: &mut App, ui: &mut Ui, palette: &Palette) {
     if qr_clicked {
         crate::profile::open_link_screen(app);
     } else if chip.on_hover_text("Edit profile").clicked() {
+        app.settings.page = Page::Profile;
         crate::profile::open(app);
     }
     ui.add_space(4.);

@@ -29,6 +29,10 @@ pub struct ProfileEditor {
     pub confirm_delete_username: bool,
     /// The About emoji's picker, while open.
     pub about_picker: Option<crate::emoji_picker::Picker>,
+    /// Desktop's AvatarEditor, open.
+    pub avatar_editor: Option<crate::avatar_editor::AvatarEditor>,
+    /// What was saved, for Cancel on the name and About pages.
+    pub saved: (String, String, String, String),
 }
 
 pub struct UsernameEdit {
@@ -97,6 +101,8 @@ pub fn open(app: &mut App) {
         editing_username: None,
         confirm_delete_username: false,
         about_picker: None,
+        avatar_editor: None,
+        saved: Default::default(),
     });
     let aci = app.aci.clone();
     app.load(move |db| async move {
@@ -108,6 +114,7 @@ pub fn open(app: &mut App) {
                 e.family = p.family_name;
                 e.about = p.about;
                 e.about_emoji = p.about_emoji;
+                e.saved = (e.given.clone(), e.family.clone(), e.about.clone(), e.about_emoji.clone());
                 e.photo = p.photo.map(|p| p.to_string_lossy().into_owned());
                 e.username = p.username;
                 e.link = p.username_link.and_then(|l| l.url());
@@ -116,92 +123,248 @@ pub fn open(app: &mut App) {
     });
 }
 
-pub fn show(app: &mut App, ui: &mut Ui) {
-    let Some(mut e) = app.panes.profile.take() else { return };
+/// Desktop's name limit (`ProfileEditor`'s `maxLengthCount`), and when its
+/// counter shows.
+const NAME_MAX: usize = 26;
+/// Desktop's About limit (`BioInput`).
+const ABOUT_MAX: usize = 140;
+
+/// Desktop's About presets (`DEFAULT_BIOS`).
+const ABOUT_PRESETS: [(&str, &str); 7] = [
+    ("👋", "Speak Freely"),
+    ("🤐", "Encrypted"),
+    ("🙏", "Be kind"),
+    ("☕", "Coffee lover"),
+    ("👍", "Free to chat"),
+    ("📵", "Taking a break"),
+    ("🚀", "Working on something new"),
+];
+
+fn send_profile(app: &mut App, e: &mut ProfileEditor, avatar: AvatarChange) {
+    let edit = ProfileEdit {
+        given_name: e.given.trim().to_owned(),
+        family_name: e.family.trim().to_owned(),
+        about: e.about.trim().to_owned(),
+        about_emoji: e.about_emoji.trim().to_owned(),
+        avatar,
+    };
+    app.send(Command::SetProfile(edit));
+}
+
+/// The editor's state for a settings page, reading our profile when it
+/// isn't yet.
+fn editor(app: &mut App) -> Option<ProfileEditor> {
+    if app.panes.profile.is_none() {
+        open(app);
+    }
+    app.panes.profile.take()
+}
+
+/// Desktop's `ProfileEditor` as a settings page: the photo with Edit
+/// photo, the name and About rows, and the username with its link.
+pub fn page(app: &mut App, ui: &mut Ui) {
+    use crate::axo_list::{self, End, Item};
+    let Some(mut e) = editor(app) else { return };
     let palette = Palette::of(ui.ctx());
-    let mut answer = None;
-    let closed = modal(ui, "profile", 420., |ui| {
-        title(ui, "Profile");
-        if !e.loaded {
-            crate::widgets::spinner(ui, 24.);
-            return;
+    if !e.loaded {
+        crate::widgets::spinner(ui, 24.);
+        app.panes.profile = Some(e);
+        return;
+    }
+    ui.add_space(16.);
+    ui.vertical_centered(|ui| {
+        let name = format!("{} {}", e.given, e.family);
+        let spec = widgets::AvatarSpec { name: name.trim(), color: 0, photo: e.photo.as_deref(), group: false, note_to_self: false };
+        if widgets::avatar(ui, &spec, 80.).interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim()));
         }
-        ui.vertical_centered(|ui| {
-            let name = format!("{} {}", e.given, e.family);
-            let photo = match &e.avatar {
-                AvatarChange::Remove => None,
-                _ => e.photo.clone(),
-            };
-            let spec = widgets::AvatarSpec { name: name.trim(), color: 0, photo: photo.as_deref(), group: false, note_to_self: false };
-            widgets::avatar(ui, &spec, 80.);
-            ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 160.).max(0.) / 2.);
-                if ui.link("Edit photo").clicked()
-                    && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg"]).pick_file()
-                    && let Ok(bytes) = std::fs::read(&path)
-                {
-                    // Desktop's AvatarEditor crops to a square; this takes
-                    // the middle square, at most 512 pixels.
-                    match square_photo(&bytes) {
-                        Some(cropped) => {
-                            let preview = avatar_preview_path();
-                            let _ = std::fs::write(&preview, &cropped);
-                            ui.ctx().forget_image(&format!("file://{}", preview.display()));
-                            e.photo = Some(preview.to_string_lossy().into_owned());
-                            e.avatar = AvatarChange::New(std::sync::Arc::new(cropped));
-                        }
-                        None => app.toast("That picture couldn't be read."),
-                    }
+        ui.add_space(12.);
+        if widgets::axo_button(ui, "Edit photo", widgets::Axo::SubtleSecondary).clicked() {
+            e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim()));
+        }
+    });
+    ui.add_space(16.);
+    let mut go = None;
+    let full = format!("{} {}", e.given, e.family).trim().to_owned();
+    let about = if e.about.is_empty() && e.about_emoji.is_empty() { "About".to_owned() } else { format!("{} {}", e.about_emoji, e.about).trim().to_owned() };
+    axo_list::list(ui, None, Some("Your profile and changes to it will be visible to people you message, contacts and groups."), |ui| {
+        if axo_list::item(ui, Item::new(&full).symbol("person"), End::Click).clicked() {
+            go = Some(crate::settings::Page::ProfileName);
+        }
+        if axo_list::item(ui, Item::new(&about).symbol("pencil"), End::Click).clicked() {
+            go = Some(crate::settings::Page::ProfileAbout);
+        }
+    });
+    axo_list::gap(ui);
+    let username = e.username.clone();
+    axo_list::list(ui, None, Some("People can now message you using your optional username so you don't have to give out your phone number."), |ui| {
+        let label = username.clone().unwrap_or_else(|| "Username".into());
+        let row = axo_list::item(ui, Item::new(&label).symbol("at"), End::Click);
+        let menu = egui::Id::unique("profile-username-menu");
+        if row.clicked() {
+            match &username {
+                // Desktop's username row opens its menu once there's one.
+                Some(_) => crate::menu::open_at(ui.ctx(), menu, row.row.rect.right_bottom() - egui::vec2(200., 0.)),
+                None => e.editing_username = Some(UsernameEdit { nickname: String::new(), digits: String::new(), typed_at: Instant::now(), asked: None, reservation: None, problem: None, saving: false }),
+            }
+        }
+        crate::menu::show(ui.ctx(), menu, |m| {
+            if let Some(name) = &username {
+                if m.item(Some("copy"), "Copy username") {
+                    ui.ctx().copy_text(name.clone());
+                    app.toast("Username copied");
                 }
-                if photo.is_some() && ui.link("Remove").clicked() {
-                    e.avatar = AvatarChange::Remove;
+                if m.item(Some("pencil"), "Edit username") {
+                    let (nickname, digits) = name.split_once('.').map(|(n, d)| (n.to_owned(), d.to_owned())).unwrap_or((name.clone(), String::new()));
+                    e.editing_username = Some(UsernameEdit { nickname, digits, typed_at: Instant::now(), asked: None, reservation: None, problem: None, saving: false });
+                }
+                if m.item(Some("trash"), "Delete") {
+                    e.confirm_delete_username = true;
+                }
+            }
+        });
+        if username.is_some() && axo_list::item(ui, Item::new("QR code or link").symbol("qrcode"), End::Click).clicked() {
+            open_link_screen(app);
+        }
+    });
+    let _ = palette;
+    if let Some(page) = go {
+        app.settings.page = page;
+    }
+    app.panes.profile = Some(e);
+}
+
+/// A field with Desktop's remaining-characters counter (shown as it nears
+/// the limit).
+fn counted_field(ui: &mut Ui, palette: &Palette, text: &mut String, hint: &str, max: usize, show_at: usize) -> egui::Response {
+    let r = ui.add(egui::TextEdit::singleline(text).hint_text(hint).char_limit(max).desired_width(ui.available_width() - 40.).margin(egui::Margin::symmetric(10, 8)));
+    let left = max.saturating_sub(text.chars().count());
+    if left <= show_at {
+        ui.painter().text(egui::pos2(r.rect.right() + 8., r.rect.center().y), egui::Align2::LEFT_CENTER, left.to_string(), theme::regular(12.), palette.text_secondary);
+    }
+    r
+}
+
+/// Desktop's name editor: first and last name with counters, Cancel and
+/// Save.
+pub fn name_page(app: &mut App, ui: &mut Ui) {
+    let Some(mut e) = editor(app) else { return };
+    let palette = Palette::of(ui.ctx());
+    if e.loaded {
+        ui.add_space(16.);
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 0)).show(ui, |ui| {
+            counted_field(ui, &palette, &mut e.given, "First name (required)", NAME_MAX, 9).request_focus();
+            ui.add_space(12.);
+            counted_field(ui, &palette, &mut e.family, "Last name (optional)", NAME_MAX, 9);
+            let changed = (e.given.as_str(), e.family.as_str()) != (e.saved.0.as_str(), e.saved.1.as_str());
+            ui.add_space(8.);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let ok = changed && !e.given.trim().is_empty();
+                if ui.add_enabled_ui(ok, |ui| widgets::pill_button(ui, "Save", true).clicked()).inner && ok {
+                    send_profile(app, &mut e, AvatarChange::Keep);
+                }
+                ui.add_space(8.);
+                if widgets::pill_button(ui, "Cancel", false).clicked() {
+                    e.given = e.saved.0.clone();
+                    e.family = e.saved.1.clone();
+                    app.settings.page = crate::settings::Page::Profile;
                 }
             });
         });
-        ui.add_space(10.);
-        widgets::text_field(ui, &mut e.given, "First name (required)", false);
-        ui.add_space(6.);
-        widgets::text_field(ui, &mut e.family, "Last name (optional)", false);
-        ui.add_space(6.);
-        ui.horizontal(|ui| {
-            // The About emoji from the picker, as Desktop's BioInput does.
-            let face = if e.about_emoji.is_empty() { "🙂".to_owned() } else { e.about_emoji.clone() };
-            let mut job = egui::text::LayoutJob::default();
-            crate::chat::append_with_emoji(&mut job, &face, egui::TextFormat { font_id: theme::emoji(18.), color: palette.text, ..Default::default() });
-            if ui.add(egui::Button::new(job).corner_radius(CornerRadius::same(8))).on_hover_text("Choose an emoji").clicked() {
-                e.about_picker = if e.about_picker.is_some() { None } else { Some(Default::default()) };
-            }
-            widgets::text_field(ui, &mut e.about, "About", false);
-        });
-        if let Some(picker) = e.about_picker.as_mut() {
-            ui.add_space(6.);
-            if let Some(emoji) = picker.body(ui, &app.recent_emoji) {
-                e.about_emoji = emoji.to_owned();
-                e.about_picker = None;
-            }
-        }
-        // Desktop's About presets.
-        ui.add_space(4.);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(4., 4.);
-            for (emoji, text) in [("👋", "Speak Freely"), ("🤐", "Encrypted"), ("👍", "Free to chat"), ("☕", "Coffee lover"), ("📴", "Taking a break")] {
+    }
+    app.panes.profile = Some(e);
+}
+
+/// Desktop's About editor: the emoji and text with its counter, the
+/// presets as a list, Cancel and Save.
+pub fn about_page(app: &mut App, ui: &mut Ui) {
+    let Some(mut e) = editor(app) else { return };
+    let palette = Palette::of(ui.ctx());
+    if e.loaded {
+        ui.add_space(16.);
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 0)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let face = if e.about_emoji.is_empty() { "🙂".to_owned() } else { e.about_emoji.clone() };
                 let mut job = egui::text::LayoutJob::default();
-                crate::chat::append_with_emoji(&mut job, &format!("{emoji} {text}"), egui::TextFormat { font_id: theme::regular(12.), color: palette.text, ..Default::default() });
-                if ui.add(egui::Button::new(job).corner_radius(CornerRadius::same(12))).clicked() {
+                crate::chat::append_with_emoji(&mut job, &face, egui::TextFormat { font_id: theme::emoji(18.), color: palette.text, ..Default::default() });
+                if ui.add(egui::Button::new(job).corner_radius(CornerRadius::same(8)).min_size(egui::vec2(36., 36.))).on_hover_text("Choose an emoji").clicked() {
+                    e.about_picker = if e.about_picker.is_some() { None } else { Some(Default::default()) };
+                }
+                counted_field(ui, &palette, &mut e.about, "Write a few words about yourself...", ABOUT_MAX, 30);
+            });
+            if let Some(picker) = e.about_picker.as_mut() {
+                ui.add_space(6.);
+                if let Some(emoji) = picker.body(ui, &app.recent_emoji) {
+                    e.about_emoji = emoji.to_owned();
+                    e.about_picker = None;
+                }
+            }
+            ui.add_space(12.);
+            for (emoji, text) in ABOUT_PRESETS {
+                let (rect, hit) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.), Sense::click());
+                if hit.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                }
+                ui.painter().text(egui::pos2(rect.left() + 12., rect.center().y), egui::Align2::LEFT_CENTER, emoji, theme::emoji(18.), palette.text);
+                ui.painter().text(egui::pos2(rect.left() + 44., rect.center().y), egui::Align2::LEFT_CENTER, text, theme::regular(14.), palette.text);
+                if hit.clicked() {
                     e.about_emoji = emoji.to_owned();
                     e.about = text.to_owned();
                 }
             }
-            if (!e.about.is_empty() || !e.about_emoji.is_empty()) && ui.add(egui::Button::new(RichText::new("Clear").font(theme::regular(12.))).corner_radius(CornerRadius::same(12))).clicked() {
-                e.about.clear();
-                e.about_emoji.clear();
-            }
+            let changed = (e.about.as_str(), e.about_emoji.as_str()) != (e.saved.2.as_str(), e.saved.3.as_str());
+            ui.add_space(12.);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add_enabled_ui(changed, |ui| widgets::pill_button(ui, "Save", true).clicked()).inner && changed {
+                    send_profile(app, &mut e, AvatarChange::Keep);
+                }
+                ui.add_space(8.);
+                if widgets::pill_button(ui, "Cancel", false).clicked() {
+                    e.about = e.saved.2.clone();
+                    e.about_emoji = e.saved.3.clone();
+                    app.settings.page = crate::settings::Page::Profile;
+                }
+            });
         });
-        ui.add_space(12.);
-        ui.label(RichText::new("Username").font(theme::semibold(14.)));
-        username(app, ui, &palette, &mut e);
-        answer = buttons(ui, &["Save", "Cancel"]);
-    });
+    }
+    app.panes.profile = Some(e);
+}
+
+/// The profile's dialogs: the avatar editor, Desktop's username editor
+/// (`EditUsernameModalBody`) and Delete username.
+pub fn show(app: &mut App, ui: &mut Ui) {
+    let Some(mut e) = app.panes.profile.take() else { return };
+    let palette = Palette::of(ui.ctx());
+    if let Some(editor) = e.avatar_editor.as_mut() {
+        let mut toast = None;
+        if let Some(change) = editor.show(ui, &mut toast) {
+            e.avatar_editor = None;
+            if !matches!(change, AvatarChange::Keep) {
+                if let AvatarChange::New(bytes) = &change {
+                    let preview = avatar_preview_path();
+                    let _ = std::fs::write(&preview, bytes.as_slice());
+                    ui.ctx().forget_image(&format!("file://{}", preview.display()));
+                    e.photo = Some(preview.to_string_lossy().into_owned());
+                } else {
+                    e.photo = None;
+                }
+                send_profile(app, &mut e, change);
+            }
+        }
+        if let Some(t) = toast {
+            app.toast(t);
+        }
+    }
+    if e.editing_username.is_some() {
+        let mut done = false;
+        let closed = modal(ui, "username-editor", 400., |ui| {
+            title(ui, "Username");
+            done = username(app, ui, &palette, &mut e);
+        });
+        if closed || done {
+            e.editing_username = None;
+        }
+    }
     if e.confirm_delete_username {
         let name = e.username.clone().unwrap_or_default();
         let description = format!("This will remove your username and disable your QR code and link. \u{201c}{name}\u{201d} will be available for others to claim. Are you sure?");
@@ -214,111 +377,62 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             None => {}
         }
     }
-    let current = (e.given.clone(), e.family.clone(), e.about.clone(), e.about_emoji.clone(), !matches!(e.avatar, AvatarChange::Keep));
-    let leave = e.loaded && crate::panes::discard_guard(ui.ctx(), "profile", &current, answer == Some(1) || (closed && answer.is_none()), answer == Some(0));
-    let leave = leave || (!e.loaded && closed);
-    match answer {
-        Some(0) if e.given.trim().is_empty() => {
-            app.toast("Your profile needs a first name.");
-            app.panes.profile = Some(e);
-        }
-        Some(0) => {
-            let edit = ProfileEdit {
-                given_name: e.given.trim().to_owned(),
-                family_name: e.family.trim().to_owned(),
-                about: e.about.trim().to_owned(),
-                about_emoji: e.about_emoji.trim().to_owned(),
-                avatar: std::mem::replace(&mut e.avatar, AvatarChange::Keep),
-            };
-            app.send(Command::SetProfile(edit));
-            // Kept open until the save is answered (Event::ProfileSaved).
-            app.panes.profile = Some(e);
-        }
-        _ if leave => {}
-        _ => app.panes.profile = Some(e),
-    }
+    app.panes.profile = Some(e);
 }
 
-fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor) {
-    match e.editing_username.as_mut() {
-        None => {
-            match &e.username {
-                Some(name) => {
-                    ui.label(RichText::new(name).font(theme::regular(14.)));
-                    if let Some(link) = &e.link {
-                        ui.horizontal(|ui| {
-                            ui.set_max_width(372.);
-                            ui.add(egui::Label::new(RichText::new(link).font(theme::regular(12.)).color(palette.text_secondary)).truncate());
-                            if ui.small_button("Copy").clicked() {
-                                ui.ctx().copy_text(link.clone());
-                                app.toast("Username link copied.");
-                            }
-                        });
-                        if ui.link("Reset link").clicked() {
-                            app.send(Command::ResetUsernameLink);
-                        }
-                        if ui.link("QR code").clicked() {
-                            open_link_screen(app);
-                        }
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.link("Edit username").clicked() {
-                            let (nickname, digits) = name.split_once('.').map(|(n, d)| (n.to_owned(), d.to_owned())).unwrap_or((name.clone(), String::new()));
-                            e.editing_username = Some(UsernameEdit { nickname, digits, typed_at: Instant::now(), asked: None, reservation: None, problem: None, saving: false });
-                        }
-                        if ui.link("Delete username").clicked() {
-                            e.confirm_delete_username = true;
-                        }
-                    });
-                }
-                None => {
-                    body(ui, palette, "People can now message you using your optional username so you don't have to give out your phone number.");
-                    if ui.link("Set up username").clicked() {
-                        e.editing_username = Some(UsernameEdit { nickname: String::new(), digits: String::new(), typed_at: Instant::now(), asked: None, reservation: None, problem: None, saving: false });
-                    }
-                }
+/// Desktop's `EditUsernameModalBody`: the nickname, a dot and its
+/// numbers, the check as it's typed, Cancel and Done. True to close.
+fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor) -> bool {
+    let Some(edit) = e.editing_username.as_mut() else { return true };
+    let field = egui::Frame::new().fill(palette.fill_secondary).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let a = ui.add(egui::TextEdit::singleline(&mut edit.nickname).hint_text("Username").frame(egui::Frame::NONE).desired_width(ui.available_width() - 70.));
+            ui.label(RichText::new(".").font(theme::regular(14.)).color(palette.text_secondary));
+            let b = ui.add(egui::TextEdit::singleline(&mut edit.digits).hint_text("00").frame(egui::Frame::NONE).char_limit(9).desired_width(48.));
+            if a.changed() || b.changed() {
+                edit.typed_at = Instant::now();
+                edit.reservation = None;
+                edit.problem = None;
             }
-        }
-        Some(edit) => {
-            ui.horizontal(|ui| {
-                let a = ui.add(egui::TextEdit::singleline(&mut edit.nickname).hint_text("Username").desired_width(220.));
-                ui.label(".");
-                let b = ui.add(egui::TextEdit::singleline(&mut edit.digits).hint_text("00").desired_width(48.));
-                if a.changed() || b.changed() {
-                    edit.typed_at = Instant::now();
-                    edit.reservation = None;
-                    edit.problem = None;
-                }
-            });
-            // Desktop reserves half a second after typing stops.
-            let wanted = (edit.nickname.trim().to_lowercase(), Some(edit.digits.trim().to_owned()).filter(|d| !d.is_empty()));
-            if !wanted.0.is_empty() && edit.typed_at.elapsed() > Duration::from_millis(500) && edit.asked.as_ref() != Some(&wanted) {
-                edit.asked = Some(wanted.clone());
-                app.send(Command::ReserveUsername { nickname: wanted.0, discriminator: wanted.1 });
-            } else if !wanted.0.is_empty() {
-                ui.ctx().request_repaint_after(Duration::from_millis(200));
-            }
-            if let Some(problem) = &edit.problem {
-                ui.label(RichText::new(problem).font(theme::regular(12.)).color(palette.destructive));
-            } else if let Some(r) = &edit.reservation {
-                ui.label(RichText::new(format!("{} is available", r.username)).font(theme::regular(12.)).color(palette.green));
-            }
-            let mut cancel = false;
-            ui.horizontal(|ui| {
-                let ready = edit.reservation.is_some() && !edit.saving;
-                if ui.add_enabled(ready, egui::Button::new("Save username")).clicked()
-                    && let Some(r) = edit.reservation.clone()
-                {
-                    edit.saving = true;
-                    app.send(Command::ConfirmUsername(r));
-                }
-                cancel = ui.button("Cancel").clicked();
-            });
-            if cancel {
-                e.editing_username = None;
-            }
-        }
+            a
+        })
+        .inner
+    });
+    if ui.memory(|m| m.focused().is_none()) {
+        field.inner.request_focus();
     }
+    // Desktop reserves half a second after typing stops.
+    let wanted = (edit.nickname.trim().to_lowercase(), Some(edit.digits.trim().to_owned()).filter(|d| !d.is_empty()));
+    if !wanted.0.is_empty() && edit.typed_at.elapsed() > Duration::from_millis(500) && edit.asked.as_ref() != Some(&wanted) {
+        edit.asked = Some(wanted.clone());
+        app.send(Command::ReserveUsername { nickname: wanted.0, discriminator: wanted.1 });
+    } else if !wanted.0.is_empty() {
+        ui.ctx().request_repaint_after(Duration::from_millis(200));
+    }
+    ui.add_space(6.);
+    if let Some(problem) = &edit.problem {
+        ui.label(RichText::new(problem).font(theme::regular(12.)).color(palette.destructive));
+    } else {
+        body(ui, palette, "Usernames are always paired with a set of numbers.");
+    }
+    let ready = edit.reservation.is_some() && !edit.saving;
+    let mut close = false;
+    ui.add_space(16.);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let label = if edit.saving { "…" } else { "Done" };
+        if ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, label, true).clicked()).inner
+            && ready
+            && let Some(r) = edit.reservation.clone()
+        {
+            edit.saving = true;
+            app.send(Command::ConfirmUsername(r));
+        }
+        ui.add_space(4.);
+        if widgets::pill_button(ui, "Cancel", false).clicked() {
+            close = true;
+        }
+    });
+    close
 }
 
 /// Desktop's username link colors (`UsernameLinkEditor`'s `COLOR_MAP`), by
@@ -428,7 +542,7 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
 }
 
 /// The middle square of a picture, at most 512 pixels, as a JPEG.
-fn square_photo(bytes: &[u8]) -> Option<Vec<u8>> {
+pub fn square_photo(bytes: &[u8]) -> Option<Vec<u8>> {
     let image = image::load_from_memory(bytes).ok()?;
     let side = image.width().min(image.height());
     let x = (image.width() - side) / 2;
