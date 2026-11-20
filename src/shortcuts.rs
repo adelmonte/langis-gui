@@ -19,6 +19,7 @@ const GUIDE: &[(&str, &[(&str, &[&str])])] = &[
     (
         "Navigation",
         &[
+            ("Navigate by section", &["Ctrl", "T"]),
             ("Go to previous chat", &["Alt", "↑"]),
             ("Go to next chat", &["Alt", "↓"]),
             ("Go to previous unread chat", &["Alt", "Shift", "↑"]),
@@ -47,6 +48,7 @@ const GUIDE: &[(&str, &[(&str, &[&str])])] = &[
     (
         "Message",
         &[
+            ("Open context menu for selected message", &["Shift", "F10"]),
             ("Default action for selected message", &["Enter"]),
             ("View selected message details", &["Ctrl", "D"]),
             ("Toggle reply to selected message", &["Ctrl", "Shift", "R"]),
@@ -204,6 +206,17 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         app.tab = Tab::Chats;
         ctx.memory_mut(|m| m.request_focus(crate::sidebar::search_id()));
     }
+    // Desktop's Navigate by section (Ctrl+T, F6): the chat list's search,
+    // then the composer, round again.
+    if pressed(ctx, CTRL, Key::T) || pressed(ctx, Modifiers::NONE, Key::F6) {
+        let search = crate::sidebar::search_id();
+        let composer = app.selected.as_ref().filter(|_| app.chat.is_some()).map(crate::composer::input_id);
+        let in_search = ctx.memory(|m| m.has_focus(search));
+        match composer {
+            Some(c) if in_search => ctx.memory_mut(|m| m.request_focus(c)),
+            _ => ctx.memory_mut(|m| m.request_focus(search)),
+        }
+    }
     let Some(id) = app.selected.clone().filter(|_| app.chat.is_some()) else { return };
     if pressed(ctx, CTRL_SHIFT, Key::F) {
         app.find_requested = true;
@@ -309,6 +322,14 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         }
     }
     let Some(m) = chat.messages.iter().find(|m| m.id == selected).cloned() else { return };
+    // Desktop's Shift+F10: the selected message's context menu.
+    if !typing && pressed(ctx, Modifiers::SHIFT, Key::F10) {
+        let at = ctx.content_rect().center();
+        if let Some(chat) = app.chat.as_mut() {
+            chat.popup = Some(crate::actions::Popup::Menu { message: m.id, at });
+        }
+        return;
+    }
     if !typing && pressed(ctx, Modifiers::NONE, Key::Enter) {
         // The default action: a photo or video opens in the viewer.
         if let Some(index) = m.attachments.iter().position(|a| !a.sticker && a.local_path.is_some() && (a.content_type.starts_with("image/") || a.content_type.starts_with("video/"))) {
