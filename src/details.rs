@@ -38,6 +38,8 @@ pub struct Details {
     pub edit_info: Option<(String, String)>,
     pub nickname: Option<ContactNickname>,
     pub add_members: Option<(String, Vec<String>)>,
+    /// The AvatarEditor for the group's photo.
+    pub group_avatar: Option<crate::avatar_editor::AvatarEditor>,
     pub label: Option<String>,
     /// The chat's media, for All media and whether to offer it.
     pub media: Option<Vec<langis_store::Message>>,
@@ -68,6 +70,7 @@ impl Details {
             edit_info: None,
             nickname: None,
             add_members: None,
+            group_avatar: None,
             label: None,
             media: None,
             media_tab: Default::default(),
@@ -276,13 +279,27 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             theme::paint_symbol(ui.painter(), "person-circle", at.center(), 14., color);
             ui.interact(at, ui.scope_id().with("in-contacts"), egui::Sense::hover()).on_hover_text("This person is in your contacts.");
         }
-        if c.can_edit_info && group && name.on_hover_text("Edit").clicked()
+        // A person's name opens Desktop's AboutContactModal (its chevron).
+        if !group && c.kind == ConversationKind::Direct {
+            let at = egui::pos2(name.rect.right() + if c.system_contact { 26. } else { 10. }, name.rect.center().y);
+            crate::icons::Icon::ChevronRight.paint(ui, egui::Rect::from_center_size(at, egui::vec2(16., 16.)), 16., palette.text_secondary);
+            if name.clone().on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+                && let Some(sid) = c.id.as_direct()
+            {
+                crate::contact_modal::open(app, None, sid.to_owned());
+                if let Some(contact) = app.panes.contact.as_mut() {
+                    contact.about_open = true;
+                }
+            }
+        }
+        if c.can_edit_info && group && name.on_hover_text(tr("Edit")).clicked()
             && let Some(d) = app.panes.details.as_mut()
         {
             d.edit_info = Some((c.title.clone(), c.description.clone().unwrap_or_default()));
         }
         if group {
-            body(ui, palette, &crate::i18n::tf("icu:GroupV2--join--group-metadata--full", &format!("Group · {} members", c.members.len() + 1), &[("memberCount", crate::i18n::Arg::from(&c.members.len() + 1))]));
+            // Desktop's subtitle: the description, or Add group
+            // description..., or the member count.
             match c.description.as_deref().filter(|d| !d.trim().is_empty()) {
                 Some(d) => {
                     ui.add_space(4.);
@@ -298,22 +315,29 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                         d.edit_info = Some((c.title.clone(), String::new()));
                     }
                 }
-                None => {}
-            }
-        } else if let Some(contact) = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()) {
-            if let Some(p) = &contact.profile {
-                if !p.about.is_empty() {
-                    body(ui, palette, &format!("{} {}", p.about_emoji, p.about).trim().to_owned());
-                }
-                if let Some(username) = &p.username {
-                    body(ui, palette, username);
+                None => {
+                    let n = c.members.len();
+                    body(ui, palette, &crate::i18n::tf("icu:ConversationDetailsHeader--members", &format!("{n} members"), &[("number", crate::i18n::Arg::from(n))]));
                 }
             }
-            if let Some(phone) = &c.phone {
-                body(ui, palette, phone);
-            }
+        } else if let Some(contact) = app.panes.details.as_ref().and_then(|d| d.contact.as_ref())
+            && let Some(p) = &contact.profile
+            && !p.about.is_empty()
+        {
+            body(ui, palette, &format!("{} {}", p.about_emoji, p.about).trim().to_owned());
         }
         ui.add_space(16.);
+        // Desktop's banner for an ended group.
+        if c.ended {
+            egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let (at, _) = ui.allocate_exact_size(egui::vec2(18., 18.), egui::Sense::hover());
+                    theme::paint_symbol(ui.painter(), "group-x", at.center(), 16., palette.text);
+                    ui.label(RichText::new(tr("This group has ended")).font(theme::regular(13.)));
+                });
+            });
+            ui.add_space(12.);
+        }
     });
     header_buttons(app, ui, palette, c);
     ui.add_space(20.);
@@ -566,23 +590,41 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         axo_list::gap(ui);
         axo_list::list(ui, None, None, |ui| {
             let red = |item: Item<'static>| Item { destructive: true, ..item };
-            if group && !c.left && !c.ended && axo_list::item(ui, red(Item::new(tr("Leave group")).symbol("leave")), End::Click).clicked() {
-                confirm = Some(ChatConfirm::Leave);
+            // Desktop's ConversationDetailsActions: the last admin of a group
+            // with others in it can't leave or block it until they pick one.
+            let last_admin = group && c.admins.len() == 1 && c.admins.contains(&app.aci) && c.members.len() > 1;
+            let tip = tr("Before you leave, you must choose at least one new admin for this group.");
+            if group && !c.left && !c.ended {
+                let r = axo_list::item(ui, red(Item::new(tr("Leave group")).symbol("leave")).disabled(last_admin), End::Click);
+                if last_admin {
+                    r.row.on_hover_text(tip);
+                } else if r.clicked() {
+                    confirm = Some(ChatConfirm::Leave);
+                }
             }
-            let label = match (group, c.blocked) {
-                (true, false) => tr("Block group"),
-                (true, true) => tr("Unblock group"),
-                (false, false) => tr("Block"),
-                (false, true) => tr("Unblock"),
-            };
-            if axo_list::item(ui, red(Item::new(label).symbol("block")), End::Click).clicked() {
-                confirm = Some(if c.blocked { ChatConfirm::Unblock } else { ChatConfirm::Block });
+            if !c.ended {
+                let label = match (group, c.blocked) {
+                    (true, false) => tr("Block group"),
+                    (true, true) => tr("Unblock group"),
+                    (false, false) => tr("Block"),
+                    (false, true) => tr("Unblock"),
+                };
+                let blocked_out = last_admin && !c.blocked;
+                let r = axo_list::item(ui, red(Item::new(label).symbol("block")).disabled(blocked_out), End::Click);
+                if blocked_out {
+                    r.row.on_hover_text(tip);
+                } else if r.clicked() {
+                    confirm = Some(if c.blocked { ChatConfirm::Unblock } else { ChatConfirm::Block });
+                }
             }
-            if axo_list::item(ui, Item::new(if c.archived { tr("Unarchive chat") } else { tr("Archive chat") }).symbol("archive"), End::Click).clicked() {
-                app.set_archived(c.id.clone(), !c.archived);
-            }
-            if (c.ended || c.left) && axo_list::item(ui, red(Item::new(tr("Delete chat")).symbol("trash")), End::Click).clicked() {
-                app.panes.delete_chat = Some((c.id.clone(), false));
+            // An ended group can only be archived or deleted.
+            if group && c.ended {
+                if axo_list::item(ui, Item::new(if c.archived { tr("Unarchive") } else { tr("Archive") }).symbol("archive"), End::Click).clicked() {
+                    app.set_archived(c.id.clone(), !c.archived);
+                }
+                if axo_list::item(ui, red(Item::new(tr("Delete")).symbol("trash")), End::Click).clicked() {
+                    app.panes.delete_chat = Some((c.id.clone(), false));
+                }
             }
             if !c.blocked && axo_list::item(ui, red(Item::new(tr("Report spam")).symbol("error-octagon")), End::Click).clicked() {
                 confirm = Some(ChatConfirm::ReportSpam);
@@ -1017,23 +1059,23 @@ fn permissions(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation)
     }
     let state = &c.group_state;
     crate::axo_list::list(ui, None, None, |ui| {
-        let choices: [(&str, bool, fn(bool) -> Permission); 4] = [
-            (tr("Add members"), state.members_admins_only, |a| Permission::AddMembers { admins_only: a }),
-            ("Edit group info", state.info_admins_only, |a| Permission::EditInfo { admins_only: a }),
-            ("Send messages", state.announcements_only, |a| Permission::SendMessages { admins_only: a }),
-            ("Set member labels", state.labels_admins_only, |a| Permission::SetMemberLabels { admins_only: a }),
+        // Desktop's GroupV2Permissions rows: a select of All members or Only
+        // admins, with what it's for under it.
+        let choices: [(&str, &str, bool, fn(bool) -> Permission, bool); 4] = [
+            (tr("Who can add members"), tr("Choose who can add members to this group."), state.members_admins_only, |a| Permission::AddMembers { admins_only: a }, false),
+            (tr("Who can edit group info"), tr("Choose who can edit group name, photo, description, disappearing messages timer, and pinned messages."), state.info_admins_only, |a| Permission::EditInfo { admins_only: a }, false),
+            (tr("Who can send messages"), tr("Choose who can send messages to the group."), state.announcements_only, |a| Permission::SendMessages { admins_only: a }, false),
+            (tr("Who can add member labels"), tr("Choose who can add member labels in this group."), state.labels_admins_only, |a| Permission::SetMemberLabels { admins_only: a }, true),
         ];
-        // Desktop's permission rows: each a select of All members or
-        // Only admins.
-        for (label, admins_only, make) in choices {
-            let options = [tr("All members"), "Only admins"];
-            if let Some(i) = crate::axo_list::select(ui, egui::Id::unique(("group-permission", label)), crate::axo_list::Item::new(label), &options, Some(admins_only as usize)) {
+        for (label, info, admins_only, make, labels) in choices {
+            let options = [tr("All members"), tr("Only admins")];
+            if let Some(i) = crate::axo_list::select(ui, egui::Id::unique(("group-permission", label)), crate::axo_list::Item::new(label).description(info), &options, Some(admins_only as usize)) {
                 let value = i == 1;
                 if value != admins_only {
                     // Desktop warns that admins-only labels takes away the
                     // labels non-admins have.
                     let labelled = c.member_labels.keys().any(|m| !c.admins.contains(m));
-                    if label == "Set member labels" && value && labelled {
+                    if labels && value && labelled {
                         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("confirm-label-access"), true));
                     } else {
                         app.send(Command::SetGroupPermission { conversation: c.id.clone(), permission: make(value) });
@@ -1049,26 +1091,33 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     let Some(mut d) = app.panes.details.take() else { return };
     if let Some((mut name, mut description)) = d.edit_info.take() {
         let mut answer = None;
+        let mut open_avatar_editor = false;
         let closed = modal(ui, "edit-group", 400., |ui| {
             title(ui, tr("Edit group"));
-            ui.horizontal(|ui| {
-                widgets::avatar(ui, &widgets::AvatarSpec::of(c), 64.);
-                ui.vertical(|ui| {
-                    if ui.link("Choose photo").clicked()
-                        && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp"]).pick_file()
-                        && let Ok(bytes) = std::fs::read(path)
-                    {
-                        app.send(Command::SetGroupAvatar { conversation: c.id.clone(), image: Some(bytes) });
-                    }
-                    if c.avatar_path.is_some() && ui.link("Remove photo").clicked() {
-                        app.send(Command::SetGroupAvatar { conversation: c.id.clone(), image: None });
-                    }
-                });
+            // Desktop's AvatarPreview: a click opens the AvatarEditor.
+            ui.vertical_centered(|ui| {
+                let r = widgets::avatar(ui, &widgets::AvatarSpec::of(c), 80.).interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                if r.on_hover_text(tr("Edit photo")).clicked() {
+                    open_avatar_editor = true;
+                }
             });
+            ui.add_space(12.);
+            // The name (32) and description (480), with their counters as
+            // they near the end.
+            let field = |ui: &mut Ui, text: &mut String, hint: &str, max: usize, rows: usize| {
+                ui.add(egui::TextEdit::multiline(text).hint_text(hint).char_limit(max).desired_rows(rows).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+                let left = max.saturating_sub(text.chars().count());
+                if left <= if max > 100 { 100 } else { 10 } {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        ui.label(RichText::new(left.to_string()).font(theme::regular(12.)).color(palette.text_secondary));
+                    });
+                }
+            };
+            field(ui, &mut name, tr("Group name (required)"), 32, 1);
             ui.add_space(8.);
-            widgets::text_field(ui, &mut name, "Group name", false);
+            field(ui, &mut description, tr("Description"), 480, 3);
             ui.add_space(6.);
-            widgets::text_field(ui, &mut description, "Group description", false);
+            body(ui, palette, tr("Group descriptions will be visible to members of this group and people who have been invited."));
             answer = buttons(ui, &[tr("Save"), tr("Cancel")]);
         });
         let current = (name.clone(), description.clone());
@@ -1083,6 +1132,24 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
             _ if leave => {}
             _ => d.edit_info = Some((name, description)),
+        }
+        if open_avatar_editor {
+            d.group_avatar = Some(crate::avatar_editor::AvatarEditor::new(c.avatar_path.clone(), &c.title));
+        }
+    }
+    // The group's AvatarEditor.
+    if let Some(editor) = d.group_avatar.as_mut() {
+        let mut toast = None;
+        if let Some(change) = editor.show(ui, &mut toast) {
+            d.group_avatar = None;
+            match change {
+                langis_core::profiles::AvatarChange::New(bytes) => app.send(Command::SetGroupAvatar { conversation: c.id.clone(), image: Some(bytes.to_vec()) }),
+                langis_core::profiles::AvatarChange::Remove => app.send(Command::SetGroupAvatar { conversation: c.id.clone(), image: None }),
+                langis_core::profiles::AvatarChange::Keep => {}
+            }
+        }
+        if let Some(t) = toast {
+            app.toast(t);
         }
     }
     if let Some(mut nick) = d.nickname.take() {
