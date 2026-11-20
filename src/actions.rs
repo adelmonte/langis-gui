@@ -25,6 +25,8 @@ pub enum Popup {
 
 /// A dialog over the chat.
 pub enum Dialog {
+    /// Desktop's ContactDetail: a shared contact in full, as a panel.
+    ContactDetail { message: i64 },
     /// Desktop's `DeleteMessagesModal`, for one message or a selection.
     Delete { messages: Vec<i64> },
     Pin { message: i64, choice: usize },
@@ -94,6 +96,8 @@ pub enum Do {
     /// The reaction bar for this message, at the menu's place.
     ReactBar(i64),
     Open(Dialog),
+    /// Opens a chat (a shared contact's Send message).
+    OpenChat(langis_store::ConversationId),
     /// Select mode, starting with this message.
     Select(i64),
     /// Scrolls to a message, loading around it if it isn't here.
@@ -920,6 +924,19 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 out.push(Do::Close);
             }
         }
+        Dialog::ContactDetail { message } => {
+            let Some(m) = chat.iter().find(|m| m.id == *message) else { return vec![Do::Close] };
+            let Some(langis_store::MessageContent::Contact(contact)) = m.content.as_ref() else { return vec![Do::Close] };
+            let contact = contact.clone();
+            let mut go = None;
+            if panel(ui, &palette, "Contact", |ui| go = contact_detail(app, ui, &palette, &contact)) {
+                out.push(Do::Close);
+            }
+            if let Some(command) = go {
+                out.push(command);
+                out.push(Do::Close);
+            }
+        }
         Dialog::Info { message, details } => {
             let id = *message;
             let Some(m) = chat.iter().find(|m| m.id == id) else { return vec![Do::Close] };
@@ -977,6 +994,106 @@ fn radio_row(ui: &mut Ui, on: bool, label: &str) -> bool {
     }
     ui.painter().text(Pos2::new(rect.left() + 38., rect.center().y), Align2::LEFT_CENTER, label, theme::regular(14.), palette.text);
     r.clicked()
+}
+
+/// A panel over the conversation (Desktop's `ConversationPanel`): a back
+/// button and the title, then `body` in a centered column. True on back.
+fn panel(ui: &Ui, palette: &Palette, title: &str, body: impl FnOnce(&mut Ui)) -> bool {
+    let pane = ui.max_rect();
+    let mut back = false;
+    egui::Area::new(egui::Id::unique(("conversation-panel", title))).order(egui::Order::Middle).fixed_pos(pane.min).show(ui.ctx(), |ui| {
+        ui.set_min_size(pane.size());
+        ui.set_max_size(pane.size());
+        ui.interact(pane, ui.scope_id().with("panel-bg"), Sense::click());
+        ui.painter().rect_filled(pane, 0, palette.background);
+        let header = Rect::from_min_size(pane.min, Vec2::new(pane.width(), 52.));
+        ui.painter().text(header.center(), Align2::CENTER_CENTER, title, theme::semibold(14.), palette.text);
+        ui.painter().hline(header.x_range(), header.bottom(), Stroke::new(1., palette.border));
+        let b = Rect::from_center_size(Pos2::new(header.left() + 30., header.center().y), Vec2::splat(32.));
+        let hit = ui.interact(b, ui.scope_id().with("panel-back"), Sense::click());
+        if hit.hovered() {
+            ui.painter().circle_filled(b.center(), 16., palette.fill);
+        }
+        Icon::ChevronLeft.paint(ui, b, 20., palette.text);
+        back = hit.on_hover_text("Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let rest = Rect::from_min_max(Pos2::new(pane.left(), header.bottom() + 1.), pane.max);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                let width = ui.available_width().min(600.);
+                ui.add_space(20.);
+                ui.horizontal(|ui| {
+                    ui.add_space(((ui.available_width() - width) / 2.).max(16.));
+                    ui.vertical(|ui| {
+                        ui.set_width(width - 32.);
+                        body(ui);
+                    });
+                });
+                ui.add_space(20.);
+            });
+        });
+    });
+    back
+}
+
+/// Desktop's `ContactDetail`: the photo and name, Send message for a
+/// Signal account, then each number, email and address with its kind.
+fn contact_detail(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::SharedContact) -> Option<Do> {
+    use langis_store::{AddressKind, ContactMethodKind};
+    let mut out = None;
+    let name = c.display_nickname().or_else(|| c.display_name()).or_else(|| c.organization.clone()).unwrap_or_else(|| "Unknown contact".into());
+    ui.vertical_centered(|ui| {
+        let spec = widgets::AvatarSpec { name: &name, color: 0, photo: c.avatar.as_ref().and_then(|a| a.local_path.as_deref()), group: false, note_to_self: false };
+        widgets::avatar(ui, &spec, 80.);
+        ui.add_space(10.);
+        ui.label(RichText::new(&name).font(theme::semibold(20.)));
+        if let Some(org) = c.organization.as_ref().filter(|o| !o.is_empty() && **o != name) {
+            ui.label(RichText::new(org).font(theme::regular(14.)).color(palette.text_secondary));
+        }
+        if let Some(aci) = &c.aci {
+            ui.add_space(12.);
+            if widgets::pill_button(ui, "Send message", true).clicked() {
+                out = Some(Do::OpenChat(langis_store::ConversationId::direct(aci)));
+            }
+        }
+    });
+    let kind = |k: ContactMethodKind, label: &Option<String>| match k {
+        ContactMethodKind::Home => "Home".to_owned(),
+        ContactMethodKind::Mobile => "Mobile".to_owned(),
+        ContactMethodKind::Work => "Work".to_owned(),
+        ContactMethodKind::Custom => label.clone().unwrap_or_else(|| "Other".into()),
+    };
+    let row = |ui: &mut Ui, label: String, value: String| {
+        ui.add_space(14.);
+        ui.label(RichText::new(label).font(theme::regular(12.)).color(palette.text_secondary));
+        ui.add(egui::Label::new(RichText::new(value).font(theme::regular(14.))).selectable(true));
+    };
+    ui.add_space(12.);
+    for n in &c.numbers {
+        row(ui, kind(n.kind, &n.label), langis_core::share_contact::format_phone(&n.value, app.phone.as_deref()));
+    }
+    for e in &c.emails {
+        row(ui, kind(e.kind, &e.label), e.value.clone());
+    }
+    for a in &c.addresses {
+        let label = match a.kind {
+            AddressKind::Home => "Home".to_owned(),
+            AddressKind::Work => "Work".to_owned(),
+            AddressKind::Custom => a.label.clone().unwrap_or_else(|| "Address".into()),
+        };
+        let lines: Vec<String> = [&a.street, &a.pobox, &a.neighborhood]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .chain([[a.city.clone(), a.region.clone(), a.postcode.clone()].into_iter().flatten().collect::<Vec<_>>().join(" ")].into_iter().filter(|s| !s.is_empty()))
+            .chain(a.country.clone())
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        row(ui, label, lines.join("\n"));
+    }
+    if let Some(note) = c.note.as_ref().filter(|n| !n.is_empty()) {
+        row(ui, "Note".into(), note.clone());
+    }
+    out
 }
 
 /// Desktop's round checkbox.

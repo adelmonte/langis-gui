@@ -150,6 +150,8 @@ enum Action {
     Contact(String),
     /// Opens a 1:1 chat (a shared contact's Message).
     Chat(langis_store::ConversationId),
+    /// Desktop's ContactDetail for a message's shared contact.
+    ContactDetail(i64),
     /// Read more: 3000 more characters of a long message.
     ReadMore(i64),
     /// Play or pause a message's audio, or (at, 0 to 1) play from a point.
@@ -474,6 +476,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             Action::AudioRate => app.audio.cycle_rate(),
             Action::Contact(aci) => crate::contact_modal::open(app, Some(id.clone()), aci),
+            Action::ContactDetail(message) => {
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.dialog = Some(crate::actions::Dialog::ContactDetail { message });
+                }
+            }
             Action::Chat(chat) => app.open(chat),
             Action::ReadMore(message_id) => {
                 if let Some(chat) = app.chat.as_mut() {
@@ -587,6 +594,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
     }
     // The menu's "React" opens the reaction bar in its place.
     let mut replaced = false;
+    let mut opened = None;
     for (from_popup, d) in todo {
         match d {
             Do::Close => {
@@ -636,6 +644,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
                     chat.pending_jump = Some(id);
                 }
             }
+            Do::OpenChat(to) => opened = Some(to),
             Do::Open(dialog) => {
                 if let crate::actions::Dialog::Info { message, .. } = &dialog {
                     crate::actions::load_details(app, *message);
@@ -645,6 +654,9 @@ fn popups(app: &mut App, ui: &mut Ui) {
         }
     }
     app.chat = Some(chat);
+    if let Some(to) = opened {
+        app.open(to);
+    }
 }
 
 /// A file extension for a content type, for naming saved attachments.
@@ -1850,7 +1862,10 @@ fn message(
     if let Some(content) = content {
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., content_h));
         let sender = (!outgoing).then(|| m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into()));
-        if let Some(action) = content_block(ui, palette, content, sender.as_deref(), rect, outgoing, in_color, meta_color, ui.scope_id().with(("content", m.id))) {
+        if let Some(action) = content_block(ui, palette, content, sender.as_deref(), rect, outgoing, in_color, meta_color, ui.scope_id().with(("content", m.id))).map(|a| match a {
+            Action::ContactDetail(_) => Action::ContactDetail(m.id),
+            a => a,
+        }) {
             actions.push(action);
         }
         y += content_h;
@@ -2509,12 +2524,12 @@ fn content_block(
             let g = ui.fonts_mut(|f| f.layout_job(job));
             ui.painter().galley(Pos2::new(row.left() + 64., row.center().y - g.size().y / 2.), g, text);
             theme::paint_symbol(ui.painter(), "chevron-[end]", Pos2::new(row.right() - 10., row.center().y), 20., secondary);
-            // The row opens who they are: their Signal profile when known.
-            let response = ui.interact(row, id.with("row"), Sense::click());
+            // The row opens Desktop's ContactDetail.
+            let response = ui.interact(row, id.with("row"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                action = Some(Action::ContactDetail(0));
+            }
             if let Some(aci) = &c.aci {
-                if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    action = Some(Action::Contact(aci.clone()));
-                }
                 let button = Rect::from_min_size(Pos2::new(rect.left(), row.bottom() + 12.), Vec2::new(rect.width(), 32.));
                 let b = ui.interact(button, id.with("message"), Sense::click());
                 let fill = if outgoing { Color32::from_white_alpha(if b.hovered() { 70 } else { 50 }) } else if b.hovered() { palette.fill_pressed } else { palette.fill };
@@ -2522,12 +2537,6 @@ fn content_block(
                 ui.painter().text(button.center(), Align2::CENTER_CENTER, "Message", theme::semibold(14.), text);
                 if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     action = Some(Action::Chat(langis_store::ConversationId::direct(aci)));
-                }
-            } else {
-                // Without a Signal account, the card lists how to reach them.
-                let how: Vec<String> = c.numbers.iter().chain(&c.emails).map(|m| m.value.clone()).collect();
-                if !how.is_empty() {
-                    response.on_hover_text(how.join("\n"));
                 }
             }
         }

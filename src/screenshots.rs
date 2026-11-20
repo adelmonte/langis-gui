@@ -294,6 +294,19 @@ fn screenshots_media() {
     wait(&mut harness, "view-once bubble", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == once)));
     save(&mut harness, "view-once-bubble");
 
+    // A shared contact's ContactDetail panel.
+    if let Some(sam) = harness.state().conversations.iter().find(|c| c.title == "Leo Martin").map(|c| c.id.clone()) {
+        let shared = all_messages(&harness, &sam).iter().find(|m| matches!(m.content, Some(langis_store::MessageContent::Contact(_)))).map(|m| m.id);
+        if let Some(shared) = shared {
+            harness.state_mut().open_at(sam.clone(), shared);
+            wait(&mut harness, "shared contact", |app| app.chat.as_ref().is_some_and(|c| c.messages.iter().any(|m| m.id == shared)));
+            harness.state_mut().chat.as_mut().unwrap().dialog = Some(crate::actions::Dialog::ContactDetail { message: shared });
+            wait(&mut harness, "contact detail", |_| true);
+            save(&mut harness, "contact-detail");
+            harness.state_mut().chat.as_mut().unwrap().dialog = None;
+        }
+    }
+
     let notes = open_chat(&mut harness, langis_store::ConversationKind::NoteToSelf);
     let m = all_messages(&harness, &notes)
         .into_iter()
