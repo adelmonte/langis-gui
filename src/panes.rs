@@ -324,6 +324,49 @@ pub fn title(ui: &mut Ui, text: &str) {
     ui.add_space(14.);
 }
 
+/// Desktop's `ConfirmDiscardDialog` for an editor: `original` is what it
+/// held when opened (kept under `key` until it closes). Leaving (Cancel,
+/// the X, Escape) with changes asks "Would you like to discard these
+/// changes?" first. Returns true when it really closes now.
+pub fn discard_guard<T: Clone + PartialEq + Send + Sync + 'static>(ctx: &egui::Context, key: &str, current: &T, leaving: bool, done: bool) -> bool {
+    let original_id = egui::Id::unique(("discard-original", key));
+    let asking_id = egui::Id::unique(("discard-asking", key));
+    let forget = |ctx: &egui::Context| ctx.data_mut(|d| {
+        d.remove::<T>(original_id);
+        d.remove::<bool>(asking_id);
+    });
+    if done {
+        forget(ctx);
+        return true;
+    }
+    let original: T = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(original_id, || current.clone()).clone());
+    let mut asking = ctx.data(|d| d.get_temp::<bool>(asking_id)).unwrap_or(false);
+    if leaving && *current != original {
+        asking = true;
+    } else if leaving {
+        forget(ctx);
+        return true;
+    }
+    if !asking {
+        return false;
+    }
+    use crate::dialog::{Answer, Variant};
+    match crate::dialog::show(ctx, asking_id.with("dialog"), "", "Would you like to discard these changes?", Some("Cancel"), &[("Discard", Variant::StrongDestructive)]) {
+        Some(Answer::Action(_)) => {
+            forget(ctx);
+            true
+        }
+        Some(Answer::Cancel) => {
+            ctx.data_mut(|d| d.remove::<bool>(asking_id));
+            false
+        }
+        None => {
+            ctx.data_mut(|d| d.insert_temp(asking_id, true));
+            false
+        }
+    }
+}
+
 pub fn body(ui: &mut Ui, palette: &Palette, text: &str) {
     ui.label(RichText::new(text).font(theme::regular(14.)).color(palette.text_secondary));
 }

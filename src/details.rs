@@ -1027,6 +1027,8 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             widgets::text_field(ui, &mut description, "Group description", false);
             answer = buttons(ui, &["Save", "Cancel"]);
         });
+        let current = (name.clone(), description.clone());
+        let leave = crate::panes::discard_guard(ui.ctx(), "edit-group", &current, answer == Some(1) || (closed && answer.is_none()), answer == Some(0));
         match answer {
             Some(0) => {
                 let title = (name.trim() != c.title && !name.trim().is_empty()).then(|| name.trim().to_owned());
@@ -1035,9 +1037,8 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     app.send(Command::UpdateGroup { conversation: c.id.clone(), title, description: desc });
                 }
             }
-            Some(_) => {}
-            None if closed => {}
-            None => d.edit_info = Some((name, description)),
+            _ if leave => {}
+            _ => d.edit_info = Some((name, description)),
         }
     }
     if let Some(mut nick) = d.nickname.take() {
@@ -1053,12 +1054,12 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             widgets::text_field(ui, &mut nick.note, "Note", false);
             answer = buttons(ui, &["Save", "Cancel", "Delete"]);
         });
+        let leave = crate::panes::discard_guard(ui.ctx(), "nickname", &nick, answer == Some(1) || (closed && answer.is_none()), matches!(answer, Some(0 | 2)));
         match answer {
             Some(0) => app.send(Command::SetNickname { conversation: c.id.clone(), nickname: nick }),
             Some(2) => app.send(Command::SetNickname { conversation: c.id.clone(), nickname: ContactNickname::default() }),
-            Some(_) => {}
-            None if closed => {}
-            None => d.nickname = Some(nick),
+            _ if leave => {}
+            _ => d.nickname = Some(nick),
         }
         if answer.is_some_and(|a| a != 1)
             && let Some(sid) = c.id.as_direct()

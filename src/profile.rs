@@ -214,6 +214,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             None => {}
         }
     }
+    let current = (e.given.clone(), e.family.clone(), e.about.clone(), e.about_emoji.clone(), !matches!(e.avatar, AvatarChange::Keep));
+    let leave = e.loaded && crate::panes::discard_guard(ui.ctx(), "profile", &current, answer == Some(1) || (closed && answer.is_none()), answer == Some(0));
+    let leave = leave || (!e.loaded && closed);
     match answer {
         Some(0) if e.given.trim().is_empty() => {
             app.toast("Your profile needs a first name.");
@@ -231,9 +234,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             // Kept open until the save is answered (Event::ProfileSaved).
             app.panes.profile = Some(e);
         }
-        Some(_) => {}
-        None if closed => {}
-        None => app.panes.profile = Some(e),
+        _ if leave => {}
+        _ => app.panes.profile = Some(e),
     }
 }
 
