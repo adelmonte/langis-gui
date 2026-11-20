@@ -114,6 +114,10 @@ pub fn tr(english: &'static str) -> &'static str {
 /// the key's missing.
 pub fn tf(key: &str, fallback: &str, args: &[(&str, Arg)]) -> String {
     let table = TABLE.read().unwrap();
+    // English is the code's own text, exactly.
+    if table.as_ref().is_none_or(|t| t.locale == "en") {
+        return fallback.to_owned();
+    }
     let message = table.as_ref().and_then(|t| t.icu.get(key).copied()).unwrap_or(fallback);
     let locale = table.as_ref().map(|t| t.locale).unwrap_or("en");
     format_icu(message, args, locale)
@@ -126,9 +130,11 @@ pub enum Arg {
     Number(i64),
 }
 
-impl From<&str> for Arg {
-    fn from(s: &str) -> Self {
-        Arg::Text(s.to_owned())
+/// Any shown value by reference (a name, a count); numbers given as text
+/// still choose plural forms.
+impl<T: std::fmt::Display + ?Sized> From<&T> for Arg {
+    fn from(v: &T) -> Self {
+        Arg::Text(v.to_string())
     }
 }
 impl From<String> for Arg {
@@ -403,7 +409,7 @@ mod tests {
     #[test]
     fn icu_messages_format() {
         let m = "{count, plural, one {# member} other {# members}}";
-        assert_eq!(format_icu(m, &[("count", 1.into())], "en"), "1 member");
+        assert_eq!(format_icu(m, &[("count", 1i64.into())], "en"), "1 member");
         assert_eq!(format_icu(m, &[("count", 5.into())], "en"), "5 members");
         let ru = "{count, plural, one {# участник} few {# участника} many {# участников} other {# участника}}";
         assert_eq!(format_icu(ru, &[("count", 3.into())], "ru"), "3 участника");

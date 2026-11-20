@@ -117,7 +117,7 @@ fn section(millis: i64) -> String {
     if time.year() == now.year() && time.month() == now.month() {
         return tr("This Month").into();
     }
-    time.format("%B %Y").to_string()
+    crate::format::localized(&time, "%B %Y")
 }
 
 /// `ExperimentalAxoSegmentedControl` without a track, for the header.
@@ -334,7 +334,7 @@ fn list_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: 
         let top = if tab == Tab::Links { row.top() + 8. } else { row.center().y - (tgh + sg.size().y) / 2. };
         ui.painter().with_clip_rect(Rect::from_min_max(Pos2::new(x, row.top()), Pos2::new(x + text_w, row.bottom()))).galley(Pos2::new(x, top), tg, palette.text);
         ui.painter().galley(Pos2::new(x, top + tgh), sg, palette.text_secondary);
-        let date = Local.timestamp_millis_opt(m.sent_at).single().map(|t| t.format("%b %-d").to_string()).unwrap_or_default();
+        let date = Local.timestamp_millis_opt(m.sent_at).single().map(|t| crate::format::localized(&t, "%b %-d")).unwrap_or_default();
         let date_pos = if tab == Tab::Links { Pos2::new(row.right() - 14., row.top() + 8.) } else { Pos2::new(row.right() - 14., row.center().y) };
         let date_rect = Rect::from_min_max(Pos2::new(row.right() - 62., row.top()), row.max);
         let date_click = ui.interact(date_rect, egui::Id::unique("media-date").with((m.id, e.index)), Sense::click());

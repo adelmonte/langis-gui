@@ -921,7 +921,7 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
     if pack.blessed {
         theme::paint_symbol(ui.painter(), "badge-fill", Pos2::new(t.right() + 10., t.center().y), 14., palette.badge);
     }
-    let sub = if pack.author.is_empty() { format!("{} stickers", pack.sticker_count) } else { format!("{} · {} stickers", pack.author, pack.sticker_count) };
+    let sub = if pack.author.is_empty() { crate::i18n::tf("icu:stickers--StickerPreview--StickerCount", &format!("{} stickers", pack.sticker_count), &[("count", crate::i18n::Arg::from(&pack.sticker_count))]) } else { format!("{} · {} stickers", pack.author, pack.sticker_count) };
     ui.painter().text(Pos2::new(rect.left() + 60., rect.top() + 30.), Align2::LEFT_TOP, sub, theme::regular(12.), palette.text_secondary);
     let label = if pack.installed { tr("Uninstall") } else { tr("Install") };
     let g = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(13.), palette.text);

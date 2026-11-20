@@ -545,7 +545,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                     ui.painter().rect_filled(row, CornerRadius::same(12), palette.fill);
                 }
                 story_thumb(ui, s, Rect::from_min_size(row.min + Vec2::new(10., 6.), Vec2::new(40., 72.)));
-                let views = if app.panes.stories.receipts { format!("{} views", s.views.len()) } else { tr("Views off").to_owned() };
+                let views = if app.panes.stories.receipts { crate::i18n::tf("icu:MyStories__views", &format!("{} views", s.views.len()), &[("views", crate::i18n::Arg::from(&s.views.len()))]) } else { tr("Views off").to_owned() };
                 ui.painter().text(Pos2::new(row.left() + 64., row.top() + 22.), egui::Align2::LEFT_TOP, views, theme::semibold(14.), palette.text);
                 ui.painter().text(Pos2::new(row.left() + 64., row.top() + 44.), egui::Align2::LEFT_TOP, crate::format::short_timestamp(s.sent_at), theme::regular(12.), palette.text_secondary);
                 if r.clicked() {
@@ -973,7 +973,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
                 }
                 // `StoryViewer__reply-placeholder` / `__reply-group`.
                 let first = story.author_name.as_deref().or(Some(name.as_str())).and_then(|n| n.split_whitespace().next()).unwrap_or_default().to_owned();
-                let hint = if story.group.is_some() { tr("Reply to Group").to_owned() } else { format!("Reply to {first}") };
+                let hint = if story.group.is_some() { tr("Reply to Group").to_owned() } else { crate::i18n::tf("icu:StoryViewer__reply-placeholder", &format!("Reply to {first}"), &[("firstName", crate::i18n::Arg::from(&first))]) };
                 let field = ui.add(egui::TextEdit::singleline(&mut app.panes.stories.reply).id(egui::Id::unique("story-reply-field")).hint_text(hint).desired_width(ui.available_width() - 70.));
                 let send = ui.button(tr("Send")).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                 if send && !app.panes.stories.reply.trim().is_empty() {
@@ -989,7 +989,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
             let text = match n {
                 0 => tr("Reply to Group").to_owned(),
                 1 => "1 reply".to_owned(),
-                n => format!("{n} replies"),
+                n => crate::i18n::tf("icu:MyStories__replies", &format!("{n} replies"), &[("replyCount", crate::i18n::Arg::from(&n))]),
             };
             ui.add_space(6.);
             if ui.add(egui::Button::new(RichText::new(text).font(theme::semibold(13.)).color(Color32::WHITE)).frame(false)).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
@@ -1073,7 +1073,7 @@ fn info_modal(app: &mut App, ui: &mut Ui, story: &Story) {
                 });
             });
         };
-        let full = |at: i64| chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%a, %b %-d, %Y %-I:%M %p").to_string()).unwrap_or_default();
+        let full = |at: i64| chrono::DateTime::from_timestamp_millis(at).map(|t| crate::format::localized(&t.with_timezone(&chrono::Local), "%a, %b %-d, %Y %-I:%M %p")).unwrap_or_default();
         row(ui, tr("Sent"), full(story.sent_at));
         if story.author.is_some() {
             row(ui, tr("Received"), full(story.received_at));

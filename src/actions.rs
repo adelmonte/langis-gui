@@ -419,7 +419,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 ui.label(RichText::new(tr("Pin message for...")).font(theme::semibold(18.)));
                 ui.add_space(12.);
                 for (i, (label, _)) in PIN_DURATIONS.iter().enumerate() {
-                    if radio_row(ui, *choice == i, label) {
+                    if radio_row(ui, *choice == i, tr(label)) {
                         *choice = i;
                     }
                 }
@@ -1130,7 +1130,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
     });
     ui.add_space(12.);
     let when = |label: &str, at: i64| {
-        let time = chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%A, %B %-d, %Y at %-I:%M %p").to_string()).unwrap_or_default();
+        let time = chrono::DateTime::from_timestamp_millis(at).map(|t| crate::format::localized(&t.with_timezone(&chrono::Local), "%A, %B %-d, %Y at %-I:%M %p")).unwrap_or_default();
         (label.to_owned(), time)
     };
     let mut rows = vec![when(tr("Sent"), m.sent_at)];

@@ -18,15 +18,15 @@ pub fn short_timestamp(millis: i64) -> String {
     if age.num_seconds() < 60 {
         tr("now").into()
     } else if age.num_minutes() < 60 {
-        format!("{}m", age.num_minutes())
+        crate::i18n::tf("icu:minutesAgo", &format!("{}m", age.num_minutes()), &[("minutes", crate::i18n::Arg::from(age.num_minutes()))])
     } else if time.date_naive() == now.date_naive() {
-        time.format("%-I:%M %p").to_string()
+        localized(&time, "%-I:%M %p")
     } else if (now.date_naive() - time.date_naive()).num_days() < 7 {
-        time.format("%a").to_string()
+        localized(&time, "%a")
     } else if time.year() == now.year() {
-        time.format("%b %-d").to_string()
+        localized(&time, "%b %-d")
     } else {
-        time.format("%-m/%-d/%y").to_string()
+        localized(&time, "%-m/%-d/%y")
     }
 }
 
@@ -37,9 +37,9 @@ pub fn message_time(millis: i64) -> String {
     if age.num_seconds() < 60 {
         tr("Now").into()
     } else if age.num_minutes() < 60 {
-        format!("{}m", age.num_minutes())
+        crate::i18n::tf("icu:minutesAgo", &format!("{}m", age.num_minutes()), &[("minutes", crate::i18n::Arg::from(age.num_minutes()))])
     } else {
-        time.format("%-I:%M %p").to_string()
+        localized(&time, "%-I:%M %p")
     }
 }
 
@@ -52,9 +52,9 @@ pub fn day_label(millis: i64) -> String {
     match (today - day).num_days() {
         0 => tr("Today").into(),
         1 => tr("Yesterday").into(),
-        2..=6 => time.format("%A").to_string(),
-        _ if day.year() == today.year() => time.format("%a, %b %-d").to_string(),
-        _ => time.format("%b %-d, %Y").to_string(),
+        2..=6 => localized(&time, "%A"),
+        _ if day.year() == today.year() => localized(&time, "%a, %b %-d"),
+        _ => localized(&time, "%b %-d, %Y"),
     }
 }
 
@@ -131,5 +131,47 @@ mod tests {
         assert_eq!(timer_long(0), "Off");
         assert_eq!(duration(245), "4:05");
         assert_eq!(duration(3729), "1:02:09");
+    }
+}
+
+/// chrono's locale for the app's language.
+fn chrono_locale() -> Option<chrono::Locale> {
+    let code = crate::i18n::locale();
+    let name = match code {
+        "en" => return None,
+        "zh-Hant" => "zh_TW".to_owned(),
+        "yue" => "yue_HK".to_owned(),
+        "tl-PH" => "fil_PH".to_owned(),
+        c if c.contains('-') => c.replace('-', "_"),
+        "ja" => "ja_JP".into(),
+        "ko" => "ko_KR".into(),
+        "cs" => "cs_CZ".into(),
+        "da" => "da_DK".into(),
+        "el" => "el_GR".into(),
+        "nb" => "nb_NO".into(),
+        "sv" => "sv_SE".into(),
+        "sr" => "sr_RS".into(),
+        "ms" => "ms_MY".into(),
+        "uk" => "uk_UA".into(),
+        "vi" => "vi_VN".into(),
+        "sw" => "sw_KE".into(),
+        "ca" | "eu" | "gl" => format!("{c}_ES", c = code),
+        c => format!("{c}_{}", c.to_uppercase()),
+    };
+    chrono::Locale::try_from(name.as_str()).ok()
+}
+
+/// `time` as `english` (a chrono format) would show it, in the app's
+/// language: names translated, and a 24-hour clock outside English.
+pub fn localized<Tz: chrono::TimeZone>(time: &chrono::DateTime<Tz>, english: &str) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    match chrono_locale() {
+        None => time.format(english).to_string(),
+        Some(locale) => {
+            let f = english.replace("%-I:%M %p", "%H:%M").replace(" at ", " ");
+            time.format_localized(&f, locale).to_string()
+        }
     }
 }

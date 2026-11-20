@@ -111,11 +111,11 @@ pub fn incoming_bar(app: &mut App, ui: &mut Ui) {
                 .unwrap_or_default();
             let who = app.name(ringer).split_whitespace().next().unwrap_or_default().to_owned();
             match others.as_slice() {
-                [] => format!("{who} is calling you"),
-                [a] => format!("{who} is calling you and {a}"),
-                [a, b] => format!("{who} is calling you, {a}, and {b}"),
-                [a, b, _] => format!("{who} is calling you, {a}, {b}, and 1 other"),
-                [a, b, rest @ ..] => format!("{who} is calling you, {a}, {b}, and {} others", rest.len()),
+                [] => crate::i18n::tf("icu:incomingGroupCall__ringing-you", &format!("{who} is calling you"), &[("ringer", crate::i18n::Arg::from(&who))]),
+                [a] => crate::i18n::tf("icu:incomingGroupCall__ringing-1-other", &format!("{who} is calling you and {a}"), &[("ringer", crate::i18n::Arg::from(&who)), ("otherMember", crate::i18n::Arg::from(&a))]),
+                [a, b] => crate::i18n::tf("icu:incomingGroupCall__ringing-2-others", &format!("{who} is calling you, {a}, and {b}"), &[("ringer", crate::i18n::Arg::from(&who)), ("first", crate::i18n::Arg::from(&a)), ("second", crate::i18n::Arg::from(&b))]),
+                [a, b, _] => crate::i18n::tf("icu:incomingGroupCall__ringing-3-others", &format!("{who} is calling you, {a}, {b}, and 1 other"), &[("ringer", crate::i18n::Arg::from(&who)), ("first", crate::i18n::Arg::from(&a)), ("second", crate::i18n::Arg::from(&b))]),
+                [a, b, rest @ ..] => crate::i18n::tf("icu:incomingGroupCall__ringing-many", &format!("{who} is calling you, {a}, {b}, and {} others", rest.len()), &[("ringer", crate::i18n::Arg::from(&who)), ("first", crate::i18n::Arg::from(&a)), ("second", crate::i18n::Arg::from(&b)), ("remaining", crate::i18n::Arg::from(&rest.len()))]),
             }
         }
         _ => if call.video { tr("Incoming video call") } else { tr("Incoming voice call") }.into(),
@@ -768,7 +768,7 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
     if call.group && matches!(call.status, CallStatus::Connected { .. }) {
         // `CallParticipantCount`: "N people" and a chevron, opening the list.
         let count = call.participants.len() + 1;
-        let text = if count == 1 { "1 person".to_owned() } else { format!("{count} people") };
+        let text = if count == 1 { "1 person".to_owned() } else { crate::i18n::tf("icu:CallControls__InfoDisplay--participants", &format!("{count} people"), &[("count", crate::i18n::Arg::from(&count))]) };
         let galley = ui.painter().layout_no_wrap(text, theme::regular(13.), gray20);
         let rect = Rect::from_min_size(Pos2::new(inner.left(), status_y), Vec2::new(galley.size().x + 15., 18.));
         let response = ui.interact(rect, ui.scope_id().with("participant-count"), Sense::click()).on_hover_text("Participants");

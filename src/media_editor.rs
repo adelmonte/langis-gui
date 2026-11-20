@@ -541,7 +541,7 @@ impl Editor {
                         if pill(ui, if self.highlighter { tr("Highlighter") } else { tr("Pen") }, false) {
                             self.highlighter = !self.highlighter;
                         }
-                        if pill(ui, WIDTHS[self.width].1, false) {
+                        if pill(ui, crate::i18n::tr(WIDTHS[self.width].1), false) {
                             self.width = (self.width + 1) % WIDTHS.len();
                         }
                         self.color_slider(ui);

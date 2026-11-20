@@ -681,11 +681,11 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
         let first = |i: usize| others.get(i).map(|(_, n)| n.split_whitespace().next().unwrap_or(n).to_owned()).unwrap_or_default();
         let text = match (mine, others.len()) {
             (true, 0) => tr("You raised a hand.").to_owned(),
-            (true, 1) => format!("You and {} raised a hand.", first(0)),
-            (true, n) => format!("You, {}, and {} more raised a hand.", first(0), n - 1),
-            (false, 1) => format!("{} raised a hand.", first(0)),
-            (false, 2) => format!("{} and {} raised a hand.", first(0), first(1)),
-            (false, n) => format!("{}, {}, and {} more raised a hand.", first(0), first(1), n - 2),
+            (true, 1) => crate::i18n::tf("icu:CallControls__RaiseHandsToast--you-and-one", &format!("You and {} raised a hand.", first(0)), &[("otherName", crate::i18n::Arg::from(&first(0)))]),
+            (true, n) => crate::i18n::tf("icu:CallControls__RaiseHandsToast--you-and-more", &format!("You, {}, and {} more raised a hand.", first(0), n - 1), &[("otherName", crate::i18n::Arg::from(&first(0))), ("overflowCount", crate::i18n::Arg::from(&n - 1))]),
+            (false, 1) => crate::i18n::tf("icu:CallControls__RaiseHandsToast--one", &format!("{} raised a hand.", first(0)), &[("name", crate::i18n::Arg::from(&first(0)))]),
+            (false, 2) => crate::i18n::tf("icu:CallControls__RaiseHandsToast--two", &format!("{} and {} raised a hand.", first(0), first(1)), &[("name", crate::i18n::Arg::from(&first(0))), ("otherName", crate::i18n::Arg::from(&first(1)))]),
+            (false, n) => crate::i18n::tf("icu:CallControls__RaiseHandsToast--more", &format!("{}, {}, and {} more raised a hand.", first(0), first(1), n - 2), &[("name", crate::i18n::Arg::from(&first(0))), ("otherName", crate::i18n::Arg::from(&first(1))), ("overflowCount", crate::i18n::Arg::from(&n - 2))]),
         };
         let button = if mine { tr("Lower") } else { tr("Open queue") };
         let galley = ui.painter().layout_no_wrap(text, theme::regular(13.), white);

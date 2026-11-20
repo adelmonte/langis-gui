@@ -93,8 +93,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     if let Some(which) = confirm {
         // `ContactModal`'s confirmations, over it.
         let (title, body, action) = match which {
-            Confirm::Admin if is_admin => (format!("Remove {name} as group admin?"), String::new(), tr("Remove as admin")),
-            Confirm::Admin => (String::new(), format!("{name} will be able to edit this group and its members."), tr("Make admin")),
+            Confirm::Admin if is_admin => (crate::i18n::tf("icu:ContactModal--rm-admin-info", &format!("Remove {name} as group admin?"), &[("contact", crate::i18n::Arg::from(&name))]), String::new(), tr("Remove as admin")),
+            Confirm::Admin => (String::new(), crate::i18n::tf("icu:ContactModal--make-admin-info", &format!("{name} will be able to edit this group and its members."), &[("contact", crate::i18n::Arg::from(&name))]), tr("Make admin")),
             Confirm::Remove => (String::new(), format!("Remove \"{name}\" from the group?"), tr("Remove from group")),
         };
         let variant = if which == Confirm::Remove || is_admin { Variant::StrongDestructive } else { Variant::StrongPrimary };
@@ -356,7 +356,7 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         let q = query.trim().to_lowercase();
         egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
             for g in app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && g.can_add_members && !g.left && !g.members.iter().any(|m| m == aci) && (q.is_empty() || g.title.to_lowercase().contains(&q))) {
-                let r = crate::panes::contact_row(ui, &palette, &g.title, Some(&format!("{} members", g.members.len() + 1)), g.color, None);
+                let r = crate::panes::contact_row(ui, &palette, &g.title, Some(&crate::i18n::tf("icu:GroupListItem__message-default", &format!("{} members", g.members.len() + 1), &[("count", crate::i18n::Arg::from(&g.members.len() + 1))])), g.color, None);
                 if r.clicked() {
                     picked = Some(g.id.clone());
                 }

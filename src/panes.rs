@@ -776,9 +776,9 @@ pub fn chat_confirm_dialog(app: &mut App, ctx: &egui::Context) {
     let (title, body, actions): (String, &str, Vec<(&str, Variant)>) = match which {
         ChatConfirm::Leave => (tr("Do you really want to leave?").into(), tr("You will no longer be able to send or receive messages in this group."), vec![(tr("Leave"), Variant::StrongDestructive)]),
         ChatConfirm::Block if group => (format!("Block and Leave the \"{name}\" Group?"), tr("You will no longer receive messages or updates from this group."), vec![(tr("Block"), Variant::StrongDestructive)]),
-        ChatConfirm::Block => (format!("Block {name}?"), tr("Blocked people won't be able to call you or send you messages."), vec![(tr("Block"), Variant::StrongDestructive)]),
+        ChatConfirm::Block => (crate::i18n::tf("icu:MessageRequests--block-direct-confirm-title", &format!("Block {name}?"), &[("title", crate::i18n::Arg::from(&name))]), tr("Blocked people won't be able to call you or send you messages."), vec![(tr("Block"), Variant::StrongDestructive)]),
         ChatConfirm::Unblock if group => (format!("Unblock the \"{name}\" Group?"), tr("Your contacts will be able to add you to this group."), vec![(tr("Unblock"), Variant::StrongDestructive)]),
-        ChatConfirm::Unblock => (format!("Unblock {name}?"), tr("You will be able to message and call each other."), vec![(tr("Unblock"), Variant::StrongPrimary)]),
+        ChatConfirm::Unblock => (crate::i18n::tf("icu:MessageRequests--unblock-direct-confirm-title", &format!("Unblock {name}?"), &[("name", crate::i18n::Arg::from(&name))]), tr("You will be able to message and call each other."), vec![(tr("Unblock"), Variant::StrongPrimary)]),
         ChatConfirm::ReportSpam => (
             tr("Report as spam?").into(),
             if group {
@@ -852,7 +852,7 @@ pub fn custom_time_dialogs(app: &mut App, ctx: &egui::Context) {
                 if let Some(i) = crate::axo_list::select_pill(ui, egui::Id::unique("custom-timer-value"), 80., &options, (value as usize).saturating_sub(1)) {
                     value = i as u32 + 1;
                 }
-                let units: Vec<&str> = TIME_UNITS.iter().map(|(n, _, _)| *n).collect();
+                let units: Vec<&str> = TIME_UNITS.iter().map(|(n, _, _)| tr(n)).collect();
                 if let Some(i) = crate::axo_list::select_pill(ui, egui::Id::unique("custom-timer-unit"), ui.available_width(), &units, unit) {
                     unit = i;
                     value = value.clamp(1, TIME_UNITS[i].2 - 1);
@@ -902,7 +902,7 @@ pub fn custom_time_dialogs(app: &mut App, ctx: &egui::Context) {
                 ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(ui.available_width()));
                 ui.add_space(8.);
             }
-            ui.label(RichText::new(format!("All times in {zone}")).font(theme::regular(12.)).color(palette.text_secondary));
+            ui.label(RichText::new(crate::i18n::tf("icu:MuteUntilDialog__timeZoneNote", &format!("All times in {zone}"), &[("timeZone", crate::i18n::Arg::from(&zone))])).font(theme::regular(12.)).color(palette.text_secondary));
         });
         match answer {
             Some(Answer::Action(_)) => match at {
@@ -1033,7 +1033,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                 ui.add_space(8.);
                 let name = c.title.clone();
                 let text = match (group, blocked) {
-                    (false, true) => format!("Let {name} message you and share your name and photo with them? You won't receive any messages until you unblock them."),
+                    (false, true) => crate::i18n::tf("icu:MessageRequests--message-direct-blocked", &format!("Let {name} message you and share your name and photo with them? You won't receive any messages until you unblock them."), &[("name", crate::i18n::Arg::from(&name))]),
                     (false, false) => format!("Let {name} message you and share your name and photo with them? They won\u{2019}t know you\u{2019}ve seen their messages until you accept."),
                     (true, true) => tr("Unblock this group and share your name and photo with its members? You won't receive any messages until you unblock them.").into(),
                     (true, false) => tr("Join this group and share your name and photo with its members? They won\u{2019}t know you\u{2019}ve seen their messages until you accept.").into(),
@@ -1098,17 +1098,17 @@ fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation
     // Desktop's `MessageRequestActionsConfirmation` and `ReportAndMaybeBlockModal`.
     let (title, body, actions): (String, String, Vec<(&str, Variant, MessageRequestResponse)>) = match answer {
         MessageRequestResponse::Block if group => (
-            format!("Block and Leave {who}?"),
+            crate::i18n::tf("icu:MessageRequests--block-group-confirm-title", &format!("Block and Leave {who}?"), &[("title", crate::i18n::Arg::from(&who))]),
             tr("You will no longer receive messages or updates from this group and members won't be able to add you to this group again.").into(),
             vec![(tr("Block"), Variant::StrongDestructive, MessageRequestResponse::Block)],
         ),
         MessageRequestResponse::Block => (
-            format!("Block {who}?"),
+            crate::i18n::tf("icu:MessageRequests--block-direct-confirm-title", &format!("Block {who}?"), &[("title", crate::i18n::Arg::from(&who))]),
             tr("Blocked people won't be able to call you or send you messages.").into(),
             vec![(tr("Block"), Variant::StrongDestructive, MessageRequestResponse::Block)],
         ),
         MessageRequestResponse::Delete if group => (
-            format!("Delete and Leave {who}?"),
+            crate::i18n::tf("icu:MessageRequests--delete-group-confirm-title", &format!("Delete and Leave {who}?"), &[("title", crate::i18n::Arg::from(&who))]),
             tr("You will leave this group, and it will be deleted from all your devices.").into(),
             vec![(tr("Delete and Leave"), Variant::StrongDestructive, MessageRequestResponse::Delete)],
         ),
@@ -1133,7 +1133,7 @@ fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation
         ),
         // Unblock: accepting a blocked chat unblocks it.
         MessageRequestResponse::Unknown => (
-            format!("Unblock {who}?"),
+            crate::i18n::tf("icu:MessageRequests--unblock-direct-confirm-title", &format!("Unblock {who}?"), &[("name", crate::i18n::Arg::from(&who))]),
             if group { tr("Group members will be able to add you to this group again.").into() } else { tr("You will be able to message and call each other.").into() },
             vec![(tr("Unblock"), Variant::StrongPrimary, MessageRequestResponse::Accept)],
         ),
@@ -1217,7 +1217,7 @@ fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_s
     let subtitle = match c.kind {
         ConversationKind::Group => Some(match c.members.len() {
             1 => "1 member".to_owned(),
-            n => format!("{n} members"),
+            n => crate::i18n::tf("icu:GroupListItem__message-default", &format!("{n} members"), &[("count", crate::i18n::Arg::from(&n))]),
         }),
         // Desktop's ContactListItem shows a person's About under the name.
         ConversationKind::Direct => c.about.clone(),
@@ -1338,7 +1338,7 @@ fn size_limit_dialog(app: &mut App, ui: &Ui) {
     let Some(limit) = app.panes.size_limit else { return };
     let (title, body) = match limit {
         SizeLimit::Recommended(n) => (tr("Recommended member limit reached").to_owned(), format!("Signal groups perform best with {n} members or fewer. Adding more members will cause delays sending and receiving messages.")),
-        SizeLimit::Max(n) => (tr("Maximum group size reached").to_owned(), format!("Signal groups can have a maximum of {n} members.")),
+        SizeLimit::Max(n) => (tr("Maximum group size reached").to_owned(), crate::i18n::tf("icu:chooseGroupMembers__maximum-group-size__body", &format!("Signal groups can have a maximum of {n} members."), &[("max", crate::i18n::Arg::from(&n))])),
     };
     if crate::dialog::show(ui.ctx(), egui::Id::unique("group-size-limit"), &title, &body, None, &[(tr("Okay"), crate::dialog::Variant::StrongPrimary)]).is_some() {
         app.panes.size_limit = None;
@@ -1386,7 +1386,7 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
                     let x = Rect::from_center_size(Pos2::new(rect.right() - 8. - 8., rect.center().y), Vec2::splat(16.));
                     let r = ui.interact(x, egui::Id::unique("contact-pill").with(m), Sense::click());
                     theme::paint_symbol(ui.painter(), "x", x.center(), 14., palette.text);
-                    if r.on_hover_text(format!("Remove {name}")).clicked() {
+                    if r.on_hover_text(crate::i18n::tf("icu:StoriesSettings__remove--title", &format!("Remove {name}"), &[("title", crate::i18n::Arg::from(&name))])).clicked() {
                         remove = Some(m.clone());
                     }
                 }
@@ -1754,7 +1754,7 @@ fn group_link_dialog(app: &mut App, ui: &mut Ui) {
             widgets::avatar(ui, &widgets::AvatarSpec { name: &preview.title, color: 4, photo: photo.as_deref(), group: true, note_to_self: false }, 80.);
             ui.add_space(8.);
             ui.label(RichText::new(&preview.title).font(theme::semibold(18.)));
-            body(ui, &palette, &format!("Group · {} members", preview.member_count));
+            body(ui, &palette, &crate::i18n::tf("icu:GroupV2--join--group-metadata--full", &format!("Group · {} members", preview.member_count), &[("memberCount", crate::i18n::Arg::from(&preview.member_count))]));
             if let Some(d) = &preview.description {
                 ui.add_space(6.);
                 body(ui, &palette, d);
@@ -1866,21 +1866,21 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         let listed = match others.len() {
             0 => String::new(),
             1 => others[0].clone(),
-            2 => format!("{} and {}", others[0], others[1]),
-            3 => format!("{}, {}, and {}", others[0], others[1], others[2]),
+            2 => crate::i18n::tf("icu:ConversationHero--group-members-two", &format!("{} and {}", others[0], others[1]), &[("member1", crate::i18n::Arg::from(&others[0])), ("member2", crate::i18n::Arg::from(&others[1]))]),
+            3 => crate::i18n::tf("icu:ConversationHero--group-members-three", &format!("{}, {}, and {}", others[0], others[1], others[2]), &[("member1", crate::i18n::Arg::from(&others[0])), ("member2", crate::i18n::Arg::from(&others[1])), ("member3", crate::i18n::Arg::from(&others[2]))]),
             n => format!("{}, {}, and {} others", others[0], others[1], n - 2),
         };
         let who = if group {
             match users.len() {
-                0 if ringable && !listed.is_empty() => if ring { format!("Signal will ring {listed}") } else { format!("{listed} will be notified") },
+                0 if ringable && !listed.is_empty() => if ring { crate::i18n::tf("icu:calling__pre-call-info--will-ring-1", &format!("Signal will ring {listed}"), &[("person", crate::i18n::Arg::from(&listed))]) } else { crate::i18n::tf("icu:calling__pre-call-info--will-notify-1", &format!("{listed} will be notified"), &[("person", crate::i18n::Arg::from(&listed))]) },
                 0 => tr("No one else is here").to_owned(),
-                1 => format!("{} is in this call", app.name(&users[0])),
-                2 => format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])),
-                3 => format!("{}, {}, and {} are in this call", app.name(&users[0]), app.name(&users[1]), app.name(&users[2])),
-                n => format!("{}, {}, and {} others are in this call", app.name(&users[0]), app.name(&users[1]), n - 2),
+                1 => crate::i18n::tf("icu:calling__pre-call-info--1-person-in-call", &format!("{} is in this call", app.name(&users[0])), &[("first", crate::i18n::Arg::from(&app.name(&users[0])))]),
+                2 => crate::i18n::tf("icu:calling__pre-call-info--2-people-in-call", &format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])), &[("first", crate::i18n::Arg::from(&app.name(&users[0]))), ("second", crate::i18n::Arg::from(&app.name(&users[1])))]),
+                3 => crate::i18n::tf("icu:calling__pre-call-info--3-people-in-call", &format!("{}, {}, and {} are in this call", app.name(&users[0]), app.name(&users[1]), app.name(&users[2])), &[("first", crate::i18n::Arg::from(&app.name(&users[0]))), ("second", crate::i18n::Arg::from(&app.name(&users[1]))), ("third", crate::i18n::Arg::from(&app.name(&users[2])))]),
+                n => crate::i18n::tf("icu:calling__pre-call-info--many-people-in-call", &format!("{}, {}, and {} others are in this call", app.name(&users[0]), app.name(&users[1]), n - 2), &[("first", crate::i18n::Arg::from(&app.name(&users[0]))), ("second", crate::i18n::Arg::from(&app.name(&users[1]))), ("others", crate::i18n::Arg::from(&n - 2))]),
             }
         } else {
-            format!("Signal will ring {}", title_text)
+            crate::i18n::tf("icu:calling__pre-call-info--will-ring-1", &format!("Signal will ring {}", title_text), &[("person", crate::i18n::Arg::from(&title_text))])
         };
         let mut y = frame.bottom() + 24.;
         ui.painter().text(Pos2::new(screen.center().x, y), egui::Align2::CENTER_TOP, &title_text, theme::semibold(20.), white);

@@ -561,7 +561,7 @@ impl App {
                     for p in old.participants.iter().filter(|p| p.presenting) {
                         if !new.participants.iter().any(|n| n.demux_id == p.demux_id && n.presenting) {
                             let name = self.name(&p.aci);
-                            self.panes.call_toasts.push((format!("{name} stopped presenting"), Instant::now()));
+                            self.panes.call_toasts.push((crate::i18n::tf("icu:calling__presenting--person-stopped", &format!("{name} stopped presenting"), &[("name", crate::i18n::Arg::from(&name))]), Instant::now()));
                         }
                     }
                 }

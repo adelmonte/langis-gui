@@ -243,7 +243,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             };
             ui.painter().text(top.left_center() + Vec2::new(20., -8.), Align2::LEFT_CENTER, who, theme::semibold(14.), Color32::WHITE);
             let when = chrono::DateTime::from_timestamp_millis(item.sent_at)
-                .map(|t| t.with_timezone(&chrono::Local).format("%b %-d, %Y, %-I:%M %p").to_string())
+                .map(|t| crate::format::localized(&t.with_timezone(&chrono::Local), "%b %-d, %Y, %-I:%M %p"))
                 .unwrap_or_default();
             ui.painter().text(top.left_center() + Vec2::new(20., 10.), Align2::LEFT_CENTER, when, theme::regular(12.), Color32::from_gray(190));
         }

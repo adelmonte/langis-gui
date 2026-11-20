@@ -884,7 +884,7 @@ fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
 /// Desktop's `LastSeenIndicator`: a 1px gray-45 line, then "N Unread
 /// Messages" in bold, 25 above and 35 below.
 fn last_seen_indicator(ui: &mut Ui, palette: &Palette, count: u32) -> Rect {
-    let text = if count == 1 { "1 Unread Message".to_owned() } else { format!("{count} Unread Messages") };
+    let text = if count == 1 { "1 Unread Message".to_owned() } else { crate::i18n::tf("icu:LeftPaneChatFolders__ItemUnreadBadge__AccessibleLabel", &format!("{count} Unread Messages"), &[("count", crate::i18n::Arg::from(&count))]) };
     let galley = ui.painter().layout_no_wrap(text, theme::semibold(13.), palette.text);
     let height = 25. + 1. + 3. + galley.size().y + 35.;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
@@ -975,7 +975,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                     if i == first {
                         ui.add_space(10.);
                         let label = match k {
-                            0 => format!("{run} group updates"),
+                            0 => crate::i18n::tf("icu:collapsedGroupUpdates", &format!("{run} group updates"), &[("count", crate::i18n::Arg::from(&run))]),
                             1 => format!("{run} disappearing message timer changes"),
                             _ => format!("{run} calls"),
                         };
@@ -1183,11 +1183,11 @@ fn shared_groups_text(groups: &[String], accepted: bool) -> String {
     match groups {
         [] if accepted => tr("No groups in common").into(),
         [] => tr("No groups in common. Review requests carefully.").into(),
-        [a] => format!("Member of {a}"),
-        [a, b] => format!("Member of {a} and {b}"),
-        [a, b, c] => format!("Member of {a}, {b}, and {c}"),
-        [a, b, c, _] => format!("Member of {a}, {b}, {c} and one more"),
-        [a, b, c, rest @ ..] => format!("Member of {a}, {b}, {c} and {} more", rest.len()),
+        [a] => crate::i18n::tf("icu:member-of-1-group", &format!("Member of {a}"), &[("group", crate::i18n::Arg::from(&a))]),
+        [a, b] => crate::i18n::tf("icu:member-of-2-groups", &format!("Member of {a} and {b}"), &[("group1", crate::i18n::Arg::from(&a)), ("group2", crate::i18n::Arg::from(&b))]),
+        [a, b, c] => crate::i18n::tf("icu:member-of-3-groups", &format!("Member of {a}, {b}, and {c}"), &[("group1", crate::i18n::Arg::from(&a)), ("group2", crate::i18n::Arg::from(&b)), ("group3", crate::i18n::Arg::from(&c))]),
+        [a, b, c, _] => crate::i18n::tf("icu:member-of-more-than-3-groups--one-more", &format!("Member of {a}, {b}, {c} and one more"), &[("group1", crate::i18n::Arg::from(&a)), ("group2", crate::i18n::Arg::from(&b)), ("group3", crate::i18n::Arg::from(&c))]),
+        [a, b, c, rest @ ..] => crate::i18n::tf("icu:member-of-more-than-3-groups--multiple-more", &format!("Member of {a}, {b}, {c} and {} more", rest.len()), &[("group1", crate::i18n::Arg::from(&a)), ("group2", crate::i18n::Arg::from(&b)), ("group3", crate::i18n::Arg::from(&c)), ("remainingCount", crate::i18n::Arg::from(&rest.len()))]),
     }
 }
 
@@ -1197,10 +1197,10 @@ fn group_members_text(others: &[String], you: bool) -> String {
         ([], false) => tr("No group members").into(),
         ([], true) => tr("No other group members yet").into(),
         ([a], false) => a.clone(),
-        ([a], true) => format!("{a} and you"),
-        ([a, b], false) => format!("{a} and {b}"),
-        ([a, b], true) => format!("{a}, {b}, and you"),
-        ([a, b, c], false) => format!("{a}, {b}, and {c}"),
+        ([a], true) => crate::i18n::tf("icu:ConversationHero--group-members-one-and-you", &format!("{a} and you"), &[("member", crate::i18n::Arg::from(&a))]),
+        ([a, b], false) => crate::i18n::tf("icu:ConversationHero--group-members-two", &format!("{a} and {b}"), &[("member1", crate::i18n::Arg::from(&a)), ("member2", crate::i18n::Arg::from(&b))]),
+        ([a, b], true) => crate::i18n::tf("icu:ConversationHero--group-members-two-and-you", &format!("{a}, {b}, and you"), &[("member1", crate::i18n::Arg::from(&a)), ("member2", crate::i18n::Arg::from(&b))]),
+        ([a, b, c], false) => crate::i18n::tf("icu:ConversationHero--group-members-three", &format!("{a}, {b}, and {c}"), &[("member1", crate::i18n::Arg::from(&a)), ("member2", crate::i18n::Arg::from(&b)), ("member3", crate::i18n::Arg::from(&c))]),
         ([a, b, c, rest @ ..], _) => format!("{a}, {b}, {c}, and {} {}", rest.len() + you as usize, if rest.len() + you as usize == 1 { "other" } else { "others" }),
     }
 }
@@ -1471,12 +1471,12 @@ fn message(
         let mut job = egui::text::LayoutJob::default();
         // Desktop's `Message` names who deleted it: the admin, else its author.
         let text = match &m.deleted_by_admin {
-            Some(langis_store::DeletedByAdmin { by: Some(admin) }) => format!("Admin {} deleted this message", ctx.app.name(admin)),
+            Some(langis_store::DeletedByAdmin { by: Some(admin) }) => crate::i18n::tf("icu:message--deletedByAdmin", &format!("Admin {} deleted this message", ctx.app.name(admin)), &[("admin", crate::i18n::Arg::from(&ctx.app.name(admin)))]),
             Some(_) => tr("You deleted this message").to_owned(),
             None if outgoing => tr("You deleted this message").to_owned(),
             None => {
                 let name = m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| tr("Unknown").into());
-                format!("{name} deleted this message")
+                crate::i18n::tf("icu:message--deletedForEveryone--incoming", &format!("{name} deleted this message"), &[("name", crate::i18n::Arg::from(&name))])
             }
         };
         // Desktop's deleted message: plain text in gray-60 / gray-25.
@@ -2710,7 +2710,7 @@ fn preview_date(millis: i64) -> Option<String> {
         return None;
     }
     let date = chrono::DateTime::from_timestamp_millis(millis)?.with_timezone(&chrono::Local);
-    Some(date.format("%b %-d, %Y").to_string())
+    Some(crate::format::localized(&date, "%b %-d, %Y"))
 }
 
 fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: bool, actions: &mut Vec<Action>) {
@@ -3210,7 +3210,7 @@ fn select_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
             if button(ui, rect.right() - 4. - 44. - 22., "trash", "Delete selected messages", !chosen.is_empty()) {
                 chat.dialog = Some(crate::actions::Dialog::Delete { messages: chosen.clone() });
             }
-            let text = format!("{} selected", chosen.len());
+            let text = crate::i18n::tf("icu:SelectModeActions--selectedMessages", &format!("{} selected", chosen.len()), &[("count", crate::i18n::Arg::from(&chosen.len()))]);
             ui.painter().text(Pos2::new(rect.left() + 4. + 44. + 10., rect.center().y), egui::Align2::LEFT_CENTER, text, theme::regular(14.), if palette.dark { theme::rgb(0xbebebe) } else { theme::rgb(0x5e5e5e) });
         });
 }

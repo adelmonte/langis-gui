@@ -40,17 +40,22 @@ def icu_plain(mf):
 
 
 en = load('en')
-by_english = {}
+# Desktop can have several messages with the same English; each language
+# gets the translation most of them have.
+by_english, all_keys = {}, {}
 for k, v in en.items():
     p = icu_plain(v)
     if p is not None:
         by_english.setdefault(norm(p), k)
+        all_keys.setdefault(norm(p), []).append(k)
 
 # What the code asks for.
 plain_used, icu_used = {}, set()
 for f in glob.glob('src/*.rs'):
     text = open(f).read()
-    for m in re.finditer(r'\btr\("((?:[^"\\]|\\.)*)"\)', text):
+    # Every literal that's a Desktop message: wrapped where shown, or kept
+    # in a constant and translated where it's drawn (`tr(label)`).
+    for m in re.finditer(r'"((?:[^"\\]|\\.)*)"', text):
         lit = m.group(1)
         key = by_english.get(norm(rust_unescape(lit)))
         if key:
@@ -65,10 +70,17 @@ for loc in OFFERED:
     msgs = en if loc == 'en' else load(loc)
     plain = {}
     for english, key in plain_used.items():
-        tr = msgs.get(key)
-        p = icu_plain(tr) if tr else None
-        if p and loc != 'en':
-            plain[english] = p
+        if loc == 'en':
+            continue
+        votes = {}
+        for k in all_keys.get(norm(english), [key]):
+            t = msgs.get(k)
+            p = icu_plain(t) if t else None
+            if p:
+                votes[p] = votes.get(p, 0) + 1
+        if votes:
+            # Most common; one that differs from English wins a tie.
+            plain[english] = max(votes.items(), key=lambda kv: (kv[1], kv[0] != english))[0]
     icu = {k: msgs[k] for k in sorted(icu_used) if k in msgs}
     # Every offered language's name in this one (Desktop's
     # locale-display-names), for the language list.

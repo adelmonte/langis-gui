@@ -338,7 +338,7 @@ pub fn picker(app: &mut App, ui: &mut egui::Ui, chat: Option<ConversationId>) {
     let delete = egui::Id::unique("custom-color-delete");
     if let Some((id, used)) = ui.ctx().data(|d| d.get_temp::<(String, usize)>(delete)) {
         use crate::dialog::{self, Choice, Variant};
-        let body = if used == 1 { "This custom color is used in 1 chat. Do you want to delete it for all chats?".to_owned() } else { format!("This custom color is used in {used} chats. Do you want to delete it for all chats?") };
+        let body = if used == 1 { "This custom color is used in 1 chat. Do you want to delete it for all chats?".to_owned() } else { crate::i18n::tf("icu:ChatColorPicker__delete--message", &format!("This custom color is used in {used} chats. Do you want to delete it for all chats?"), &[("num", crate::i18n::Arg::from(&used))]) };
         let answer = dialog::confirm(ui.ctx(), delete.with("dialog"), tr("Delete color"), &body, tr("Delete"), Variant::StrongDestructive);
         if answer == Some(Choice::Action) {
             app.send(Command::EditChatColors(ChatColorEdit::RemoveCustom { id }));

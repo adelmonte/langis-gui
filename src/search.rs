@@ -221,14 +221,14 @@ pub fn message_results(app: &App, ui: &mut Ui, palette: &Palette) -> Option<(Con
             }
             (None, _) => {
                 widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo: app.me.1.as_deref(), ..widgets::AvatarSpec::person(&app.me.0, 0) });
-                format!("You to {}", c.title)
+                crate::i18n::tf("icu:searchResultHeader--you-to-group", &format!("You to {}", c.title), &[("receiverGroup", crate::i18n::Arg::from(&c.title))])
             }
             (Some(a), _) => {
                 let name = app.name(a);
                 let photo = app.conversation(&ConversationId::direct(a)).and_then(|p| p.avatar_path.clone());
                 let color = a.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
                 widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo: photo.as_deref(), ..widgets::AvatarSpec::person(&name, color) });
-                if group { format!("{name} to {}", c.title) } else { format!("{name} to You") }
+                if group { format!("{name} to {}", c.title) } else { crate::i18n::tf("icu:searchResultHeader--sender-to-you", &format!("{name} to You"), &[("sender", crate::i18n::Arg::from(&name))]) }
             }
         };
         let left = row.left() + 74.;

@@ -93,7 +93,7 @@ impl Page {
             Page::WhileMuted => tr("While muted"),
             Page::PhoneNumber => tr("Phone Number"),
             Page::Blocked => tr("Blocked"),
-            other => Page::NAV.iter().find(|(p, _, _)| *p == other).map(|(_, _, l)| *l).unwrap_or(""),
+            other => Page::NAV.iter().find(|(p, _, _)| *p == other).map(|(_, _, l)| tr(l)).unwrap_or(""),
         }
     }
 }
@@ -541,7 +541,7 @@ fn nav(app: &mut App, ui: &mut Ui, palette: &Palette) {
             painter.rect_filled(r, CornerRadius::same(14), fill);
         }
         theme::paint_symbol(&painter, symbol, Pos2::new(r.left() + 18. + 9., r.center().y), 18., palette.text);
-        painter.text(Pos2::new(r.left() + 18. + 18. + 12., r.center().y), Align2::LEFT_CENTER, *label, theme::regular(14.), palette.text);
+        painter.text(Pos2::new(r.left() + 18. + 18. + 12., r.center().y), Align2::LEFT_CENTER, tr(label), theme::regular(14.), palette.text);
         if response.clicked() {
             app.settings.page = *page;
             app.settings.stale = true;
@@ -742,7 +742,7 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     let count = app.panes.folders.iter().filter(|f| f.folder_type == langis_store::ChatFolderType::Custom).count();
     axo_list::list(ui, Some(tr("Chat folders")), None, |ui| {
         let (label, value) = if count > 0 {
-            (tr("Add or edit folders"), Some(if count == 1 { "1 folder".to_owned() } else { format!("{count} folders") }))
+            (tr("Add or edit folders"), Some(if count == 1 { "1 folder".to_owned() } else { crate::i18n::tf("icu:Preferences__ChatsPage__ChatFoldersSection__AddChatFolderItem__Description--WithChatFolders", &format!("{count} folders"), &[("chatFoldersCount", crate::i18n::Arg::from(&count))]) }))
         } else {
             (tr("Add a chat folder"), None)
         };
@@ -1435,9 +1435,9 @@ fn privacy(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     let groups = app.conversations.iter().filter(|c| c.blocked && c.kind == ConversationKind::Group).count();
     let count = match (users, groups) {
         (0, 0) => "No users or groups".to_owned(),
-        (u, 0) => if u == 1 { "1 user".into() } else { format!("{u} users") },
-        (0, g) => if g == 1 { "1 group".into() } else { format!("{g} groups") },
-        (u, g) => if u + g == 1 { "1 user or group".into() } else { format!("{} users or groups", u + g) },
+        (u, 0) => if u == 1 { "1 user".into() } else { crate::i18n::tf("icu:Preferences--blocked-count-contacts-new", &format!("{u} users"), &[("num", crate::i18n::Arg::from(&u))]) },
+        (0, g) => if g == 1 { "1 group".into() } else { crate::i18n::tf("icu:Preferences--blocked-count-groups-new", &format!("{g} groups"), &[("num", crate::i18n::Arg::from(&g))]) },
+        (u, g) => if u + g == 1 { "1 user or group".into() } else { crate::i18n::tf("icu:Preferences--blocked-count-both-new", &format!("{} users or groups", u + g), &[("num", crate::i18n::Arg::from(&u + g))]) },
     };
     axo_list::list(ui, None, None, |ui| {
         if axo_list::item(ui, Item::new(tr("Blocked")), End::Arrow(Some(&count))).clicked() {
@@ -1614,9 +1614,9 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
                 // The name, and when it was blocked under it.
                 match c.blocked_at {
                     Some(at) => {
-                        let date = chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%b %-d, %Y").to_string()).unwrap_or_default();
+                        let date = chrono::DateTime::from_timestamp_millis(at).map(|t| crate::format::localized(&t.with_timezone(&chrono::Local), "%b %-d, %Y")).unwrap_or_default();
                         ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y - 8.), Align2::LEFT_CENTER, &c.title, theme::regular(13.), palette.text);
-                        ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y + 9.), Align2::LEFT_CENTER, format!("Blocked on {date}"), theme::regular(12.), palette.text_secondary);
+                        ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y + 9.), Align2::LEFT_CENTER, crate::i18n::tf("icu:Preferences--blocked--blocked-on", &format!("Blocked on {date}"), &[("blockedAt", crate::i18n::Arg::from(&date))]), theme::regular(12.), palette.text_secondary);
                     }
                     None => {
                         ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y), Align2::LEFT_CENTER, &c.title, theme::regular(13.), palette.text);
@@ -1694,7 +1694,7 @@ fn ask(app: &mut App, ctx: &egui::Context) {
         },
         Ask::Unblock(conversation, name, group) => {
             let body = if *group { tr("Group members will be able to add you to this group again.") } else { tr("You will be able to message and call each other.") };
-            match dialog::confirm(ctx, id, &format!("Unblock {name}?"), body, tr("Unblock"), Variant::StrongPrimary) {
+            match dialog::confirm(ctx, id, &crate::i18n::tf("icu:MessageRequests--unblock-direct-confirm-title", &format!("Unblock {name}?"), &[("name", crate::i18n::Arg::from(&name))]), body, tr("Unblock"), Variant::StrongPrimary) {
                 Some(Choice::Action) => {
                     app.send(Command::SetChat { conversation: conversation.clone(), change: ChatChange::Blocked(false) });
                     true

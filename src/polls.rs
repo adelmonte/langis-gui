@@ -64,7 +64,7 @@ pub fn dialog(ui: &mut Ui, palette: &Palette, poll: &mut NewPoll, conversation: 
             ui.set_width(ui.available_width());
             let w = ui.available_width() - if poll.options.len() > 2 { 36. } else { 0. };
             ui.allocate_ui(egui::vec2(w, 34.), |ui| {
-                widgets::text_field(ui, &mut poll.options[i], &format!("Option {}", i + 1), false);
+                widgets::text_field(ui, &mut poll.options[i], &crate::i18n::tf("icu:PollCreateModal__optionPlaceholder", &format!("Option {}", i + 1), &[("number", crate::i18n::Arg::from(&i + 1))]), false);
             });
             if poll.options.len() > 2 && widgets::icon_button(ui, crate::icons::Icon::XCompact, 14., "Remove option").clicked() {
                 remove = Some(i);

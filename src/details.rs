@@ -146,10 +146,10 @@ pub const TIMERS: [(u32, &str); 9] = [
 /// A drop-down of [`TIMERS`]; true when it changed.
 pub fn timer_picker(ui: &mut Ui, id: &str, seconds: &mut u32, custom: &mut bool) -> bool {
     let before = *seconds;
-    let label = TIMERS.iter().find(|(s, _)| s == seconds).map(|(_, l)| (*l).to_owned()).unwrap_or_else(|| crate::format::timer_long(*seconds));
+    let label = TIMERS.iter().find(|(s, _)| s == seconds).map(|(_, l)| tr(l).to_owned()).unwrap_or_else(|| crate::format::timer_long(*seconds));
     egui::ComboBox::from_id_salt(id).selected_text(label).show_ui(ui, |ui| {
         for (s, l) in TIMERS.iter().filter(|(s, _)| *s != u32::MAX) {
-            ui.selectable_value(seconds, *s, *l);
+            ui.selectable_value(seconds, *s, tr(l));
         }
         // Desktop's `DisappearingTimerSelect` ends with Custom time.
         if ui.selectable_label(false, tr("Custom time…")).clicked() {
@@ -282,7 +282,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             d.edit_info = Some((c.title.clone(), c.description.clone().unwrap_or_default()));
         }
         if group {
-            body(ui, palette, &format!("Group · {} members", c.members.len() + 1));
+            body(ui, palette, &crate::i18n::tf("icu:GroupV2--join--group-metadata--full", &format!("Group · {} members", c.members.len() + 1), &[("memberCount", crate::i18n::Arg::from(&c.members.len() + 1))]));
             match c.description.as_deref().filter(|d| !d.trim().is_empty()) {
                 Some(d) => {
                     ui.add_space(4.);
@@ -383,7 +383,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             } else if c.muted_until == i64::MAX {
                 tr("Muted always").to_owned()
             } else {
-                format!("Muted until {}", crate::format::short_timestamp(c.muted_until))
+                crate::i18n::tf("icu:muteExpirationLabel", &format!("Muted until {}", crate::format::short_timestamp(c.muted_until)), &[("duration", crate::i18n::Arg::from(&crate::format::short_timestamp(c.muted_until)))])
             };
             let r = axo_list::item(ui, Item::new(tr("Mute notifications")).symbol(if c.muted { "bell-slash" } else { "bell" }), End::Arrow(Some(&state)));
             let menu = egui::Id::unique("details-mute").with(&c.id.0);
@@ -421,7 +421,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         let common: Vec<Conversation> = app.conversations.iter().filter(|g| g.kind == ConversationKind::Group && !g.left && g.members.iter().any(|m| m == them)).cloned().collect();
         if !common.is_empty() {
             axo_list::gap(ui);
-            let title = if common.len() == 1 { "1 group in common".to_owned() } else { format!("{} groups in common", common.len()) };
+            let title = if common.len() == 1 { "1 group in common".to_owned() } else { crate::i18n::tf("icu:ConversationDetailsGroups--title", &format!("{} groups in common", common.len()), &[("count", crate::i18n::Arg::from(&common.len()))]) };
             axo_list::list(ui, Some(&title), None, |ui| {
                 for g in &common {
                     let row = group_row(ui, palette, g);
@@ -467,11 +467,11 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         axo_list::gap(ui);
         let count = c.members.len() + 1;
         let title = if c.ended {
-            if count == 1 { "1 former member".to_owned() } else { format!("{count} former members") }
+            if count == 1 { "1 former member".to_owned() } else { crate::i18n::tf("icu:ConversationDetailsMembershipList--terminated-title", &format!("{count} former members"), &[("number", crate::i18n::Arg::from(&count))]) }
         } else if count == 1 {
             "1 member".to_owned()
         } else {
-            format!("{count} members")
+            crate::i18n::tf("icu:GroupListItem__message-default", &format!("{count} members"), &[("count", crate::i18n::Arg::from(&count))])
         };
         axo_list::list(ui, Some(&title), None, |ui| {
             if c.can_add_members && !c.left && axo_list::item(ui, Item::new(tr("Add members")).symbol("plus"), End::Click).clicked()
@@ -614,7 +614,7 @@ fn group_row(ui: &mut Ui, palette: &Palette, g: &Conversation) -> egui::Response
     widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(g));
     let x = avatar.right() + 12.;
     ui.painter().text(egui::pos2(x, rect.center().y - 1.), egui::Align2::LEFT_BOTTOM, &g.title, theme::regular(13.), palette.text);
-    ui.painter().text(egui::pos2(x, rect.center().y + 1.), egui::Align2::LEFT_TOP, format!("{} members", g.members.len() + 1), theme::regular(12.), palette.text_secondary);
+    ui.painter().text(egui::pos2(x, rect.center().y + 1.), egui::Align2::LEFT_TOP, crate::i18n::tf("icu:GroupListItem__message-default", &format!("{} members", g.members.len() + 1), &[("count", crate::i18n::Arg::from(&g.members.len() + 1))]), theme::regular(12.), palette.text_secondary);
     response
 }
 
