@@ -1303,9 +1303,30 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             title(ui, tr("Add members"));
             widgets::text_field(ui, &mut query, tr("Search"), false);
             ui.add_space(6.);
+            // Desktop's ContactPills: those chosen, each with its X.
+            if !chosen.is_empty() {
+                let mut remove = None;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6., 6.);
+                    for m in &chosen {
+                        let name = app.name(m);
+                        if ui.add(egui::Button::new(RichText::new(format!("{name}  \u{d7}")).font(theme::regular(13.))).corner_radius(CornerRadius::same(7))).on_hover_text(tr("Remove")).clicked() {
+                            remove = Some(m.clone());
+                        }
+                    }
+                });
+                if let Some(m) = remove {
+                    chosen.retain(|x| *x != m);
+                }
+                ui.add_space(6.);
+            }
             let q = query.trim().to_lowercase();
             let people: Vec<langis_store::Conversation> = app.conversations.iter().filter(|p| p.kind == ConversationKind::Direct && !p.blocked && (q.is_empty() || p.title.to_lowercase().contains(&q))).cloned().collect();
             egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
+                if people.is_empty() {
+                    ui.add_space(20.);
+                    ui.vertical_centered(|ui| body(ui, palette, tr("No contacts found")));
+                }
                 for p in &people {
                     let Some(sid) = p.id.as_direct() else { continue };
                     // Desktop's ChooseGroupMembersModal lists members too,
@@ -1326,10 +1347,20 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     }
                 }
             });
-            answer = buttons(ui, &[&format!("Add ({})", chosen.len()), tr("Cancel")]);
+            answer = buttons(ui, &[tr("Update"), tr("Cancel")]);
         });
         match answer {
-            Some(0) if !chosen.is_empty() => app.send(Command::AddGroupMembers { conversation: c.id.clone(), members: chosen }),
+            // Desktop's ConfirmAdditionsModal before adding.
+            Some(0) if !chosen.is_empty() => {
+                use crate::i18n::{Arg, tf};
+                let (title, action) = if chosen.len() == 1 {
+                    let person = app.name(&chosen[0]);
+                    (tf("icu:AddGroupMembersModal--confirm-title--one", &format!("Add {person} to \u{201c}{}\u{201d}?", c.title), &[("person", Arg::from(&person)), ("group", Arg::from(&c.title))]), tr("Add member"))
+                } else {
+                    (tf("icu:AddGroupMembersModal--confirm-title--many", &format!("Add {} members to \u{201c}{}\u{201d}?", chosen.len(), c.title), &[("count", Arg::from(chosen.len())), ("group", Arg::from(&c.title))]), tr("Add members"))
+                };
+                crate::panes::ask(app, title, "", action, false, vec![Command::AddGroupMembers { conversation: c.id.clone(), members: chosen }]);
+            }
             Some(_) => {}
             None if closed => {}
             None => d.add_members = Some((query, chosen)),
