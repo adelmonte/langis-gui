@@ -1443,7 +1443,7 @@ fn message(
         let links_on = ctx.app.conversation(ctx.chat_id).is_none_or(|c| c.accepted);
         let mut rich = rich_text(m, &|sid| ctx.app.name(sid), in_color, if links_on { link_color } else { in_color }, revealed, font_size, limit);
         if !links_on {
-            rich.links.retain(|(_, url)| url == READ_MORE);
+            rich.links.retain(|(_, url)| url == READ_MORE || url.starts_with(MENTION));
             for section in &mut rich.job.sections {
                 section.format.underline = Stroke::NONE;
             }
@@ -1829,7 +1829,13 @@ fn message(
             }
             if text_response.clicked() {
                 if let Some((_, url)) = rich.links.iter().find(|(r, _)| r.contains(&at)) {
-                    actions.push(if url == READ_MORE { Action::ReadMore(m.id) } else { Action::Open(url.clone()) });
+                    actions.push(if url == READ_MORE {
+                        Action::ReadMore(m.id)
+                    } else if let Some(aci) = url.strip_prefix(MENTION) {
+                        Action::Contact(aci.to_owned())
+                    } else {
+                        Action::Open(url.clone())
+                    });
                 } else if !revealed && rich.spoilers.iter().any(|r| r.contains(&at)) {
                     revealed_now = Some(true);
                 }
@@ -2829,6 +2835,8 @@ pub struct Rich {
 /// are over 900) waits behind Read more, cut where no link is split.
 pub const READ_MORE_LENGTH: usize = 800;
 const READ_MORE: &str = "langis:read-more";
+/// A mention's place among a message's links: the person it names.
+const MENTION: &str = "langis:mention:";
 
 /// Where `body` is cut to show `limit` characters, if it is.
 fn read_more_cut(body: &str, links: &[(std::ops::Range<usize>, String)], limit: usize) -> Option<usize> {
@@ -2911,6 +2919,9 @@ pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, lin
         }
         if let Some((_, url)) = link {
             out_links.push((chars..chars + n, url.clone()));
+        } else if let Some(mn) = mention.filter(|_| revealed || !active(TextStyle::Spoiler)) {
+            // Desktop's AtMention opens the person's ContactModal.
+            out_links.push((chars..chars + n, format!("{MENTION}{}", mn.aci)));
         }
         append_with_emoji(&mut job, &text, format);
         chars += n;
