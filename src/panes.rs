@@ -287,20 +287,41 @@ pub fn on_event(app: &mut App, event: Event) {
 
 /// A dialog in Desktop's style: a rounded card over a dimmed window.
 /// Returns whether it was dismissed (Escape, or a click outside).
+/// Desktop's `Modal`: radius 8, 16px padding, its popper shadow; true
+/// when it should close (Escape, a click outside, or the title's X).
 pub fn modal(ui: &Ui, id: &str, width: f32, contents: impl FnOnce(&mut Ui)) -> bool {
     let palette = Palette::of(ui.ctx());
+    let close_id = egui::Id::unique("langis-modal-close");
+    ui.ctx().data_mut(|d| d.remove::<bool>(close_id));
+    let shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: egui::Color32::from_black_alpha(if palette.dark { 90 } else { 50 }) };
     let response = egui::Modal::new(egui::Id::unique(("langis-modal", id)))
-        .frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24))
+        .frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(8)).inner_margin(16).shadow(shadow))
         .show(ui.ctx(), |ui| {
             ui.set_width(width);
             contents(ui);
         });
-    response.should_close()
+    let x = ui.ctx().data(|d| d.get_temp::<bool>(close_id)).unwrap_or(false);
+    response.should_close() || x
 }
 
+/// `module-Modal__headerTitle`: the title in body-1-bold, the 20px close X
+/// at its end, 1em under it.
 pub fn title(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).font(theme::semibold(18.)));
-    ui.add_space(8.);
+    let palette = Palette::of(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(text).font(theme::semibold(14.)));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let (rect, r) = ui.allocate_exact_size(egui::vec2(20., 20.), egui::Sense::click());
+            if r.hovered() {
+                ui.painter().rect_filled(rect, CornerRadius::same(4), palette.fill);
+            }
+            theme::paint_symbol(ui.painter(), "x", rect.center(), 18., palette.text_secondary);
+            if r.on_hover_text("Close").clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("langis-modal-close"), true));
+            }
+        });
+    });
+    ui.add_space(14.);
 }
 
 pub fn body(ui: &mut Ui, palette: &Palette, text: &str) {
