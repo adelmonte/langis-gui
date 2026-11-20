@@ -69,6 +69,8 @@ pub struct StoriesView {
     pub info_of: Option<i64>,
     /// "Hide story?" waiting for this story's answer.
     pub confirm_hide: Option<i64>,
+    /// The story whose whole caption is open (Read more).
+    pub caption_open: Option<i64>,
     /// The stories list's search.
     pub search: String,
     /// "Delete this story?" waiting for this story's answer.
@@ -514,6 +516,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
         app.panes.stories.my_stories = false;
         return;
     }
+    let mut info = None;
     let mut delete = None;
     let mut view = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(full.shrink2(Vec2::new(32., 24.))), |ui| {
@@ -580,6 +583,29 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                 {
                     crate::menu::open_at(ui.ctx(), menu, at);
                 }
+                // Desktop's row buttons: Download (a photo or video), then
+                // More options.
+                let more = Rect::from_center_size(Pos2::new(row.right() - 24., row.center().y), Vec2::splat(32.));
+                let more_hit = ui.interact(more, ui.scope_id().with(("my-story-more", s.id, section.as_str())), Sense::click());
+                ui.painter().circle_filled(more.center(), 16., if more_hit.hovered() { palette.fill_pressed } else { palette.fill });
+                theme::paint_symbol(ui.painter(), "more", more.center(), 18., palette.text);
+                if more_hit.on_hover_text(tr("More options")).clicked() {
+                    crate::menu::open_at(ui.ctx(), menu, more.left_bottom());
+                }
+                if let StoryContent::Media { attachment, .. } = &s.content
+                    && let Some(path) = &attachment.local_path
+                {
+                    let dl = more.translate(Vec2::new(-40., 0.));
+                    let dl_hit = ui.interact(dl, ui.scope_id().with(("my-story-dl", s.id, section.as_str())), Sense::click());
+                    ui.painter().circle_filled(dl.center(), 16., if dl_hit.hovered() { palette.fill_pressed } else { palette.fill });
+                    theme::paint_symbol(ui.painter(), "download", dl.center(), 18., palette.text);
+                    if dl_hit.on_hover_text(tr("Download")).clicked() {
+                        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "story".into());
+                        if let Some(to) = rfd::FileDialog::new().set_file_name(&name).save_file() {
+                            let _ = std::fs::copy(path, to);
+                        }
+                    }
+                }
                 crate::menu::show(ui.ctx(), menu, |m| {
                     if let StoryContent::Media { attachment, .. } = &s.content
                         && let Some(path) = &attachment.local_path
@@ -590,6 +616,9 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                             let _ = std::fs::copy(path, to);
                         }
                     }
+                    if m.item(Some("info"), tr("Info")) {
+                        info = Some(s.id);
+                    }
                     if m.item(Some("trash"), tr("Delete")) {
                         delete = Some(s.id);
                     }
@@ -598,6 +627,15 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
             }
         });
     });
+    if let Some(id) = info {
+        app.panes.stories.info_of = Some(id);
+    }
+    // Its Info dialog, here as in the viewer.
+    if let Some(id) = app.panes.stories.info_of
+        && let Some(story) = mine.iter().find(|s| s.id == id).cloned()
+    {
+        info_modal(app, ui, &story);
+    }
     if let Some(i) = view {
         app.panes.stories.my_stories = false;
         app.panes.stories.viewer = Some(("me".into(), i, Instant::now()));
@@ -609,8 +647,15 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
 
 /// Paints a story's content into `rect`.
 fn paint_story(ui: &Ui, s: &Story, rect: Rect) -> Option<Rect> {
+    paint_story_caption(ui, s, rect, true).0
+}
+
+/// A story, its caption at most three lines unless `expanded`; returns the
+/// link card, and the caption's rect when it was cut short (Desktop's Read
+/// more).
+fn paint_story_caption(ui: &Ui, s: &Story, rect: Rect, expanded: bool) -> (Option<Rect>, Option<Rect>) {
     match &s.content {
-        StoryContent::Text(t) => paint_text_story(ui, t, rect, None).card,
+        StoryContent::Text(t) => (paint_text_story(ui, t, rect, None).card, None),
         StoryContent::Media { attachment, caption, .. } => {
             ui.painter().rect_filled(rect, CornerRadius::same(12), Color32::BLACK);
             match &attachment.local_path {
@@ -629,13 +674,26 @@ fn paint_story(ui: &Ui, s: &Story, rect: Rect) -> Option<Rect> {
                     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Downloading…", theme::regular(14.), Color32::from_white_alpha(200));
                 }
             }
+            let mut cut = None;
             if !caption.is_empty() {
-                let galley = ui.painter().layout(caption.clone(), theme::regular(14.), Color32::WHITE, rect.width() - 32.);
-                let at = Pos2::new(rect.left() + 16., rect.bottom() - galley.size().y - 16.);
-                ui.painter().rect_filled(Rect::from_min_size(at - Vec2::splat(6.), galley.size() + Vec2::splat(12.)), CornerRadius::same(8), Color32::from_black_alpha(120));
-                ui.painter().galley(at, galley, Color32::WHITE);
+                let mut job = egui::text::LayoutJob::simple(caption.clone(), theme::regular(14.), Color32::WHITE, rect.width() - 32.);
+                if !expanded {
+                    job.wrap.max_rows = 3;
+                    job.wrap.overflow_character = Some('\u{2026}');
+                }
+                let galley = ui.fonts_mut(|f| f.layout_job(job));
+                let elided = galley.elided;
+                let extra = if elided { 20. } else { 0. };
+                let at = Pos2::new(rect.left() + 16., rect.bottom() - galley.size().y - extra - 16.);
+                let back = Rect::from_min_size(at - Vec2::splat(6.), galley.size() + Vec2::new(12., 12. + extra));
+                ui.painter().rect_filled(back, CornerRadius::same(8), Color32::from_black_alpha(120));
+                ui.painter().galley(at, galley.clone(), Color32::WHITE);
+                if elided {
+                    ui.painter().text(Pos2::new(at.x, at.y + galley.size().y + 2.), egui::Align2::LEFT_TOP, tr("Read more"), theme::semibold(13.), Color32::WHITE);
+                    cut = Some(back);
+                }
             }
-            None
+            (None, cut)
         }
     }
 }
@@ -814,7 +872,15 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     let width = (height * 9. / 16.).min(full.width() - 120.);
     let rect = Rect::from_center_size(Pos2::new(full.center().x, full.top() + 24. + height / 2.), Vec2::new(width, height));
     // A text story's link opens from its card (Desktop's TextAttachment).
-    if let Some(card) = paint_story(ui, &story, rect)
+    let (card, cut) = paint_story_caption(ui, &story, rect, app.panes.stories.caption_open == Some(story.id));
+    // Desktop's Read more opens the whole caption.
+    if let Some(cut) = cut
+        && ui.interact(cut, ui.scope_id().with("story-read-more"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    {
+        app.panes.stories.caption_open = Some(story.id);
+        app.panes.stories.paused.get_or_insert_with(Instant::now);
+    }
+    if let Some(card) = card
         && let StoryContent::Text(TextStory { preview: Some(p), .. }) = &story.content
     {
         let hit = ui.interact(card, ui.scope_id().with("story-link"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(domain(&p.url));
