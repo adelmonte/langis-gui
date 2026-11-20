@@ -4,11 +4,12 @@
 use langis_store::{GroupNotice, Notice};
 
 use crate::format::timer_long;
+use crate::i18n::tr;
 
 /// `name(sid)` gives a person's display name (`sid` is never `None`).
 pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
     match notice {
-        Notice::Timer { by: None, seconds: 0 } => "You disabled disappearing messages.".into(),
+        Notice::Timer { by: None, seconds: 0 } => tr("You disabled disappearing messages.").into(),
         Notice::Timer { by: Some(by), seconds: 0 } => format!("{} disabled disappearing messages.", name(by)),
         Notice::Timer { by: None, seconds } => {
             format!("You set the disappearing message time to {}.", timer_long(*seconds))
@@ -16,7 +17,7 @@ pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
         Notice::Timer { by: Some(by), seconds } => {
             format!("{} set the disappearing message time to {}.", name(by), timer_long(*seconds))
         }
-        Notice::Pinned { by: None, .. } => "You pinned a message".into(),
+        Notice::Pinned { by: None, .. } => tr("You pinned a message").into(),
         Notice::Pinned { by: Some(by), .. } => format!("{} pinned a message", name(by)),
         Notice::Group { by, change } => group_text(by.as_deref(), change, name),
         Notice::SafetyNumberChanged { who } => format!("Your safety number with {} has changed.", name(who)),
@@ -31,10 +32,10 @@ pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
         // Desktop's `icu:ChangeNumber--notification`.
         Notice::NumberChanged { who } => format!("{} changed their phone number", name(who)),
         // `icu:ChatRefresh--notification`.
-        Notice::SessionRefreshed => "Chat session refreshed".into(),
+        Notice::SessionRefreshed => tr("Chat session refreshed").into(),
         // `icu:JoinedSignal--notification`.
-        Notice::JoinedSignal { .. } => "Contact joined Signal".into(),
-        Notice::SessionEnded => "Secure session reset".into(),
+        Notice::JoinedSignal { .. } => tr("Contact joined Signal").into(),
+        Notice::SessionEnded => tr("Secure session reset").into(),
         Notice::Merged { who, phone: Some(phone) } => format!("Your message history with {} and their number {phone} has been merged.", name(who)),
         Notice::Merged { who, phone: None } => format!("Your message history with {} and another chat that belonged to them has been merged.", name(who)),
         Notice::NumberIsTheirs { who, phone } => format!("{phone} belongs to {}", name(who)),
@@ -48,7 +49,7 @@ pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
             name(who)
         ),
         Notice::UnsupportedMessage { who: None } => {
-            "One of your devices sent a message that can't be processed or displayed because it uses a new Signal feature.".into()
+            tr("One of your devices sent a message that can't be processed or displayed because it uses a new Signal feature.").into()
         }
         // `icu:youMarkedAsVerified` and the rest (`VerificationNotification`).
         Notice::Verified { who, verified, local } => format!(
@@ -74,12 +75,12 @@ fn message_request_text(event: langis_store::MessageRequestEvent, group: bool, w
     use langis_store::MessageRequestEvent;
     match (event, group, who) {
         (MessageRequestEvent::Accept, false, Some(who)) => format!("You accepted {}'s message request", name(who)),
-        (MessageRequestEvent::Accept, _, _) => "You accepted the message request".into(),
-        (MessageRequestEvent::Block, true, _) => "You blocked the group".into(),
-        (MessageRequestEvent::Block, false, _) => "You blocked this person".into(),
-        (MessageRequestEvent::Unblock, true, _) => "You unblocked the group".into(),
-        (MessageRequestEvent::Unblock, false, _) => "You unblocked this person".into(),
-        (MessageRequestEvent::Spam, _, _) => "Reported as spam".into(),
+        (MessageRequestEvent::Accept, _, _) => tr("You accepted the message request").into(),
+        (MessageRequestEvent::Block, true, _) => tr("You blocked the group").into(),
+        (MessageRequestEvent::Block, false, _) => tr("You blocked this person").into(),
+        (MessageRequestEvent::Unblock, true, _) => tr("You unblocked the group").into(),
+        (MessageRequestEvent::Unblock, false, _) => tr("You unblocked this person").into(),
+        (MessageRequestEvent::Spam, _, _) => tr("Reported as spam").into(),
     }
 }
 
@@ -119,19 +120,19 @@ pub fn call_text(incoming: bool, video: bool, outcome: langis_store::CallOutcome
 fn group_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -> String) -> String {
     let who = by.map(&name);
     // "You …" or "Alice …".
-    let actor = || who.clone().unwrap_or_else(|| "You".into());
+    let actor = || who.clone().unwrap_or_else(|| tr("You").into());
     let admins_only = |only: bool| if only { "Only admins." } else { "All members." };
     match change {
         GroupNotice::Title { title } if title.is_empty() => format!("{} removed the group name.", actor()),
         GroupNotice::Title { title } => format!("{} changed the group name to \"{title}\".", actor()),
         GroupNotice::Description => format!("{} changed the group description.", actor()),
         GroupNotice::Avatar => format!("{} changed the group avatar.", actor()),
-        GroupNotice::Added { member: None } if by.is_none() => "You joined the group.".into(),
+        GroupNotice::Added { member: None } if by.is_none() => tr("You joined the group.").into(),
         GroupNotice::Added { member: None } => format!("{} added you to the group.", actor()),
         GroupNotice::Added { member: Some(m) } if by.is_none() => format!("You added {}.", name(m)),
         GroupNotice::Added { member: Some(m) } if by == Some(m.as_str()) => format!("{} joined the group.", name(m)),
         GroupNotice::Added { member: Some(m) } => format!("{} added {}.", actor(), name(m)),
-        GroupNotice::Removed { member: None } if by.is_none() => "You left the group.".into(),
+        GroupNotice::Removed { member: None } if by.is_none() => tr("You left the group.").into(),
         GroupNotice::Removed { member: None } => format!("{} removed you.", actor()),
         GroupNotice::Removed { member: Some(m) } if by == Some(m.as_str()) => format!("{} left the group.", name(m)),
         GroupNotice::Removed { member: Some(m) } if by.is_none() => format!("You removed {}.", name(m)),
@@ -179,15 +180,15 @@ fn invitations(count: u32) -> String {
 fn membership_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -> String) -> String {
     use langis_store::Inviter;
     let who = by.map(&name);
-    let actor = || who.clone().unwrap_or_else(|| "You".into());
+    let actor = || who.clone().unwrap_or_else(|| tr("You").into());
     let same = |member: &Option<String>| member.as_deref() == by;
     match change {
-        GroupNotice::JoinedByLink { member: None } => "You joined the group via the group link.".into(),
+        GroupNotice::JoinedByLink { member: None } => tr("You joined the group via the group link.").into(),
         GroupNotice::JoinedByLink { member: Some(m) } => format!("{} joined the group via the group link.", name(m)),
         GroupNotice::AcceptedInvite { member: None, inviter: Inviter::Person { id } } => {
             format!("You accepted an invitation to the group from {}.", name(id))
         }
-        GroupNotice::AcceptedInvite { member: None, .. } => "You accepted an invitation to the group.".into(),
+        GroupNotice::AcceptedInvite { member: None, .. } => tr("You accepted an invitation to the group.").into(),
         GroupNotice::AcceptedInvite { member: Some(m), inviter: Inviter::Us } => {
             format!("{} accepted your invitation to the group.", name(m))
         }
@@ -199,7 +200,7 @@ fn membership_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -
         }
         GroupNotice::Approved { member: None } => match &who {
             Some(admin) => format!("{admin} approved your request to join the group."),
-            None => "Your request to join the group has been approved.".into(),
+            None => tr("Your request to join the group has been approved.").into(),
         },
         GroupNotice::Approved { member: Some(m) } => match &who {
             Some(admin) => format!("{admin} approved a request to join the group from {}.", name(m)),
@@ -207,7 +208,7 @@ fn membership_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -
         },
         GroupNotice::Invited { member: None } => match &who {
             Some(admin) => format!("{admin} invited you to the group."),
-            None => "You were invited to the group.".into(),
+            None => tr("You were invited to the group.").into(),
         },
         GroupNotice::Invited { member: Some(m) } => match &who {
             Some(member) => format!("{member} invited 1 person to the group."),
@@ -222,9 +223,9 @@ fn membership_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -
                     Some(admin) => format!("{admin} revoked the invitation to the group you sent to {}.", invitee()),
                     None => format!("You rescinded your invitation to {}.", invitee()),
                 },
-                (_, true) if by.is_none() => "You declined the invitation to the group.".into(),
+                (_, true) if by.is_none() => tr("You declined the invitation to the group.").into(),
                 (Inviter::Person { id }, true) => format!("1 person invited by {} declined the invitation to the group.", name(id)),
-                (_, true) => "1 person declined their invitation to the group.".into(),
+                (_, true) => tr("1 person declined their invitation to the group.").into(),
                 (Inviter::Person { id }, false) if by == Some(id.as_str()) => match member {
                     None => format!("{} revoked their invitation to you.", name(id)),
                     Some(_) => format!("{} revoked their invitation to 1 person.", name(id)),
@@ -250,10 +251,10 @@ fn membership_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -
             Inviter::Person { id } => format!("{} revoked {} invited by {}.", actor(), invitations(*count), name(id)),
             Inviter::Unknown => format!("{} revoked {}.", actor(), invitations(*count)),
         },
-        GroupNotice::Requested { member: None } => "You sent a request to join the group.".into(),
+        GroupNotice::Requested { member: None } => tr("You sent a request to join the group.").into(),
         GroupNotice::Requested { member: Some(m) } => format!("{} requested to join via the group link.", name(m)),
-        GroupNotice::RequestRemoved { member: None } if by.is_none() => "You canceled your request to join the group.".into(),
-        GroupNotice::RequestRemoved { member: None } => "Your request to join the group has been denied by an admin.".into(),
+        GroupNotice::RequestRemoved { member: None } if by.is_none() => tr("You canceled your request to join the group.").into(),
+        GroupNotice::RequestRemoved { member: None } => tr("Your request to join the group has been denied by an admin.").into(),
         GroupNotice::RequestRemoved { member: Some(m) } if by == Some(m.as_str()) => {
             format!("{} canceled their request to join the group.", name(m))
         }

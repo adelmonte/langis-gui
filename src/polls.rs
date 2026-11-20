@@ -7,6 +7,7 @@ use langis_core::Command;
 use crate::actions::Do;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// Desktop's limits (`POLL_QUESTION_MAX_LENGTH`, `POLL_OPTION_MAX_LENGTH`,
 /// `POLL_OPTIONS_MAX_COUNT`).
@@ -33,16 +34,16 @@ impl NewPoll {
     fn check(&self) -> Result<(), &'static str> {
         let question = self.question.trim();
         if question.is_empty() {
-            return Err("Poll question is required");
+            return Err(tr("Poll question is required"));
         }
         if question.chars().count() > QUESTION_MAX {
-            return Err("Question is too long");
+            return Err(tr("Question is too long"));
         }
         if self.options.iter().any(|o| o.trim().chars().count() > OPTION_MAX) {
-            return Err("Option is too long");
+            return Err(tr("Option is too long"));
         }
         if self.options.iter().filter(|o| !o.trim().is_empty()).count() < 2 {
-            return Err("Poll requires at least 2 options");
+            return Err(tr("Poll requires at least 2 options"));
         }
         Ok(())
     }
@@ -51,12 +52,12 @@ impl NewPoll {
 /// The "New poll" dialog's body; Send gives the command.
 pub fn dialog(ui: &mut Ui, palette: &Palette, poll: &mut NewPoll, conversation: &langis_store::ConversationId, out: &mut Vec<Do>) {
     ui.set_width(400.);
-    ui.label(RichText::new("New poll").font(theme::semibold(18.)));
+    ui.label(RichText::new(tr("New poll")).font(theme::semibold(18.)));
     ui.add_space(12.);
-    ui.label(RichText::new("Question").font(theme::medium(13.)).color(palette.text_secondary));
-    widgets::text_field(ui, &mut poll.question, "Ask a question", false);
+    ui.label(RichText::new(tr("Question")).font(theme::medium(13.)).color(palette.text_secondary));
+    widgets::text_field(ui, &mut poll.question, tr("Ask a question"), false);
     ui.add_space(12.);
-    ui.label(RichText::new("Options").font(theme::medium(13.)).color(palette.text_secondary));
+    ui.label(RichText::new(tr("Options")).font(theme::medium(13.)).color(palette.text_secondary));
     let mut remove = None;
     for i in 0..poll.options.len() {
         ui.horizontal(|ui| {
@@ -81,7 +82,7 @@ pub fn dialog(ui: &mut Ui, palette: &Palette, poll: &mut NewPoll, conversation: 
     ui.add_space(8.);
     ui.horizontal(|ui| {
         widgets::switch(ui, &mut poll.allow_multiple);
-        ui.label(RichText::new("Allow multiple votes").font(theme::regular(14.)));
+        ui.label(RichText::new(tr("Allow multiple votes")).font(theme::regular(14.)));
     });
     if let Some(error) = poll.error {
         ui.add_space(8.);
@@ -89,7 +90,7 @@ pub fn dialog(ui: &mut Ui, palette: &Palette, poll: &mut NewPoll, conversation: 
     }
     ui.add_space(16.);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if widgets::pill_button(ui, "Send", true).clicked() {
+        if widgets::pill_button(ui, tr("Send"), true).clicked() {
             match poll.check() {
                 Ok(()) => {
                     let options = poll.options.iter().map(|o| o.trim().to_owned()).filter(|o| !o.is_empty()).collect();
@@ -104,7 +105,7 @@ pub fn dialog(ui: &mut Ui, palette: &Palette, poll: &mut NewPoll, conversation: 
                 Err(error) => poll.error = Some(error),
             }
         }
-        if widgets::pill_button(ui, "Cancel", false).clicked() {
+        if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
             out.push(Do::Close);
         }
     });

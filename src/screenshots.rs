@@ -593,3 +593,21 @@ fn screenshots_menus() {
     save(&mut harness, "dialog-delete-chat");
 }
 
+
+/// The app in German: Settings and a chat, from Desktop's translations.
+#[test]
+#[ignore = "renders with a GPU driver; run explicitly"]
+fn screenshots_language() {
+    let mut harness = demo_harness();
+    crate::i18n::set_locale("de");
+    open_chat(&mut harness, langis_store::ConversationKind::Group);
+    wait(&mut harness, "chat", |_| true);
+    save(&mut harness, "lang-de-chat");
+    harness.state_mut().tab = crate::app::Tab::Settings;
+    harness.state_mut().settings.page = crate::settings::Page::Appearance;
+    harness.state_mut().settings.stale = true;
+    wait(&mut harness, "settings", |app| app.settings.snapshot.is_some());
+    save(&mut harness, "lang-de-settings");
+    crate::i18n::set_locale("en");
+    finish(harness);
+}

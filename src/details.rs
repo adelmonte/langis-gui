@@ -13,6 +13,7 @@ use crate::icons::Icon;
 use crate::panes::{ChatConfirm, body, buttons, modal, title};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
@@ -151,7 +152,7 @@ pub fn timer_picker(ui: &mut Ui, id: &str, seconds: &mut u32, custom: &mut bool)
             ui.selectable_value(seconds, *s, *l);
         }
         // Desktop's `DisappearingTimerSelect` ends with Custom time.
-        if ui.selectable_label(false, "Custom time…").clicked() {
+        if ui.selectable_label(false, tr("Custom time…")).clicked() {
             *custom = true;
         }
     });
@@ -176,7 +177,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1., palette.border));
             ui.horizontal_centered(|ui| {
                 ui.add_space(12.);
-                if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() {
+                if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() {
                     match page {
                         Page::Main => app.panes.details = None,
                         _ => {
@@ -190,16 +191,16 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 let heading = match page {
                     Page::Main => {
                         if c.kind == ConversationKind::Group {
-                            "Group settings"
+                            tr("Group settings")
                         } else {
-                            "Chat settings"
+                            tr("Chat settings")
                         }
                     }
                     Page::Safety => "Safety number",
-                    Page::GroupLink => "Group link",
+                    Page::GroupLink => tr("Group link"),
                     Page::Requests => "Requests and invites",
-                    Page::Permissions => "Permissions",
-                    Page::ChatColor => "Chat Color",
+                    Page::Permissions => tr("Permissions"),
+                    Page::ChatColor => tr("Chat Color"),
                     Page::AllMedia => "",
                 };
                 ui.label(RichText::new(heading).font(theme::semibold(14.)));
@@ -291,7 +292,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 // Desktop's "Add group description..." for those who can.
                 None if c.can_edit_info => {
                     ui.add_space(4.);
-                    if ui.add(egui::Label::new(RichText::new("Add group description...").font(theme::regular(14.)).color(palette.text_secondary)).sense(egui::Sense::click())).clicked()
+                    if ui.add(egui::Label::new(RichText::new(tr("Add group description...")).font(theme::regular(14.)).color(palette.text_secondary)).sense(egui::Sense::click())).clicked()
                         && let Some(d) = app.panes.details.as_mut()
                     {
                         d.edit_info = Some((c.title.clone(), String::new()));
@@ -322,21 +323,21 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     // Disappearing messages, nickname, chat color, media, safety number.
     axo_list::list(ui, None, None, |ui| {
         let info = if group {
-            "When enabled, messages sent and received in this group will disappear after they've been seen."
+            tr("When enabled, messages sent and received in this group will disappear after they've been seen.")
         } else {
-            "When enabled, messages sent and received in this 1:1 chat will disappear after they've been seen."
+            tr("When enabled, messages sent and received in this 1:1 chat will disappear after they've been seen.")
         };
         let mut values: Vec<u32> = TIMERS.iter().map(|(v, _)| *v).filter(|v| *v != u32::MAX).collect();
         values.sort_by_key(|v| if *v == 0 { 0 } else { u32::MAX - v });
         if !values.contains(&c.expire_timer) {
             values.push(c.expire_timer);
         }
-        let mut labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
+        let mut labels: Vec<String> = values.iter().map(|v| if *v == 0 { tr("Off").to_owned() } else { crate::format::timer_long(*v) }).collect();
         // Desktop's `DisappearingTimerSelect` ends with Custom time.
-        labels.push("Custom time…".to_owned());
+        labels.push(tr("Custom time…").to_owned());
         let options: Vec<&str> = labels.iter().map(String::as_str).collect();
         let chosen = values.iter().position(|v| *v == c.expire_timer);
-        let item = Item::new("Disappearing messages").symbol("timer-slash").description(info).disabled(group && !c.can_edit_info);
+        let item = Item::new(tr("Disappearing messages")).symbol("timer-slash").description(info).disabled(group && !c.can_edit_info);
         if let Some(i) = axo_list::select(ui, egui::Id::unique("details-timer").with(&c.id.0), item, &options, chosen) {
             if i == values.len() {
                 let (value, unit) = crate::panes::custom_timer_start(if c.expire_timer > 0 { c.expire_timer } else { 3_600 });
@@ -345,24 +346,24 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 app.send(Command::SetExpireTimer { conversation: c.id.clone(), seconds: values[i] });
             }
         }
-        if c.kind == ConversationKind::Direct && axo_list::item(ui, Item::new("Nickname").symbol("pencil"), End::Click).clicked() {
+        if c.kind == ConversationKind::Direct && axo_list::item(ui, Item::new(tr("Nickname")).symbol("pencil"), End::Click).clicked() {
             let current = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()).and_then(|ct| ct.nickname.clone()).unwrap_or_default();
             if let Some(d) = app.panes.details.as_mut() {
                 d.nickname = Some(current);
             }
         }
         let bubble = crate::chat_colors::for_chat(app, &c.id);
-        if axo_list::item(ui, Item::new("Chat color").symbol("palette"), End::Swatch(bubble)).clicked() {
+        if axo_list::item(ui, Item::new(tr("Chat color")).symbol("palette"), End::Swatch(bubble)).clicked() {
             set_page(app, Page::ChatColor);
         }
         let has_media = app.panes.details.as_ref().and_then(|d| d.media.as_ref()).is_some_and(|m| !m.is_empty());
-        if has_media && axo_list::item(ui, Item::new("Media, links, and files").symbol("album"), End::Arrow(None)).clicked() {
+        if has_media && axo_list::item(ui, Item::new(tr("Media, links, and files")).symbol("album"), End::Arrow(None)).clicked() {
             set_page(app, Page::AllMedia);
         }
         if c.kind == ConversationKind::Direct {
             let verified = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()).is_some_and(|ct| ct.verified);
-            let item = Item::new("View Safety Number").symbol("shield-check");
-            if axo_list::item(ui, item, End::Arrow(verified.then_some("Verified"))).clicked() {
+            let item = Item::new(tr("View Safety Number")).symbol("shield-check");
+            if axo_list::item(ui, item, End::Arrow(verified.then_some(tr("Verified")))).clicked() {
                 app.send(Command::LoadSafetyNumber { conversation: c.id.clone() });
                 if let Some(d) = app.panes.details.as_mut() {
                     d.page = Page::Safety;
@@ -376,22 +377,22 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     // `ConversationNotificationsSettings`: mute, and until when.
     if c.kind != ConversationKind::NoteToSelf {
         axo_list::gap(ui);
-        axo_list::list(ui, Some("Notifications"), None, |ui| {
+        axo_list::list(ui, Some(tr("Notifications")), None, |ui| {
             let state = if !c.muted {
-                "Not muted".to_owned()
+                tr("Not muted").to_owned()
             } else if c.muted_until == i64::MAX {
-                "Muted always".to_owned()
+                tr("Muted always").to_owned()
             } else {
                 format!("Muted until {}", crate::format::short_timestamp(c.muted_until))
             };
-            let r = axo_list::item(ui, Item::new("Mute notifications").symbol(if c.muted { "bell-slash" } else { "bell" }), End::Arrow(Some(&state)));
+            let r = axo_list::item(ui, Item::new(tr("Mute notifications")).symbol(if c.muted { "bell-slash" } else { "bell" }), End::Arrow(Some(&state)));
             let menu = egui::Id::unique("details-mute").with(&c.id.0);
             if r.clicked() {
                 crate::menu::open_at(ui.ctx(), menu, r.row.rect.right_bottom() - egui::vec2(220., 0.));
             }
             crate::menu::show(ui.ctx(), menu, |m| {
                 if c.muted {
-                    if m.item(Some("bell"), "Unmute") {
+                    if m.item(Some("bell"), tr("Unmute")) {
                         app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(0) });
                     }
                 } else {
@@ -402,7 +403,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             // mentions anyway or not.
             if c.kind == ConversationKind::Group {
                 let options = ["Always notify", "Don't notify"];
-                let item = Item::new("Mentions").symbol("at").description("Receive notifications when you're mentioned in muted chats");
+                let item = Item::new(tr("Mentions")).symbol("at").description("Receive notifications when you're mentioned in muted chats");
                 if let Some(i) = axo_list::select(ui, egui::Id::unique(("details-mentions", c.id.0.as_str())), item, &options, Some(c.dont_notify_mentions as usize)) {
                     let off = i == 1;
                     if off != c.dont_notify_mentions {
@@ -453,10 +454,10 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         .unwrap_or_default();
     if !calls.is_empty() {
         axo_list::gap(ui);
-        axo_list::list(ui, Some("Calls"), None, |ui| {
+        axo_list::list(ui, Some(tr("Calls")), None, |ui| {
             for (text, at) in &calls {
                 let when = crate::format::short_timestamp(*at);
-                axo_list::item(ui, Item::new(text).symbol("phone"), End::Arrow(Some(&when)));
+                axo_list::item(ui, Item::new(text).symbol(tr("phone")), End::Arrow(Some(&when)));
             }
         });
     }
@@ -473,7 +474,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             format!("{count} members")
         };
         axo_list::list(ui, Some(&title), None, |ui| {
-            if c.can_add_members && !c.left && axo_list::item(ui, Item::new("Add members").symbol("plus"), End::Click).clicked()
+            if c.can_add_members && !c.left && axo_list::item(ui, Item::new(tr("Add members")).symbol("plus"), End::Click).clicked()
                 && let Some(d) = app.panes.details.as_mut()
             {
                 d.add_members = Some((String::new(), Vec::new()));
@@ -488,12 +489,12 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 ui.horizontal(|ui| {
                     ui.add_space(12.);
                     ui.set_width(ui.available_width() - 12.);
-                    widgets::text_field(ui, &mut d.member_query, "Search members", false);
+                    widgets::text_field(ui, &mut d.member_query, tr("Search members"), false);
                 });
                 ui.add_space(4.);
             }
             let (query, all) = app.panes.details.as_ref().map(|d| (d.member_query.trim().to_lowercase(), d.all_members)).unwrap_or_default();
-            let names: Vec<(String, String)> = everyone.into_iter().map(|m| { let n = if m == me { "You".to_owned() } else { app.name(&m) }; (m, n) }).collect();
+            let names: Vec<(String, String)> = everyone.into_iter().map(|m| { let n = if m == me { tr("You").to_owned() } else { app.name(&m) }; (m, n) }).collect();
             let matching: Vec<(String, String)> = names.into_iter().filter(|(_, n)| query.is_empty() || n.to_lowercase().contains(&query)).collect();
             let hidden = if query.is_empty() && !all && long { matching.len().saturating_sub(SHOWN) } else { 0 };
             for (m, name) in matching.into_iter().take(if hidden > 0 { SHOWN } else { usize::MAX }) {
@@ -502,21 +503,21 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 let label = c.member_labels.get(&m).map(|l| format!("{} {}", l.emoji.clone().unwrap_or_default(), l.text).trim().to_owned());
                 let color = m.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
                 let photo = if you { app.me.1.clone() } else { app.conversation(&ConversationId::direct(&m)).and_then(|p| p.avatar_path.clone()) };
-                let row = member_row(ui, palette, &name, label.as_deref(), color, photo.as_deref(), is_admin.then_some("Admin"));
+                let row = member_row(ui, palette, &name, label.as_deref(), color, photo.as_deref(), is_admin.then_some(tr("Admin")));
                 if !you && row.clicked() {
                     crate::contact_modal::open(app, Some(c.id.clone()), m.clone());
                 }
                 if !you {
                     crate::menu::context(ui, &row, egui::Id::unique("details-member").with(&m), |menu| {
-                        if menu.item(Some("message"), "Message") {
+                        if menu.item(Some("message"), tr("Message")) {
                             app.panes.details = None;
                             app.open(ConversationId::direct(&m));
                         }
                         if admin {
-                            if menu.item(Some("key"), if is_admin { "Remove as admin" } else { "Make admin" }) {
+                            if menu.item(Some("key"), if is_admin { tr("Remove as admin") } else { tr("Make admin") }) {
                                 crate::contact_modal::confirm_member(app, c.id.clone(), m.clone(), true);
                             }
-                            if menu.item(Some("minus-circle"), "Remove from group") {
+                            if menu.item(Some("minus-circle"), tr("Remove from group")) {
                                 crate::contact_modal::confirm_member(app, c.id.clone(), m.clone(), false);
                             }
                         }
@@ -535,13 +536,13 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         axo_list::gap(ui);
         axo_list::list(ui, None, None, |ui| {
             let state = &c.group_state;
-            if (admin || state.link.is_some()) && axo_list::item(ui, Item::new("Group link").symbol("link"), End::Arrow(Some(if state.link.is_some() { "On" } else { "Off" }))).clicked() {
+            if (admin || state.link.is_some()) && axo_list::item(ui, Item::new(tr("Group link")).symbol("link"), End::Arrow(Some(if state.link.is_some() { tr("On") } else { tr("Off") }))).clicked() {
                 set_page(app, Page::GroupLink);
             }
             if !c.left && c.can_label {
                 let mine = c.member_labels.get(&me).map(|l| l.text.clone()).unwrap_or_default();
                 let emoji = c.member_labels.get(&me).and_then(|l| l.emoji.clone()).unwrap_or_default();
-                if axo_list::item(ui, Item::new("Member label").symbol("label"), End::Arrow(None)).clicked()
+                if axo_list::item(ui, Item::new(tr("Member label")).symbol("label"), End::Arrow(None)).clicked()
                     && let Some(d) = app.panes.details.as_mut()
                 {
                     d.label = Some(mine);
@@ -550,10 +551,10 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
             let waiting = state.invites.len() + state.requests.len();
             let count = waiting.to_string();
-            if axo_list::item(ui, Item::new("Requests & Invites").symbol("group"), End::Arrow((waiting > 0).then_some(count.as_str()))).clicked() {
+            if axo_list::item(ui, Item::new(tr("Requests & Invites")).symbol("group"), End::Arrow((waiting > 0).then_some(count.as_str()))).clicked() {
                 set_page(app, Page::Requests);
             }
-            if admin && axo_list::item(ui, Item::new("Permissions").symbol("key"), End::Arrow(None)).clicked() {
+            if admin && axo_list::item(ui, Item::new(tr("Permissions")).symbol("key"), End::Arrow(None)).clicked() {
                 set_page(app, Page::Permissions);
             }
         });
@@ -565,32 +566,32 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         axo_list::gap(ui);
         axo_list::list(ui, None, None, |ui| {
             let red = |item: Item<'static>| Item { destructive: true, ..item };
-            if group && !c.left && !c.ended && axo_list::item(ui, red(Item::new("Leave group").symbol("leave")), End::Click).clicked() {
+            if group && !c.left && !c.ended && axo_list::item(ui, red(Item::new(tr("Leave group")).symbol("leave")), End::Click).clicked() {
                 confirm = Some(ChatConfirm::Leave);
             }
             let label = match (group, c.blocked) {
-                (true, false) => "Block group",
-                (true, true) => "Unblock group",
-                (false, false) => "Block",
-                (false, true) => "Unblock",
+                (true, false) => tr("Block group"),
+                (true, true) => tr("Unblock group"),
+                (false, false) => tr("Block"),
+                (false, true) => tr("Unblock"),
             };
             if axo_list::item(ui, red(Item::new(label).symbol("block")), End::Click).clicked() {
                 confirm = Some(if c.blocked { ChatConfirm::Unblock } else { ChatConfirm::Block });
             }
-            if axo_list::item(ui, Item::new(if c.archived { "Unarchive chat" } else { "Archive chat" }).symbol("archive"), End::Click).clicked() {
+            if axo_list::item(ui, Item::new(if c.archived { tr("Unarchive chat") } else { tr("Archive chat") }).symbol("archive"), End::Click).clicked() {
                 app.set_archived(c.id.clone(), !c.archived);
             }
-            if (c.ended || c.left) && axo_list::item(ui, red(Item::new("Delete chat").symbol("trash")), End::Click).clicked() {
+            if (c.ended || c.left) && axo_list::item(ui, red(Item::new(tr("Delete chat")).symbol("trash")), End::Click).clicked() {
                 app.panes.delete_chat = Some((c.id.clone(), false));
             }
-            if !c.blocked && axo_list::item(ui, red(Item::new("Report spam").symbol("error-octagon")), End::Click).clicked() {
+            if !c.blocked && axo_list::item(ui, red(Item::new(tr("Report spam")).symbol("error-octagon")), End::Click).clicked() {
                 confirm = Some(ChatConfirm::ReportSpam);
             }
         });
         if group && admin && !c.left && !c.ended {
             axo_list::gap(ui);
             axo_list::list(ui, None, None, |ui| {
-                if axo_list::item(ui, Item { destructive: true, ..Item::new("End group").symbol("x-circle") }, End::Click).clicked() {
+                if axo_list::item(ui, Item { destructive: true, ..Item::new(tr("End group")).symbol("x-circle") }, End::Click).clicked() {
                     confirm = Some(ChatConfirm::End);
                 }
             });
@@ -670,7 +671,7 @@ fn header_buttons(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversatio
         let disabled = matches!(*label, "Video" | "Audio") && !callable;
         let color = if disabled { palette.text_secondary } else { palette.text };
         theme::paint_symbol(ui.painter(), symbol, pill.center(), 18., color);
-        ui.painter().text(egui::pos2(cell.center().x, pill.bottom() + 6.), egui::Align2::CENTER_TOP, *label, theme::medium(11.), color);
+        ui.painter().text(egui::pos2(cell.center().x, pill.bottom() + 6.), egui::Align2::CENTER_TOP, tr(label), theme::medium(11.), color);
         let clicked = response.clicked();
         match *label {
             "Video" if clicked && callable => start_call(app, c, true),
@@ -736,10 +737,10 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 body(ui, palette, &format!("To verify end-to-end encryption with {}, compare the numbers above with their device. They can also scan your code with their device.", c.title));
                 ui.add_space(16.);
                 if number.verified {
-                    ui.label(RichText::new("Verified").font(theme::medium(14.)).color(palette.green));
+                    ui.label(RichText::new(tr("Verified")).font(theme::medium(14.)).color(palette.green));
                 }
                 ui.add_space(8.);
-                let label = if number.verified { "Clear verification" } else { "Mark as verified" };
+                let label = if number.verified { tr("Clear verification") } else { tr("Mark as verified") };
                 if widgets::pill_button(ui, label, !number.verified).clicked() {
                     app.send(Command::SetVerified { conversation: c.id.clone(), verified: !number.verified });
                 }
@@ -747,7 +748,7 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     ui.add_space(8.);
                     match kt {
                         None => {
-                            if widgets::pill_button(ui, "Verify automatically", false).clicked() {
+                            if widgets::pill_button(ui, tr("Verify automatically"), false).clicked() {
                                 app.send(Command::CheckKeyTransparency { conversation: c.id.clone() });
                                 if let Some(d) = app.panes.details.as_mut() {
                                     d.key_transparency = Some(false);
@@ -775,7 +776,7 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
     axo_list::list(ui, None, None, |ui| {
         let mut on = link.is_some();
         let url = link.as_ref().map(|l| l.url.clone());
-        let mut item = Item::new("Group link").disabled(!admin);
+        let mut item = Item::new(tr("Group link")).disabled(!admin);
         if let Some(url) = &url {
             item = item.description(url);
         }
@@ -787,7 +788,7 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
     let ask = egui::Id::unique("reset-group-link");
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
-        if axo_list::item(ui, Item::new("Copy link").symbol("copy"), End::Click).clicked() {
+        if axo_list::item(ui, Item::new(tr("Copy link")).symbol("copy"), End::Click).clicked() {
             ui.ctx().copy_text(link.url.clone());
             app.toast("Group link copied.");
         }
@@ -802,7 +803,7 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
         {
             d.link_qr = true;
         }
-        if admin && axo_list::item(ui, Item::new("Reset link").symbol("arrow-clockwise"), End::Click).clicked() {
+        if admin && axo_list::item(ui, Item::new(tr("Reset link")).symbol("arrow-clockwise"), End::Click).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(ask, true));
         }
     });
@@ -811,15 +812,15 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
         axo_list::gap(ui);
         axo_list::list(ui, None, None, |ui| {
             let mut approval = link.approval;
-            let item = Item::new("Require admin approval").description("Require an admin to approve new members joining via the group link");
+            let item = Item::new(tr("Require admin approval")).description(tr("Require an admin to approve new members joining via the group link"));
             if axo_list::switch(ui, item, &mut approval) {
                 app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: LinkChange::Approval(approval) });
             }
         });
     }
     if ui.ctx().data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
-        let body = "Are you sure you want to reset the group link? People will no longer be able to join the group using the current link.";
-        let answer = crate::dialog::confirm(ui.ctx(), ask.with("dialog"), body, "", "Reset link", crate::dialog::Variant::StrongDestructive);
+        let body = tr("Are you sure you want to reset the group link? People will no longer be able to join the group using the current link.");
+        let answer = crate::dialog::confirm(ui.ctx(), ask.with("dialog"), body, "", tr("Reset link"), crate::dialog::Variant::StrongDestructive);
         if answer == Some(crate::dialog::Choice::Action) {
             app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: LinkChange::Reset });
         }
@@ -845,7 +846,7 @@ fn share_link_dialogs(app: &mut App, ui: &mut Ui, url: &str, c: &Conversation) {
                 ui.add_space(12.);
                 body(ui, &palette, "Anyone with a Signal account can scan this to ask to join the group.");
             });
-            done = crate::panes::buttons(ui, &["Done"]).is_some();
+            done = crate::panes::buttons(ui, &[tr("Done")]).is_some();
         });
         if (done || closed)
             && let Some(d) = app.panes.details.as_mut()
@@ -857,7 +858,7 @@ fn share_link_dialogs(app: &mut App, ui: &mut Ui, url: &str, c: &Conversation) {
     let mut answer = None;
     let closed = crate::panes::modal(ui, "share-group-link", 400., |ui| {
         crate::panes::title(ui, "Share group link");
-        widgets::text_field(ui, &mut query, "Search", false);
+        widgets::text_field(ui, &mut query, tr("Search"), false);
         ui.add_space(6.);
         let q = query.trim().to_lowercase();
         egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
@@ -872,7 +873,7 @@ fn share_link_dialogs(app: &mut App, ui: &mut Ui, url: &str, c: &Conversation) {
                 }
             }
         });
-        answer = crate::panes::buttons(ui, &["Send", "Cancel"]);
+        answer = crate::panes::buttons(ui, &[tr("Send"), tr("Cancel")]);
     });
     match answer {
         Some(0) if !chosen.is_empty() => {
@@ -932,7 +933,7 @@ fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             (format!("Deny the request from \u{201c}{name}\u{201d}?"), "Deny request", Variant::StrongDestructive)
         };
         let body_text = if approve { "" } else { "They won't be able to ask to join with the group link again." };
-        match crate::dialog::show(ui.ctx(), egui::Id::unique("answer-join-request"), &title, body_text, Some("Cancel"), &[(action, variant)]) {
+        match crate::dialog::show(ui.ctx(), egui::Id::unique("answer-join-request"), &title, body_text, Some(tr("Cancel")), &[(action, variant)]) {
             Some(Answer::Action(_)) => {
                 app.send(Command::AnswerJoinRequest { conversation: c.id.clone(), member: aci, approve });
                 if let Some(d) = app.panes.details.as_mut() {
@@ -949,7 +950,7 @@ fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     }
     // Desktop's `PendingInvites`: ours one by one, others' by who invited.
     let (ours, theirs): (Vec<_>, Vec<_>) = state.invites.iter().partition(|i| i.by == app.aci);
-    ui.label(RichText::new("Invited by you").font(theme::semibold(14.)));
+    ui.label(RichText::new(tr("Invited by you")).font(theme::semibold(14.)));
     ui.add_space(6.);
     section(ui, palette, |ui| {
         if ours.is_empty() {
@@ -996,7 +997,7 @@ fn permissions(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation)
     let ask = egui::Id::unique("confirm-label-access");
     if ui.ctx().data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
         let body_text = "Members who aren't admins will lose their member labels, and only admins will be able to set them.";
-        match crate::dialog::confirm(ui.ctx(), ask.with("dialog"), "Only admins can set labels?", body_text, "Change", crate::dialog::Variant::StrongPrimary) {
+        match crate::dialog::confirm(ui.ctx(), ask.with("dialog"), "Only admins can set labels?", body_text, tr("Change"), crate::dialog::Variant::StrongPrimary) {
             Some(crate::dialog::Choice::Action) => {
                 app.send(Command::SetGroupPermission { conversation: c.id.clone(), permission: Permission::SetMemberLabels { admins_only: true } });
                 ui.ctx().data_mut(|d| d.remove::<bool>(ask));
@@ -1008,7 +1009,7 @@ fn permissions(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation)
     let state = &c.group_state;
     crate::axo_list::list(ui, None, None, |ui| {
         let choices: [(&str, bool, fn(bool) -> Permission); 4] = [
-            ("Add members", state.members_admins_only, |a| Permission::AddMembers { admins_only: a }),
+            (tr("Add members"), state.members_admins_only, |a| Permission::AddMembers { admins_only: a }),
             ("Edit group info", state.info_admins_only, |a| Permission::EditInfo { admins_only: a }),
             ("Send messages", state.announcements_only, |a| Permission::SendMessages { admins_only: a }),
             ("Set member labels", state.labels_admins_only, |a| Permission::SetMemberLabels { admins_only: a }),
@@ -1016,7 +1017,7 @@ fn permissions(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation)
         // Desktop's permission rows: each a select of All members or
         // Only admins.
         for (label, admins_only, make) in choices {
-            let options = ["All members", "Only admins"];
+            let options = [tr("All members"), "Only admins"];
             if let Some(i) = crate::axo_list::select(ui, egui::Id::unique(("group-permission", label)), crate::axo_list::Item::new(label), &options, Some(admins_only as usize)) {
                 let value = i == 1;
                 if value != admins_only {
@@ -1040,7 +1041,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     if let Some((mut name, mut description)) = d.edit_info.take() {
         let mut answer = None;
         let closed = modal(ui, "edit-group", 400., |ui| {
-            title(ui, "Edit group");
+            title(ui, tr("Edit group"));
             ui.horizontal(|ui| {
                 widgets::avatar(ui, &widgets::AvatarSpec::of(c), 64.);
                 ui.vertical(|ui| {
@@ -1059,7 +1060,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             widgets::text_field(ui, &mut name, "Group name", false);
             ui.add_space(6.);
             widgets::text_field(ui, &mut description, "Group description", false);
-            answer = buttons(ui, &["Save", "Cancel"]);
+            answer = buttons(ui, &[tr("Save"), tr("Cancel")]);
         });
         let current = (name.clone(), description.clone());
         let leave = crate::panes::discard_guard(ui.ctx(), "edit-group", &current, answer == Some(1) || (closed && answer.is_none()), answer == Some(0));
@@ -1078,15 +1079,15 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     if let Some(mut nick) = d.nickname.take() {
         let mut answer = None;
         let closed = modal(ui, "nickname", 380., |ui| {
-            title(ui, "Nickname");
+            title(ui, tr("Nickname"));
             body(ui, palette, "Nicknames and notes are stored with Signal and end-to-end encrypted. They are only visible to you.");
             ui.add_space(8.);
-            widgets::text_field(ui, &mut nick.given, "First name", false);
+            widgets::text_field(ui, &mut nick.given, tr("First name"), false);
             ui.add_space(6.);
-            widgets::text_field(ui, &mut nick.family, "Last name", false);
+            widgets::text_field(ui, &mut nick.family, tr("Last name"), false);
             ui.add_space(6.);
-            widgets::text_field(ui, &mut nick.note, "Note", false);
-            answer = buttons(ui, &["Save", "Cancel", "Delete"]);
+            widgets::text_field(ui, &mut nick.note, tr("Note"), false);
+            answer = buttons(ui, &[tr("Save"), tr("Cancel"), tr("Delete")]);
         });
         let leave = crate::panes::discard_guard(ui.ctx(), "nickname", &nick, answer == Some(1) || (closed && answer.is_none()), matches!(answer, Some(0 | 2)));
         match answer {
@@ -1127,7 +1128,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     d.label_picker = None;
                 }
             }
-            answer = buttons(ui, &["Save", "Cancel"]);
+            answer = buttons(ui, &[tr("Save"), tr("Cancel")]);
         });
         let emoji = Some(d.label_emoji.clone()).filter(|e| !e.is_empty());
         match answer {
@@ -1143,8 +1144,8 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     if let Some((mut query, mut chosen)) = d.add_members.take() {
         let mut answer = None;
         let closed = modal(ui, "add-members", 400., |ui| {
-            title(ui, "Add members");
-            widgets::text_field(ui, &mut query, "Search", false);
+            title(ui, tr("Add members"));
+            widgets::text_field(ui, &mut query, tr("Search"), false);
             ui.add_space(6.);
             let q = query.trim().to_lowercase();
             let people: Vec<langis_store::Conversation> = app.conversations.iter().filter(|p| p.kind == ConversationKind::Direct && !p.blocked && (q.is_empty() || p.title.to_lowercase().contains(&q))).cloned().collect();
@@ -1156,7 +1157,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     let member = c.members.iter().any(|m| m == sid);
                     let on = member || chosen.iter().any(|m| m == sid);
                     let row = ui.add_enabled_ui(!member, |ui| {
-                        let r = crate::panes::contact_row(ui, palette, &p.title, if member { Some("Already a member") } else { p.phone.as_deref() }, p.color, p.avatar_path.as_deref());
+                        let r = crate::panes::contact_row(ui, palette, &p.title, if member { Some(tr("Already a member")) } else { p.phone.as_deref() }, p.color, p.avatar_path.as_deref());
                         crate::panes::round_check(ui, palette, egui::pos2(r.rect.right() - 20., r.rect.center().y), on);
                         r
                     });
@@ -1169,7 +1170,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     }
                 }
             });
-            answer = buttons(ui, &[&format!("Add ({})", chosen.len()), "Cancel"]);
+            answer = buttons(ui, &[&format!("Add ({})", chosen.len()), tr("Cancel")]);
         });
         match answer {
             Some(0) if !chosen.is_empty() => app.send(Command::AddGroupMembers { conversation: c.id.clone(), members: chosen }),

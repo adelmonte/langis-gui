@@ -10,6 +10,7 @@ use crate::app::App;
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// What the call screen keeps between frames: video textures, and our
 /// microphone and camera as we last set them.
@@ -83,10 +84,10 @@ impl CallView {
 
 fn status_text(call: &CallUpdate) -> String {
     match call.status {
-        CallStatus::Ringing => if call.video { "Incoming video call" } else { "Incoming voice call" }.into(),
-        CallStatus::Calling => "Connecting…".into(),
-        CallStatus::RingingThem => "Ringing…".into(),
-        CallStatus::Connecting => "Reconnecting…".into(),
+        CallStatus::Ringing => if call.video { tr("Incoming video call") } else { tr("Incoming voice call") }.into(),
+        CallStatus::Calling => tr("Connecting…").into(),
+        CallStatus::RingingThem => tr("Ringing…").into(),
+        CallStatus::Connecting => tr("Reconnecting…").into(),
         CallStatus::Connected { since } => crate::format::duration((chrono::Utc::now().timestamp_millis() - since) / 1000),
     }
 }
@@ -117,7 +118,7 @@ pub fn incoming_bar(app: &mut App, ui: &mut Ui) {
                 [a, b, rest @ ..] => format!("{who} is calling you, {a}, {b}, and {} others", rest.len()),
             }
         }
-        _ => if call.video { "Incoming video call" } else { "Incoming voice call" }.into(),
+        _ => if call.video { tr("Incoming video call") } else { tr("Incoming voice call") }.into(),
     };
     let width = (ui.ctx().content_rect().width() - 32.).min(600.);
     egui::Area::new(egui::Id::unique("incoming-call"))
@@ -144,19 +145,19 @@ pub fn incoming_bar(app: &mut App, ui: &mut Ui) {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 24.;
                             if call.video {
-                                if round_button(ui, Icon::VideoFillLight, palette.green, "Answer call").clicked() {
+                                if round_button(ui, Icon::VideoFillLight, palette.green, tr("Answer call")).clicked() {
                                     app.call_view.video_on = Some(true);
                                     app.send(Command::AcceptCall { video: true });
                                 }
-                                if round_button(ui, Icon::VideoSlashFillLight, theme::rgb(0x878787), "Answer call without video").clicked() {
+                                if round_button(ui, Icon::VideoSlashFillLight, theme::rgb(0x878787), tr("Answer call without video")).clicked() {
                                     app.call_view.video_on = Some(false);
                                     app.send(Command::AcceptCall { video: false });
                                 }
-                            } else if round_button(ui, Icon::PhoneFill, palette.green, "Answer call").clicked() {
+                            } else if round_button(ui, Icon::PhoneFill, palette.green, tr("Answer call")).clicked() {
                                 app.call_view.video_on = Some(false);
                                 app.send(Command::AcceptCall { video: false });
                             }
-                            if round_button(ui, Icon::PhoneDownFillLight, palette.destructive, "Decline").clicked() {
+                            if round_button(ui, Icon::PhoneDownFillLight, palette.destructive, tr("Decline")).clicked() {
                                 app.send(Command::DeclineCall);
                             }
                         });
@@ -237,9 +238,9 @@ pub enum Layout {
 impl Layout {
     fn label(self) -> &'static str {
         match self {
-            Self::Grid => "Grid",
-            Self::Sidebar => "Sidebar",
-            Self::Speaker => "Speaker",
+            Self::Grid => tr("Grid"),
+            Self::Sidebar => tr("Sidebar"),
+            Self::Speaker => tr("Speaker"),
         }
     }
 
@@ -323,7 +324,7 @@ const MIN_GRID_TILE_H: f32 = 140.;
 
 fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate, video: &langis_core::CallVideo, stage: Rect) {
     if call.participants.is_empty() {
-        ui.painter().text(stage.center(), Align2::CENTER_CENTER, "No one else is here", theme::regular(15.), Color32::from_white_alpha(200));
+        ui.painter().text(stage.center(), Align2::CENTER_CENTER, tr("No one else is here"), theme::regular(15.), Color32::from_white_alpha(200));
         return;
     }
     // `prioritySortedParticipants`: presenters, then the latest speakers.
@@ -536,7 +537,7 @@ pub fn pip(app: &mut App, ctx: &egui::Context) {
             ui.scope(|ui| {
                 ui.multiply_opacity(shown);
                 let (gray15, gray60, gray80) = (theme::rgb(0xe9e9e9), theme::rgb(0x5e5e5e), theme::rgb(0x2e2e2e));
-                full = pip_button(ui, id.with("full"), Pos2::new(rect.right() - 16. - 18., rect.top() + 16. + 18.), Icon::PipMaximizeLight, gray80, gray15, "Fullscreen call");
+                full = pip_button(ui, id.with("full"), Pos2::new(rect.right() - 16. - 18., rect.top() + 16. + 18.), Icon::PipMaximizeLight, gray80, gray15, tr("Fullscreen call"));
                 // The actions slide up from below into a bar 4 in from the edges.
                 let bottom = rect.bottom() + 60. - (60. + 4.) * shown;
                 let bar = Rect::from_min_max(Pos2::new(rect.left() + 4., bottom - 56.), Pos2::new(rect.right() - 4., bottom));
@@ -544,9 +545,9 @@ pub fn pip(app: &mut App, ctx: &egui::Context) {
                 let y = bar.center().y;
                 let (cam_icon, cam_fill, cam_color) = if video_on { (Icon::VideoFillLight, gray60, gray15) } else { (Icon::VideoSlashFillLight, gray15, theme::rgb(0x1b1b1b)) };
                 let (mic_icon, mic_fill, mic_color) = if audio_on { (Icon::MicFillLight, gray60, gray15) } else { (Icon::MicSlashFillLight, gray15, theme::rgb(0x1b1b1b)) };
-                toggle_video = pip_button(ui, id.with("video"), Pos2::new(bar.center().x - 31. - 18., y), cam_icon, cam_fill, cam_color, if video_on { "Turn off camera" } else { "Turn on camera" });
-                toggle_audio = pip_button(ui, id.with("audio"), Pos2::new(bar.center().x, y), mic_icon, mic_fill, mic_color, if audio_on { "Mute" } else { "Unmute" });
-                hang_up = pip_button(ui, id.with("hangup"), Pos2::new(bar.center().x + 31. + 18., y), Icon::PhoneDownFillLight, palette.destructive, Color32::WHITE, "Leave call");
+                toggle_video = pip_button(ui, id.with("video"), Pos2::new(bar.center().x - 31. - 18., y), cam_icon, cam_fill, cam_color, if video_on { tr("Turn off camera") } else { tr("Turn on camera") });
+                toggle_audio = pip_button(ui, id.with("audio"), Pos2::new(bar.center().x, y), mic_icon, mic_fill, mic_color, if audio_on { tr("Mute") } else { tr("Unmute") });
+                hang_up = pip_button(ui, id.with("hangup"), Pos2::new(bar.center().x + 31. + 18., y), Icon::PhoneDownFillLight, palette.destructive, Color32::WHITE, tr("Leave call"));
             });
         }
         if response.drag_started()
@@ -605,7 +606,7 @@ pub fn settings_dialog(app: &mut App, ctx: &egui::Context) {
             ui.set_width(width);
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let (head, _) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::hover());
-            ui.painter().text(head.center(), Align2::CENTER_CENTER, "Call Settings", theme::semibold(14.), palette.text);
+            ui.painter().text(head.center(), Align2::CENTER_CENTER, tr("Call Settings"), theme::semibold(14.), palette.text);
             let x = Rect::from_center_size(Pos2::new(head.right() - 16. - 16., head.center().y), Vec2::splat(32.));
             let response = ui.interact(x, ui.scope_id().with("close"), Sense::click());
             if response.hovered() {
@@ -617,9 +618,9 @@ pub fn settings_dialog(app: &mut App, ctx: &egui::Context) {
             // `forceStackedLayout`: each label over its select.
             let devices = app.call_devices.clone();
             let lists = [
-                (langis_core::DeviceKind::Camera, "Video", "videocamera", &devices.devices.cameras, &devices.camera),
-                (langis_core::DeviceKind::Microphone, "Microphone", "mic", &devices.devices.microphones, &devices.microphone),
-                (langis_core::DeviceKind::Speaker, "Speakers", "speaker", &devices.devices.speakers, &devices.speaker),
+                (langis_core::DeviceKind::Camera, tr("Video"), "videocamera", &devices.devices.cameras, &devices.camera),
+                (langis_core::DeviceKind::Microphone, tr("Microphone"), "mic", &devices.devices.microphones, &devices.microphone),
+                (langis_core::DeviceKind::Speaker, tr("Speakers"), "speaker", &devices.devices.speakers, &devices.speaker),
             ];
             egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 0)).show(ui, |ui| {
                 for (kind, label, symbol, list, chosen) in lists {
@@ -627,7 +628,7 @@ pub fn settings_dialog(app: &mut App, ctx: &egui::Context) {
                     let (row, _) = ui.allocate_exact_size(Vec2::new(width - 48., 28.), Sense::hover());
                     theme::paint_symbol(ui.painter(), symbol, Pos2::new(row.left() + 10., row.center().y), 20., palette.text);
                     ui.painter().text(Pos2::new(row.left() + 30., row.center().y), Align2::LEFT_CENTER, label, theme::regular(14.), palette.text);
-                    let names: Vec<&str> = if list.is_empty() { vec!["No devices available"] } else { list.iter().map(|d| d.name.as_str()).collect() };
+                    let names: Vec<&str> = if list.is_empty() { vec![tr("No devices available")] } else { list.iter().map(|d| d.name.as_str()).collect() };
                     let index = chosen.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).unwrap_or(0);
                     ui.add_space(4.);
                     if let Some(i) = crate::axo_list::select_pill(ui, egui::Id::unique("call-settings").with(label), width - 48., &names, index)
@@ -658,12 +659,12 @@ fn header(app: &mut App, ui: &mut Ui, area: Rect) -> f32 {
         theme::paint_symbol(ui.painter(), symbol, rect.center(), 20., Color32::WHITE);
         response.clicked()
     };
-    if button(ui, "pip", false, "Minimize call") {
+    if button(ui, "pip", false, tr("Minimize call")) {
         app.call_view.pip = true;
         app.panes.participants_open = false;
         app.panes.reactions_open = false;
     }
-    if button(ui, "settings", app.call_view.settings_open, "Call Settings") {
+    if button(ui, "settings", app.call_view.settings_open, tr("Call Settings")) {
         app.call_view.settings_open = true;
         app.send(Command::LoadCallDevices);
     }
@@ -719,8 +720,8 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
     let raised = call.local_demux_id.is_some_and(|d| call.raised_hands.contains(&d));
     let audio_on = app.call_view.audio_on;
     let mut buttons: Vec<(&str, Icon, Look, &str)> = vec![
-        ("video", if video_on { Icon::VideoFillLight } else { Icon::VideoSlashFillLight }, if video_on { Look::Regular } else { Look::Highlighted }, if video_on { "Turn off camera" } else { "Turn on camera" }),
-        ("audio", if audio_on { Icon::MicFillLight } else { Icon::MicSlashFillLight }, if audio_on { Look::Regular } else { Look::Highlighted }, if audio_on { "Mute mic" } else { "Unmute mic" }),
+        ("video", if video_on { Icon::VideoFillLight } else { Icon::VideoSlashFillLight }, if video_on { Look::Regular } else { Look::Highlighted }, if video_on { tr("Turn off camera") } else { tr("Turn on camera") }),
+        ("audio", if audio_on { Icon::MicFillLight } else { Icon::MicSlashFillLight }, if audio_on { Look::Regular } else { Look::Highlighted }, if audio_on { tr("Mute mic") } else { tr("Unmute mic") }),
     ];
     if call.group {
         buttons.push(("hand", Icon::RaiseHandFillLight, if raised { Look::Highlighted } else { Look::Regular }, if raised { "Lower hand" } else { "Raise hand" }));
@@ -729,10 +730,10 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
         "present",
         Icon::ShareScreenFillLight,
         if !can_present { Look::Disabled } else if call.sharing { Look::Highlighted } else { Look::Regular },
-        if call.sharing { "Stop presenting" } else { "Present" },
+        if call.sharing { tr("Stop presenting") } else { "Present" },
     ));
     if call.group {
-        buttons.push(("react", Icon::HeartPlusFill, if app.panes.reactions_open { Look::Highlighted } else { Look::Regular }, "React"));
+        buttons.push(("react", Icon::HeartPlusFill, if app.panes.reactions_open { Look::Highlighted } else { Look::Regular }, tr("React")));
     }
     let row_w = buttons.len() as f32 * 56.;
     let mut x = bar.center().x - row_w / 2. + 10.;
@@ -784,7 +785,7 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
     }
 
     // `CallControls__JoinLeaveButton--hangup`: a red pill at the end.
-    let label = if call.group { "Leave" } else { "End" };
+    let label = if call.group { tr("Leave") } else { tr("End") };
     let galley = ui.painter().layout_no_wrap(label.to_owned(), theme::semibold(12.), Color32::WHITE);
     let pill = Rect::from_min_size(Pos2::new(inner.right() - galley.size().x - 32., bar.center().y - 15.5), Vec2::new(galley.size().x + 32., 31.));
     let response = ui.interact(pill, ui.scope_id().with("hang-up"), Sense::click());
@@ -804,7 +805,7 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
             app.call_view.audio_on = !audio_on;
             app.send(Command::SetCallAudio(!audio_on));
             // `CallControls__MutedToast`.
-            app.panes.call_toasts.push((if audio_on { "Mic off" } else { "Mic on" }.into(), std::time::Instant::now()));
+            app.panes.call_toasts.push((if audio_on { tr("Mic off") } else { tr("Mic on") }.into(), std::time::Instant::now()));
         }
         Some("hand") => app.send(Command::RaiseHand(!raised)),
         Some("present") => {

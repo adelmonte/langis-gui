@@ -6,6 +6,7 @@ use egui::{Align2, CornerRadius, RichText, Ui, Vec2};
 use crate::app::{App, Phase, Tab};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     // "Now" and "5m" under messages and the chat list's times age while
@@ -88,7 +89,7 @@ fn safety_dialog(app: &mut App, ui: &mut Ui) {
         .frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24))
         .show(ui.ctx(), |ui| {
             ui.set_width(360.);
-            ui.label(RichText::new("Safety Number Changes").font(theme::semibold(18.)));
+            ui.label(RichText::new(tr("Safety Number Changes")).font(theme::semibold(18.)));
             ui.add_space(8.);
             ui.label(
                 RichText::new(
@@ -104,7 +105,7 @@ fn safety_dialog(app: &mut App, ui: &mut Ui) {
                     ui.label(RichText::new(name).font(theme::medium(14.)));
                     // Desktop's per-person View: their safety number, to verify.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::pill_button(ui, "View", false).clicked() {
+                        if widgets::pill_button(ui, tr("View"), false).clicked() {
                             view = Some(sid.clone());
                         }
                     });
@@ -112,10 +113,10 @@ fn safety_dialog(app: &mut App, ui: &mut Ui) {
             }
             ui.add_space(16.);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::pill_button(ui, "Send anyway", true).clicked() {
+                if widgets::pill_button(ui, tr("Send anyway"), true).clicked() {
                     answer = Some(true);
                 }
-                if widgets::pill_button(ui, "Cancel", false).clicked() {
+                if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                     answer = Some(false);
                 }
             });
@@ -145,7 +146,7 @@ fn share_picker(app: &mut App, ui: &mut Ui) {
         .frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24))
         .show(ui.ctx(), |ui| {
             ui.set_width(360.);
-            ui.label(RichText::new("Share your screen").font(theme::semibold(18.)));
+            ui.label(RichText::new(tr("Share your screen")).font(theme::semibold(18.)));
             ui.add_space(12.);
             for source in &sources {
                 if ui.selectable_label(false, RichText::new(&source.name).font(theme::regular(14.))).clicked() {
@@ -153,7 +154,7 @@ fn share_picker(app: &mut App, ui: &mut Ui) {
                 }
             }
             ui.add_space(12.);
-            if widgets::pill_button(ui, "Cancel", false).clicked() {
+            if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                 chosen = Some(String::new());
             }
         });

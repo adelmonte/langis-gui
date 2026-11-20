@@ -7,6 +7,7 @@
 use egui::{Align2, Color32, CornerRadius, Id, Order, Pos2, Rect, Sense, Shadow, Vec2};
 
 use crate::theme::{self, Palette};
+use crate::i18n::tr;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Variant {
@@ -23,7 +24,7 @@ pub enum Choice {
 }
 
 pub fn confirm(ctx: &egui::Context, id: Id, title: &str, description: &str, action: &str, variant: Variant) -> Option<Choice> {
-    match show(ctx, id, title, description, Some("Cancel"), &[(action, variant)]) {
+    match show(ctx, id, title, description, Some(tr("Cancel")), &[(action, variant)]) {
         Some(Answer::Cancel) => Some(Choice::Cancel),
         Some(Answer::Action(_)) => Some(Choice::Action),
         None => None,

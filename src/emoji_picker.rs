@@ -7,6 +7,7 @@ use egui::{Align2, Color32, CornerRadius, Pos2, Rect, RichText, Sense, Vec2};
 use langis_emoji::{Emoji, Group, SkinTone};
 
 use crate::theme::{self, Palette};
+use crate::i18n::tr;
 
 /// Desktop's default skin tone (Settings, Chats), for emoji that take one.
 static SKIN_TONE: std::sync::Mutex<Option<SkinTone>> = std::sync::Mutex::new(None);
@@ -261,7 +262,7 @@ impl Picker {
                 index += s.emoji.len();
             }
             if sections.iter().all(|s| s.emoji.is_empty()) {
-                ui.painter().text(origin + Vec2::new(ui.available_width() / 2., 60.), Align2::CENTER_CENTER, "No results", theme::regular(14.), palette.text_secondary);
+                ui.painter().text(origin + Vec2::new(ui.available_width() / 2., 60.), Align2::CENTER_CENTER, tr("No results"), theme::regular(14.), palette.text_secondary);
             }
         });
         let offset = output.state.clamped_offset().y;

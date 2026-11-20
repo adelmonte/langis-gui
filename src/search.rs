@@ -13,6 +13,7 @@ use crate::chat::ChatView;
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// How long typing rests before searching.
 const DELAY: Duration = Duration::from_millis(300);
@@ -166,7 +167,7 @@ pub fn message_results(app: &App, ui: &mut Ui, palette: &Palette) -> Option<(Con
     };
     let search = &app.message_search;
     if !search.contacts.is_empty() {
-        heading(ui, "Contacts");
+        heading(ui, tr("Contacts"));
         for p in &search.contacts {
             let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 64.), Sense::click());
             let row = rect.shrink2(Vec2::new(11., 2.));
@@ -188,7 +189,7 @@ pub fn message_results(app: &App, ui: &mut Ui, palette: &Palette) -> Option<(Con
     let hits = &search.hits;
     if search.loading && hits.is_empty() {
         // Desktop's loading rows.
-        heading(ui, "Messages");
+        heading(ui, tr("Messages"));
         for _ in 0..3 {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 72.), Sense::hover());
             let row = rect.shrink2(Vec2::new(11., 2.));
@@ -201,7 +202,7 @@ pub fn message_results(app: &App, ui: &mut Ui, palette: &Palette) -> Option<(Con
     if hits.is_empty() {
         return open;
     }
-    heading(ui, "Messages");
+    heading(ui, tr("Messages"));
     for hit in hits {
         let Some(c) = app.conversation(&hit.conversation_id) else { continue };
         let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 72.), Sense::click());
@@ -216,7 +217,7 @@ pub fn message_results(app: &App, ui: &mut Ui, palette: &Palette) -> Option<(Con
         let who = match (&hit.author, c.kind) {
             (None, langis_store::ConversationKind::NoteToSelf) => {
                 widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
-                "Note to Self".to_owned()
+                tr("Note to Self").to_owned()
             }
             (None, _) => {
                 widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo: app.me.1.as_deref(), ..widgets::AvatarSpec::person(&app.me.0, 0) });
@@ -265,7 +266,7 @@ pub fn find_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatVi
             ui.horizontal_centered(|ui| {
                 ui.add_space(16.);
                 let w = (ui.available_width() - 280.).max(160.);
-                let field = ui.allocate_ui(Vec2::new(w, 32.), |ui| widgets::text_field(ui, &mut find.query, "Search in chat", false)).inner;
+                let field = ui.allocate_ui(Vec2::new(w, 32.), |ui| widgets::text_field(ui, &mut find.query, tr("Search in chat"), false)).inner;
                 if std::mem::take(&mut find.focus) {
                     field.request_focus();
                 }
@@ -287,7 +288,7 @@ pub fn find_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatVi
                 let count = if find.query.trim().is_empty() || find.searched.is_none() {
                     String::new()
                 } else if shown.is_empty() {
-                    "No results".to_owned()
+                    tr("No results").to_owned()
                 } else {
                     let at = shown.iter().position(|&i| i == find.index).map(|p| p + 1).unwrap_or(1);
                     format!("{at} of {}", shown.len())
@@ -324,7 +325,7 @@ pub fn find_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatVi
                     }
                     // Down is newer; the hits are newest first.
                     let at = shown.iter().position(|&i| i == find.index);
-                    if widgets::icon_button(ui, Icon::ChevronShallowDown, 18., "Next").clicked() && !shown.is_empty() {
+                    if widgets::icon_button(ui, Icon::ChevronShallowDown, 18., tr("Next")).clicked() && !shown.is_empty() {
                         go = Some(shown[at.map(|p| p.saturating_sub(1)).unwrap_or(0)]);
                     }
                     if widgets::icon_button(ui, Icon::ChevronShallowUp, 18., "Previous").clicked() && !shown.is_empty() {
@@ -357,7 +358,7 @@ pub fn find_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatVi
                                     ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                                 }
                                 let who = match &hit.author {
-                                    None => "You".to_owned(),
+                                    None => tr("You").to_owned(),
                                     Some(a) => app.name(a),
                                 };
                                 ui.painter().text(Pos2::new(rect.left() + 10., rect.top() + 8.), egui::Align2::LEFT_TOP, who, theme::semibold(13.), palette.text);

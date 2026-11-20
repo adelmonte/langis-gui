@@ -16,6 +16,7 @@ use crate::chat::ChatView;
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -340,7 +341,7 @@ enum Send {
 
 /// Desktop's `FunTabs`: the three, centered in a 48px row.
 fn tabs(ui: &mut Ui, palette: &Palette, tab: &mut Tab) {
-    let labels = [(Tab::Emoji, "Emoji"), (Tab::Stickers, "Stickers"), (Tab::Gifs, "GIFs")];
+    let labels = [(Tab::Emoji, tr("Emoji")), (Tab::Stickers, tr("Stickers")), (Tab::Gifs, tr("GIFs"))];
     let widths: Vec<f32> = labels.iter().map(|(_, l)| ui.painter().layout_no_wrap((*l).to_owned(), theme::medium(13.), palette.text).size().x + 24.).collect();
     let inner: f32 = widths.iter().sum::<f32>() + 4. * (labels.len() - 1) as f32;
     ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 48.), egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -395,7 +396,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
         fun.pack = fun.packs.first().map(|p| p.id.clone());
     }
     // Desktop's "Search stickers": by the emoji they stand for.
-    widgets::text_field(ui, &mut fun.sticker_query, "Search stickers", false);
+    widgets::text_field(ui, &mut fun.sticker_query, tr("Search stickers"), false);
     ui.add_space(6.);
     let query = fun.sticker_query.trim().to_owned();
     // The packs along the top: favorites, each installed pack, then "+".
@@ -443,7 +444,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                 }
             });
         });
-        if widgets::icon_button(ui, Icon::Plus, 18., "Add stickers").clicked() {
+        if widgets::icon_button(ui, Icon::Plus, 18., tr("Add stickers")).clicked() {
             fun.manager_open = true;
             app.send(Command::LoadStickerManager);
         }
@@ -487,14 +488,14 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
         _ if !query.is_empty() => "Search results".to_owned(),
         _ if fun.sticker_recents => "Recents".to_owned(),
         Some(id) => fun.packs.iter().find(|p| &p.id == id).map(|p| p.title.clone()).unwrap_or_default(),
-        None => "Favorites".to_owned(),
+        None => tr("Favorites").to_owned(),
     };
     ui.label(RichText::new(title).font(theme::semibold(13.)).color(palette.text_secondary));
     if shown.is_empty() {
         ui.add_space(40.);
         ui.vertical_centered(|ui| {
             let text = if !query.is_empty() {
-                "No results"
+                tr("No results")
             } else if fun.pack.is_none() {
                 "Stickers you favorite show up here."
             } else {
@@ -558,7 +559,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
 
 fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send> {
     let mut send = None;
-    let field = widgets::text_field(ui, &mut fun.gif_query, "Search GIFs", false);
+    let field = widgets::text_field(ui, &mut fun.gif_query, tr("Search GIFs"), false);
     if field.changed() {
         fun.gif_typed = Some(Instant::now());
     }
@@ -608,7 +609,7 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
                     ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, theme::emoji(16.), palette.text);
                 }
             }
-            if r.on_hover_text(label).clicked() {
+            if r.on_hover_text(tr(label)).clicked() {
                 match label {
                     "Recents" => fun.gif_recents = true,
                     "Trending" => {
@@ -632,13 +633,13 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
         return recent_gifs(ui, palette, fun);
     }
     ui.add_space(4.);
-    ui.label(RichText::new(if wanted.is_empty() { "Trending" } else { "Search Results" }).font(theme::semibold(13.)).color(palette.text_secondary));
+    ui.label(RichText::new(if wanted.is_empty() { tr("Trending") } else { tr("Search Results") }).font(theme::semibold(13.)).color(palette.text_secondary));
     if let Some(error) = fun.gif_error.clone() {
         ui.add_space(30.);
         ui.vertical_centered(|ui| {
             ui.label(RichText::new(error).color(palette.text_secondary));
             ui.add_space(8.);
-            if widgets::pill_button(ui, "Retry", false).clicked() {
+            if widgets::pill_button(ui, tr("Retry"), false).clicked() {
                 fun.gif_error = None;
                 fun.search_gifs(app, 0);
             }
@@ -651,7 +652,7 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
             if fun.gif_loading {
                 crate::widgets::spinner(ui, 24.);
             } else {
-                ui.label(RichText::new("No GIFs found").color(palette.text_secondary));
+                ui.label(RichText::new(tr("No GIFs found")).color(palette.text_secondary));
             }
         });
         return None;
@@ -710,7 +711,7 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
     if more && let Some(next) = fun.gif_next {
         fun.search_gifs(app, next);
     }
-    ui.painter().text(ui.max_rect().right_bottom() - Vec2::new(4., 4.), Align2::RIGHT_BOTTOM, "Powered by GIPHY", theme::regular(10.), palette.text_secondary);
+    ui.painter().text(ui.max_rect().right_bottom() - Vec2::new(4., 4.), Align2::RIGHT_BOTTOM, tr("Powered by GIPHY"), theme::regular(10.), palette.text_secondary);
     send
 }
 
@@ -759,20 +760,20 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                 if let Some(Ok(preview)) = &result {
                     let installed = preview.pack.installed || app.fun.packs.iter().any(|p| p.id == id);
                     if installed {
-                        if widgets::pill_button(ui, "Uninstall", false).clicked() {
+                        if widgets::pill_button(ui, tr("Uninstall"), false).clicked() {
                             app.fun.confirm_uninstall = Some((id.clone(), key.clone()));
                         }
-                    } else if widgets::pill_button(ui, "Install", true).clicked() {
+                    } else if widgets::pill_button(ui, tr("Install"), true).clicked() {
                         app.send(Command::InstallStickerPack { id: id.clone(), key: key.clone() });
                         close = true;
                     }
                     // Desktop's share menu's Copy link.
-                    if widgets::pill_button(ui, "Copy link", false).clicked() {
+                    if widgets::pill_button(ui, tr("Copy link"), false).clicked() {
                         ui.ctx().copy_text(pack_link(&id, &key));
                         app.toast("Link copied");
                     }
                 }
-                if widgets::pill_button(ui, "Close", false).clicked() {
+                if widgets::pill_button(ui, tr("Close"), false).clicked() {
                     close = true;
                 }
             });
@@ -797,7 +798,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         // Desktop's StickerManager tabs.
         ui.horizontal(|ui| {
             let half = ui.available_width() / 2.;
-            for (i, label) in ["Available", "Installed"].iter().enumerate() {
+            for (i, label) in ["Available", tr("Installed")].iter().enumerate() {
                 let (r, hit) = ui.allocate_exact_size(Vec2::new(half - 4., 32.), Sense::click());
                 let on = tab == i;
                 ui.painter().text(r.center(), Align2::CENTER_CENTER, *label, theme::semibold(14.), if on { palette.text } else { palette.text_secondary });
@@ -813,7 +814,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         let sections: Vec<(&str, &Vec<StickerPackSummary>, &str)> = if tab == 1 {
             vec![("Installed stickers", &manager.installed, "No stickers installed")]
         } else {
-            vec![("Signal Artist Series", &manager.blessed, ""), ("Stickers you received", &manager.received, "Stickers from incoming messages will appear here")]
+            vec![(tr("Signal Artist Series"), &manager.blessed, ""), ("Stickers you received", &manager.received, "Stickers from incoming messages will appear here")]
         };
         egui::ScrollArea::vertical().max_height(460.).min_scrolled_height(300.).auto_shrink([false, true]).show(ui, |ui| {
             for (title, packs, empty) in sections {
@@ -851,7 +852,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         });
         ui.add_space(12.);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if widgets::pill_button(ui, "Done", true).clicked() {
+            if widgets::pill_button(ui, tr("Done"), true).clicked() {
                 close = true;
             }
         });
@@ -889,7 +890,7 @@ fn uninstall_confirm(app: &mut App, ui: &Ui) {
         egui::Id::unique("sticker-uninstall"),
         "",
         "You may not be able to reinstall this sticker pack if you no longer have the source message.",
-        "Uninstall",
+        tr("Uninstall"),
         crate::dialog::Variant::StrongDestructive,
     ) {
         Some(crate::dialog::Choice::Action) => {
@@ -922,7 +923,7 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
     }
     let sub = if pack.author.is_empty() { format!("{} stickers", pack.sticker_count) } else { format!("{} · {} stickers", pack.author, pack.sticker_count) };
     ui.painter().text(Pos2::new(rect.left() + 60., rect.top() + 30.), Align2::LEFT_TOP, sub, theme::regular(12.), palette.text_secondary);
-    let label = if pack.installed { "Uninstall" } else { "Install" };
+    let label = if pack.installed { tr("Uninstall") } else { tr("Install") };
     let g = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(13.), palette.text);
     let button = Rect::from_min_size(Pos2::new(rect.right() - g.size().x - 30., rect.center().y - 14.), Vec2::new(g.size().x + 24., 28.));
     let br = ui.interact(button, ui.scope_id().with(("pack-button", section, &pack.id)), Sense::click());
@@ -956,7 +957,7 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
     }
     let mut copy = false;
     crate::menu::show(ui.ctx(), menu, |m| {
-        if m.item(Some("link"), "Copy link") {
+        if m.item(Some("link"), tr("Copy link")) {
             copy = true;
         }
     });

@@ -13,6 +13,7 @@ use crate::app::{App, Loaded, Tab};
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 #[derive(Default)]
 pub struct Panes {
@@ -256,8 +257,8 @@ pub fn on_event(app: &mut App, event: Event) {
         Event::MessageRequestAnswered { answer, .. } => {
             let text = match answer {
                 MessageRequestResponse::Block | MessageRequestResponse::BlockAndDelete => Some("Blocked."),
-                MessageRequestResponse::Spam => Some("Reported as spam."),
-                MessageRequestResponse::BlockAndSpam => Some("Reported as spam and blocked."),
+                MessageRequestResponse::Spam => Some(tr("Reported as spam.")),
+                MessageRequestResponse::BlockAndSpam => Some(tr("Reported as spam and blocked.")),
                 _ => None,
             };
             if let Some(text) = text {
@@ -383,7 +384,7 @@ pub fn discard_guard<T: Clone + PartialEq + Send + Sync + 'static>(ctx: &egui::C
         return false;
     }
     use crate::dialog::{Answer, Variant};
-    match crate::dialog::show(ctx, asking_id.with("dialog"), "", "Would you like to discard these changes?", Some("Cancel"), &[("Discard", Variant::StrongDestructive)]) {
+    match crate::dialog::show(ctx, asking_id.with("dialog"), "", tr("Would you like to discard these changes?"), Some(tr("Cancel")), &[(tr("Discard"), Variant::StrongDestructive)]) {
         Some(Answer::Action(_)) => {
             forget(ctx);
             true
@@ -489,10 +490,10 @@ pub fn list_notices(app: &mut App, ui: &mut Ui, palette: &Palette) {
             ui.label(RichText::new("Set up your username").font(theme::semibold(14.)));
             ui.label(RichText::new("Your username lets people message you without needing your phone number.").font(theme::regular(13.)).color(palette.text_secondary));
             ui.horizontal(|ui| {
-                if ui.link(RichText::new("Not now").font(theme::medium(13.))).clicked() {
+                if ui.link(RichText::new(tr("Not now")).font(theme::medium(13.))).clicked() {
                     answer = Some(false);
                 }
-                if ui.link(RichText::new("Set up").font(theme::medium(13.))).clicked() {
+                if ui.link(RichText::new(tr("Set up")).font(theme::medium(13.))).clicked() {
                     answer = Some(true);
                 }
             });
@@ -532,13 +533,13 @@ pub fn list_notices(app: &mut App, ui: &mut Ui, palette: &Palette) {
         let critical = app.panes.server_alerts.contains_key(&ServerAlert::CriticalIdlePrimaryDevice);
         let mut dismiss = false;
         card(ui, palette, |ui| {
-            ui.label(RichText::new("Open Signal on your phone").font(theme::semibold(14.)));
+            ui.label(RichText::new(tr("Open Signal on your phone")).font(theme::semibold(14.)));
             ui.label(
                 RichText::new("Your phone hasn't been used in a while. Open Signal on it to keep this device linked.")
                     .font(theme::regular(13.))
                     .color(palette.text_secondary),
             );
-            if !critical && ui.link("Dismiss").clicked() {
+            if !critical && ui.link(tr("Dismiss")).clicked() {
                 dismiss = true;
             }
         });
@@ -610,7 +611,7 @@ pub fn folder_tabs(app: &mut App, ui: &mut Ui, palette: &Palette) {
             let unread_in = |f: Option<&ChatFolder>| -> u32 {
                 app.conversations.iter().filter(|c| !c.archived && !c.muted && f.is_none_or(|f| in_folder(f, c))).map(|c| c.unread_count + c.marked_unread as u32).filter(|n| *n > 0).count() as u32
             };
-            if tab(ui, "All chats", app.panes.folder.is_none(), unread_in(None)).clicked() {
+            if tab(ui, tr("All chats"), app.panes.folder.is_none(), unread_in(None)).clicked() {
                 app.panes.folder = None;
             }
             let mut todo: Option<(ChatFolder, u8)> = None;
@@ -621,18 +622,18 @@ pub fn folder_tabs(app: &mut App, ui: &mut Ui, palette: &Palette) {
                 }
                 // Desktop's folder menu: mark all read, mute, edit.
                 crate::menu::context(ui, &r, egui::Id::unique("folder-tab-menu").with(&f.id), |m| {
-                    if m.item(Some("message-check"), "Mark all read") {
+                    if m.item(Some("message-check"), tr("Mark all read")) {
                         todo = Some((f.clone(), 0));
                     }
                     let chats: Vec<&Conversation> = app.conversations.iter().filter(|c| in_folder(f, c)).collect();
                     if chats.iter().any(|c| !c.muted) {
-                        if m.item(Some("bell-slash"), "Mute notifications") {
+                        if m.item(Some("bell-slash"), tr("Mute notifications")) {
                             todo = Some((f.clone(), 1));
                         }
-                    } else if m.item(Some("bell"), "Unmute all") {
+                    } else if m.item(Some("bell"), tr("Unmute all")) {
                         todo = Some((f.clone(), 2));
                     }
-                    if m.item(Some("pencil"), "Edit folder") {
+                    if m.item(Some("pencil"), tr("Edit folder")) {
                         todo = Some((f.clone(), 3));
                     }
                 });
@@ -684,36 +685,36 @@ pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
     use langis_core::ChatChange;
     let id = c.id.clone();
     let unread = c.unread_count > 0 || c.marked_unread;
-    if unread && m.item(Some("message-check"), "Mark read") {
+    if unread && m.item(Some("message-check"), tr("Mark read")) {
         app.send(Command::MarkRead { conversation: id.clone() });
         if c.marked_unread {
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(false) });
         }
     }
-    if !unread && m.item(Some("message-badge"), "Mark as unread") {
+    if !unread && m.item(Some("message-badge"), tr("Mark as unread")) {
         app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(true) });
     }
-    if m.item(Some(if c.pinned { "pin-slash" } else { "pin" }), if c.pinned { "Unpin chat" } else { "Pin chat" }) {
+    if m.item(Some(if c.pinned { "pin-slash" } else { "pin" }), if c.pinned { tr("Unpin chat") } else { tr("Pin chat") }) {
         app.send(Command::SetPinned { conversation: id.clone(), pinned: !c.pinned });
     }
     if c.muted {
-        if m.item(Some("bell"), "Unmute") {
+        if m.item(Some("bell"), tr("Unmute")) {
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(0) });
         }
     } else {
-        m.sub(Some("bell-slash"), "Mute notifications", |m| mute_items(app, m, &id));
+        m.sub(Some("bell-slash"), tr("Mute notifications"), |m| mute_items(app, m, &id));
     }
     let all_chats = app.panes.folder.is_none();
     let custom: Vec<ChatFolder> = app.panes.folders.iter().filter(|f| f.folder_type == langis_store::ChatFolderType::Custom).cloned().collect();
     if all_chats && !custom.is_empty() {
-        m.sub(Some("folder-plus"), "Add to folder", |m| {
+        m.sub(Some("folder-plus"), tr("Add to folder"), |m| {
             for f in &custom {
                 let inside = f.included.contains(&id);
                 if m.check(inside, &f.name) {
                     app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::ToggleChat { id: f.id.clone(), chat: id.clone(), add: !inside }));
                 }
             }
-            if m.item(Some("plus"), "Create folder") {
+            if m.item(Some("plus"), tr("Create folder")) {
                 let params = langis_store::ChatFolderParams { included: vec![id.clone()], ..langis_store::ChatFolderParams::defaults() };
                 app.settings.folder = Some((crate::settings::new_id(), true, params));
                 app.settings.page = crate::settings::Page::ChatFolders;
@@ -722,14 +723,14 @@ pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
         });
     }
     if let Some(folder) = app.panes.folder.clone()
-        && m.item(Some("folder-minus"), "Remove from folder")
+        && m.item(Some("folder-minus"), tr("Remove from folder"))
     {
         app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::ToggleChat { id: folder, chat: id.clone(), add: false }));
     }
-    if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { "Unarchive" } else { "Archive" }) {
+    if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { tr("Unarchive") } else { tr("Archive") }) {
         app.set_archived(id.clone(), !c.archived);
     }
-    if m.item(Some("trash"), "Delete") {
+    if m.item(Some("trash"), tr("Delete")) {
         let member = c.kind == langis_store::ConversationKind::Group && !c.left && !c.ended;
         app.panes.delete_chat = Some((id, member));
     }
@@ -737,9 +738,9 @@ pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
 
 /// Desktop's `MuteNotificationsMenuItems` for a chat that isn't muted.
 pub fn mute_items(app: &mut App, m: &mut crate::menu::Menu, id: &ConversationId) {
-    m.label("Mute this chat for…");
+    m.label(tr("Mute this chat for…"));
     for (label, until) in mute_choices(false) {
-        if until == i64::MAX && m.item(None, "Until…") {
+        if until == i64::MAX && m.item(None, tr("Until…")) {
             let at = chrono::Local::now() + chrono::Duration::hours(1);
             app.panes.mute_until = Some((id.clone(), at.format("%Y-%m-%d").to_string(), at.format("%H:%M").to_string()));
         }
@@ -773,29 +774,29 @@ pub fn chat_confirm_dialog(app: &mut App, ctx: &egui::Context) {
     let group = c.kind == ConversationKind::Group;
     let name = c.title.clone();
     let (title, body, actions): (String, &str, Vec<(&str, Variant)>) = match which {
-        ChatConfirm::Leave => ("Do you really want to leave?".into(), "You will no longer be able to send or receive messages in this group.", vec![("Leave", Variant::StrongDestructive)]),
-        ChatConfirm::Block if group => (format!("Block and Leave the \"{name}\" Group?"), "You will no longer receive messages or updates from this group.", vec![("Block", Variant::StrongDestructive)]),
-        ChatConfirm::Block => (format!("Block {name}?"), "Blocked people won't be able to call you or send you messages.", vec![("Block", Variant::StrongDestructive)]),
-        ChatConfirm::Unblock if group => (format!("Unblock the \"{name}\" Group?"), "Your contacts will be able to add you to this group.", vec![("Unblock", Variant::StrongDestructive)]),
-        ChatConfirm::Unblock => (format!("Unblock {name}?"), "You will be able to message and call each other.", vec![("Unblock", Variant::StrongPrimary)]),
+        ChatConfirm::Leave => (tr("Do you really want to leave?").into(), tr("You will no longer be able to send or receive messages in this group."), vec![(tr("Leave"), Variant::StrongDestructive)]),
+        ChatConfirm::Block if group => (format!("Block and Leave the \"{name}\" Group?"), tr("You will no longer receive messages or updates from this group."), vec![(tr("Block"), Variant::StrongDestructive)]),
+        ChatConfirm::Block => (format!("Block {name}?"), tr("Blocked people won't be able to call you or send you messages."), vec![(tr("Block"), Variant::StrongDestructive)]),
+        ChatConfirm::Unblock if group => (format!("Unblock the \"{name}\" Group?"), tr("Your contacts will be able to add you to this group."), vec![(tr("Unblock"), Variant::StrongDestructive)]),
+        ChatConfirm::Unblock => (format!("Unblock {name}?"), tr("You will be able to message and call each other."), vec![(tr("Unblock"), Variant::StrongPrimary)]),
         ChatConfirm::ReportSpam => (
-            "Report as spam?".into(),
+            tr("Report as spam?").into(),
             if group {
-                "Signal will be notified that the person who invited you to this group may be sending spam. Signal can't see the content of any chats."
+                tr("Signal will be notified that the person who invited you to this group may be sending spam. Signal can't see the content of any chats.")
             } else {
-                "Signal will be notified that this person may be sending spam. Signal can\u{2019}t see the content of any chats."
+                tr("Signal will be notified that this person may be sending spam. Signal can\u{2019}t see the content of any chats.")
             },
-            vec![("Report spam", Variant::StrongDestructive), ("Report and block", Variant::StrongDestructive)],
+            vec![(tr("Report spam"), Variant::StrongDestructive), (tr("Report and block"), Variant::StrongDestructive)],
         ),
         ChatConfirm::End => (
             format!("End \"{name}\"?"),
-            "Members will no longer be able to send messages or start calls in the group. They will be notified that you ended the group, and will still have access to message history.",
-            vec![("End group", Variant::StrongDestructive)],
+            tr("Members will no longer be able to send messages or start calls in the group. They will be notified that you ended the group, and will still have access to message history."),
+            vec![(tr("End group"), Variant::StrongDestructive)],
         ),
-        ChatConfirm::EndForSure => ("This will end the group permanently. Are you sure you want to proceed?".into(), "", vec![("End group", Variant::StrongDestructive)]),
+        ChatConfirm::EndForSure => (tr("This will end the group permanently. Are you sure you want to proceed?").into(), "", vec![(tr("End group"), Variant::StrongDestructive)]),
     };
     let key = egui::Id::unique("chat-confirm").with((&id.0, which as u8));
-    let Some(answer) = dialog::show(ctx, key, &title, body, Some("Cancel"), &actions) else { return };
+    let Some(answer) = dialog::show(ctx, key, &title, body, Some(tr("Cancel")), &actions) else { return };
     app.panes.chat_confirm = None;
     let Answer::Action(index) = answer else { return };
     let conversation = id.clone();
@@ -841,7 +842,7 @@ pub fn custom_timer_start(seconds: u32) -> (u32, usize) {
 pub fn custom_time_dialogs(app: &mut App, ctx: &egui::Context) {
     use crate::dialog::{self, Answer, Variant};
     if let Some((id, mut value, mut unit)) = app.panes.custom_timer.clone() {
-        let answer = dialog::show_with(ctx, egui::Id::unique("custom-timer"), "Custom Time", "Choose a custom time for disappearing messages.", Some("Cancel"), &[("Set", Variant::StrongPrimary)], |ui| {
+        let answer = dialog::show_with(ctx, egui::Id::unique("custom-timer"), tr("Custom Time"), tr("Choose a custom time for disappearing messages."), Some(tr("Cancel")), &[(tr("Set"), Variant::StrongPrimary)], |ui| {
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8., 0.);
@@ -892,10 +893,10 @@ pub fn custom_time_dialogs(app: &mut App, ctx: &egui::Context) {
             .filter(|z| z.contains('/'))
             .or_else(|| std::fs::read_link("/etc/localtime").ok().and_then(|p| p.to_str().and_then(|p| p.split_once("zoneinfo/")).map(|(_, z)| z.to_owned())))
             .unwrap_or_else(|| chrono::Local::now().format("%:z").to_string());
-        let answer = dialog::show_with(ctx, egui::Id::unique("mute-until"), "Mute this chat until…", "", Some("Cancel"), &[("Mute", Variant::StrongPrimary)], |ui| {
+        let answer = dialog::show_with(ctx, egui::Id::unique("mute-until"), tr("Mute this chat until…"), "", Some(tr("Cancel")), &[(tr("Mute"), Variant::StrongPrimary)], |ui| {
             ui.add_space(12.);
             let palette = Palette::of(ui.ctx());
-            for (label, value, hint) in [("Date", &mut date, "YYYY-MM-DD"), ("Time", &mut time, "HH:MM")] {
+            for (label, value, hint) in [(tr("Date"), &mut date, "YYYY-MM-DD"), (tr("Time"), &mut time, "HH:MM")] {
                 ui.label(RichText::new(label).font(theme::medium(13.)).color(palette.text));
                 ui.add_space(4.);
                 ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(ui.available_width()));
@@ -925,11 +926,11 @@ pub fn custom_time_dialogs(app: &mut App, ctx: &egui::Context) {
 pub fn delete_chat_dialog(app: &mut App, ctx: &egui::Context) {
     let Some((id, member)) = app.panes.delete_chat.clone() else { return };
     let description = if member {
-        "All messages in this chat will be deleted from all your devices. You will still be a member of this group."
+        tr("All messages in this chat will be deleted from all your devices. You will still be a member of this group.")
     } else {
-        "All messages in this chat will be deleted from all your devices."
+        tr("All messages in this chat will be deleted from all your devices.")
     };
-    match crate::dialog::confirm(ctx, egui::Id::unique("delete-chat"), "Delete chat?", description, "Delete", crate::dialog::Variant::StrongDestructive) {
+    match crate::dialog::confirm(ctx, egui::Id::unique("delete-chat"), tr("Delete chat?"), description, tr("Delete"), crate::dialog::Variant::StrongDestructive) {
         Some(crate::dialog::Choice::Action) => {
             app.panes.delete_chat = None;
             if app.panes.details.as_ref().is_some_and(|d| d.conversation == id) {
@@ -945,26 +946,26 @@ pub fn delete_chat_dialog(app: &mut App, ctx: &egui::Context) {
 /// Desktop's mute durations; `0` unmutes and `i64::MAX` is "Always".
 pub fn mute_choices(muted: bool) -> Vec<(&'static str, i64)> {
     if muted {
-        return vec![("Unmute", 0)];
+        return vec![(tr("Unmute"), 0)];
     }
     let now = chrono::Utc::now().timestamp_millis();
     let hour = 3_600_000;
     // getMuteValuesOptions, without "Until…" for now.
-    vec![("1 hour", now + hour), ("8 hours", now + 8 * hour), ("1 day", now + 24 * hour), ("1 week", now + 7 * 24 * hour), ("Always", i64::MAX)]
+    vec![(tr("1 hour"), now + hour), (tr("8 hours"), now + 8 * hour), (tr("1 day"), now + 24 * hour), (tr("1 week"), now + 7 * 24 * hour), (tr("Always"), i64::MAX)]
 }
 
 /// Desktop's "More actions" menu over the chat list.
 pub fn list_menu(app: &mut App, m: &mut crate::menu::Menu) {
-    if m.item(Some("archive"), "View Archive") {
+    if m.item(Some("archive"), tr("View Archive")) {
         app.panes.archived = true;
     }
     let custom = app.panes.folders.iter().any(|f| f.folder_type == langis_store::ChatFolderType::Custom);
-    if !custom && m.item(Some("folder-plus"), "Add chat folder") {
+    if !custom && m.item(Some("folder-plus"), tr("Add chat folder")) {
         app.tab = crate::app::Tab::Settings;
         app.settings.page = crate::settings::Page::ChatFolders;
         app.settings.folder = Some((crate::settings::new_id(), true, langis_store::ChatFolderParams::defaults()));
     }
-    if custom && m.item(Some("folder-settings"), "Folder settings") {
+    if custom && m.item(Some("folder-settings"), tr("Folder settings")) {
         app.tab = crate::app::Tab::Settings;
         app.settings.page = crate::settings::Page::ChatFolders;
     }
@@ -982,7 +983,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
             .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin::symmetric(24, 16)))
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new("Your request to join has been sent to the group admin. You'll be notified when they take action.").font(theme::regular(13.)).color(palette.text_secondary));
+                    ui.label(RichText::new(tr("Your request to join has been sent to the group admin. You'll be notified when they take action.")).font(theme::regular(13.)).color(palette.text_secondary));
                     ui.add_space(10.);
                     if widgets::pill_button(ui, "Cancel request", false).clicked() {
                         app.panes.confirm_cancel_join = Some(c.id.clone());
@@ -1003,7 +1004,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                 ui.vertical_centered(|ui| {
                     let text = if c.ended { "This group was ended by an admin." } else { "You are no longer a member of this group." };
                     ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
-                    if ui.link("Delete chat").clicked() {
+                    if ui.link(tr("Delete chat")).clicked() {
                         app.panes.delete_chat = Some((c.id.clone(), false));
                     }
                 });
@@ -1022,7 +1023,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                 let group = c.kind == ConversationKind::Group;
                 let safety = if palette.dark { theme::rgb(0xeb977d) } else { theme::rgb(0xb94b29) };
                 ui.horizontal(|ui| {
-                    let line = ui.painter().layout_no_wrap("Review requests carefully".into(), theme::medium(13.), safety);
+                    let line = ui.painter().layout_no_wrap(tr("Review requests carefully").into(), theme::medium(13.), safety);
                     let w = 16. + 4. + line.size().x;
                     ui.add_space(((ui.available_width() - w) / 2.).max(0.));
                     let (at, _) = ui.allocate_exact_size(Vec2::new(w, 20.), Sense::hover());
@@ -1034,26 +1035,26 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                 let text = match (group, blocked) {
                     (false, true) => format!("Let {name} message you and share your name and photo with them? You won't receive any messages until you unblock them."),
                     (false, false) => format!("Let {name} message you and share your name and photo with them? They won\u{2019}t know you\u{2019}ve seen their messages until you accept."),
-                    (true, true) => "Unblock this group and share your name and photo with its members? You won't receive any messages until you unblock them.".into(),
-                    (true, false) => "Join this group and share your name and photo with its members? They won\u{2019}t know you\u{2019}ve seen their messages until you accept.".into(),
+                    (true, true) => tr("Unblock this group and share your name and photo with its members? You won't receive any messages until you unblock them.").into(),
+                    (true, false) => tr("Join this group and share your name and photo with its members? They won\u{2019}t know you\u{2019}ve seen their messages until you accept.").into(),
                 };
                 ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
                 ui.add_space(12.);
                 use widgets::Axo;
                 let mut buttons: Vec<(&str, Axo, MessageRequestResponse)> = Vec::new();
                 if !blocked {
-                    buttons.push(("Block", Axo::SubtleDestructive, MessageRequestResponse::Block));
+                    buttons.push((tr("Block"), Axo::SubtleDestructive, MessageRequestResponse::Block));
                 }
                 if c.reported || blocked {
-                    buttons.push(("Delete", Axo::SubtleDestructive, MessageRequestResponse::Delete));
+                    buttons.push((tr("Delete"), Axo::SubtleDestructive, MessageRequestResponse::Delete));
                 }
                 if !c.reported {
-                    buttons.push(("Report...", Axo::SubtleDestructive, MessageRequestResponse::Spam));
+                    buttons.push((tr("Report..."), Axo::SubtleDestructive, MessageRequestResponse::Spam));
                 }
                 if blocked {
-                    buttons.push(("Unblock", Axo::SubtleSecondary, MessageRequestResponse::Unknown));
+                    buttons.push((tr("Unblock"), Axo::SubtleSecondary, MessageRequestResponse::Unknown));
                 } else {
-                    buttons.push(("Accept", Axo::SubtleSecondary, MessageRequestResponse::Accept));
+                    buttons.push((tr("Accept"), Axo::SubtleSecondary, MessageRequestResponse::Accept));
                 }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.;
@@ -1082,7 +1083,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
 fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation) {
     use crate::dialog::{Answer, Variant};
     if app.panes.confirm_cancel_join.as_ref() == Some(&c.id) {
-        match crate::dialog::show(ctx, egui::Id::unique("cancel-join"), "Cancel your request to join this group?", "If you cancel, you can ask to join again with the group link.", Some("Not now"), &[("Cancel request", Variant::StrongDestructive)]) {
+        match crate::dialog::show(ctx, egui::Id::unique("cancel-join"), tr("Cancel your request to join this group?"), "If you cancel, you can ask to join again with the group link.", Some(tr("Not now")), &[("Cancel request", Variant::StrongDestructive)]) {
             Some(Answer::Action(_)) => {
                 app.panes.confirm_cancel_join = None;
                 app.send(Command::CancelJoinRequest { conversation: c.id.clone() });
@@ -1098,43 +1099,43 @@ fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation
     let (title, body, actions): (String, String, Vec<(&str, Variant, MessageRequestResponse)>) = match answer {
         MessageRequestResponse::Block if group => (
             format!("Block and Leave {who}?"),
-            "You will no longer receive messages or updates from this group and members won't be able to add you to this group again.".into(),
-            vec![("Block", Variant::StrongDestructive, MessageRequestResponse::Block)],
+            tr("You will no longer receive messages or updates from this group and members won't be able to add you to this group again.").into(),
+            vec![(tr("Block"), Variant::StrongDestructive, MessageRequestResponse::Block)],
         ),
         MessageRequestResponse::Block => (
             format!("Block {who}?"),
-            "Blocked people won't be able to call you or send you messages.".into(),
-            vec![("Block", Variant::StrongDestructive, MessageRequestResponse::Block)],
+            tr("Blocked people won't be able to call you or send you messages.").into(),
+            vec![(tr("Block"), Variant::StrongDestructive, MessageRequestResponse::Block)],
         ),
         MessageRequestResponse::Delete if group => (
             format!("Delete and Leave {who}?"),
-            "You will leave this group, and it will be deleted from all your devices.".into(),
-            vec![("Delete and Leave", Variant::StrongDestructive, MessageRequestResponse::Delete)],
+            tr("You will leave this group, and it will be deleted from all your devices.").into(),
+            vec![(tr("Delete and Leave"), Variant::StrongDestructive, MessageRequestResponse::Delete)],
         ),
         MessageRequestResponse::Delete => (
-            "Delete chat?".into(),
-            "This chat will be deleted from all of your devices.".into(),
-            vec![("Delete", Variant::StrongDestructive, MessageRequestResponse::Delete)],
+            tr("Delete chat?").into(),
+            tr("This chat will be deleted from all of your devices.").into(),
+            vec![(tr("Delete"), Variant::StrongDestructive, MessageRequestResponse::Delete)],
         ),
         MessageRequestResponse::Spam => (
-            "Report as spam?".into(),
+            tr("Report as spam?").into(),
             match (group, &c.group_state.membership) {
-                (false, _) => "Signal will be notified that this person may be sending spam. Signal can\u{2019}t see the content of any chats.".into(),
+                (false, _) => tr("Signal will be notified that this person may be sending spam. Signal can\u{2019}t see the content of any chats.").into(),
                 (true, langis_store::Membership::Invited { by: Some(by) }) => format!("Signal will be notified that {}, who invited you to this group, may be sending spam. Signal can\u{2019}t see the content of any chats.", app.name(by)),
-                (true, _) => "Signal will be notified that the person who invited you to this group may be sending spam. Signal can\u{2019}t see the content of any chats.".into(),
+                (true, _) => tr("Signal will be notified that the person who invited you to this group may be sending spam. Signal can\u{2019}t see the content of any chats.").into(),
             },
-            vec![("Report Spam", Variant::SubtleDestructive, MessageRequestResponse::Spam), ("Report and Block", Variant::StrongDestructive, MessageRequestResponse::BlockAndSpam)],
+            vec![(tr("Report Spam"), Variant::SubtleDestructive, MessageRequestResponse::Spam), (tr("Report and Block"), Variant::StrongDestructive, MessageRequestResponse::BlockAndSpam)],
         ),
         MessageRequestResponse::Accept => (
-            "Accept request?".into(),
+            tr("Accept request?").into(),
             "Only accept requests from people you trust. Signal will never message you for a registration code, PIN, or recovery key.".into(),
-            vec![("Accept", Variant::StrongPrimary, MessageRequestResponse::Accept)],
+            vec![(tr("Accept"), Variant::StrongPrimary, MessageRequestResponse::Accept)],
         ),
         // Unblock: accepting a blocked chat unblocks it.
         MessageRequestResponse::Unknown => (
             format!("Unblock {who}?"),
-            if group { "Group members will be able to add you to this group again.".into() } else { "You will be able to message and call each other.".into() },
-            vec![("Unblock", Variant::StrongPrimary, MessageRequestResponse::Accept)],
+            if group { tr("Group members will be able to add you to this group again.").into() } else { tr("You will be able to message and call each other.").into() },
+            vec![(tr("Unblock"), Variant::StrongPrimary, MessageRequestResponse::Accept)],
         ),
         other => {
             app.panes.confirm_answer = None;
@@ -1143,7 +1144,7 @@ fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation
         }
     };
     let buttons: Vec<(&str, Variant)> = actions.iter().map(|(l, v, _)| (*l, *v)).collect();
-    match crate::dialog::show(ctx, egui::Id::unique("message-request-confirm"), &title, &body, Some("Cancel"), &buttons) {
+    match crate::dialog::show(ctx, egui::Id::unique("message-request-confirm"), &title, &body, Some(tr("Cancel")), &buttons) {
         Some(Answer::Action(i)) => {
             app.panes.confirm_answer = None;
             let chosen = actions[i].2;
@@ -1208,7 +1209,7 @@ fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_s
     let (inner, response) = tile(ui, palette, 52., egui::Id::unique("compose-row").with(&c.id.0));
     let avatar = Rect::from_min_size(Pos2::new(inner.left() + 14., inner.center().y - 18.), Vec2::splat(36.));
     widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
-    let title = if c.kind == ConversationKind::NoteToSelf { "Note to Self".to_owned() } else { c.title.clone() };
+    let title = if c.kind == ConversationKind::NoteToSelf { tr("Note to Self").to_owned() } else { c.title.clone() };
     let person = c.kind == ConversationKind::Direct;
     let right = if person { inner.right() - 44. } else { inner.right() - 14. };
     let clip = Rect::from_min_max(Pos2::new(avatar.right() + 12., inner.top()), Pos2::new(right, inner.bottom()));
@@ -1252,16 +1253,16 @@ fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_s
         }
         let mut action = None;
         crate::menu::show(ui.ctx(), menu_id, |m| {
-            if m.item(Some("message"), "Message") {
+            if m.item(Some("message"), tr("Message")) {
                 action = Some(0);
             }
-            if m.item(Some("phone"), "Voice call") {
+            if m.item(Some(tr("phone")), tr("Voice call")) {
                 action = Some(1);
             }
-            if m.item(Some("videocamera"), "Video call") {
+            if m.item(Some("videocamera"), tr("Video call")) {
                 action = Some(2);
             }
-            if m.item(Some("block"), "Block") {
+            if m.item(Some("block"), tr("Block")) {
                 action = Some(3);
             }
         });
@@ -1336,10 +1337,10 @@ pub fn may_add(app: &mut App, total: usize) -> bool {
 fn size_limit_dialog(app: &mut App, ui: &Ui) {
     let Some(limit) = app.panes.size_limit else { return };
     let (title, body) = match limit {
-        SizeLimit::Recommended(n) => ("Recommended member limit reached".to_owned(), format!("Signal groups perform best with {n} members or fewer. Adding more members will cause delays sending and receiving messages.")),
-        SizeLimit::Max(n) => ("Maximum group size reached".to_owned(), format!("Signal groups can have a maximum of {n} members.")),
+        SizeLimit::Recommended(n) => (tr("Recommended member limit reached").to_owned(), format!("Signal groups perform best with {n} members or fewer. Adding more members will cause delays sending and receiving messages.")),
+        SizeLimit::Max(n) => (tr("Maximum group size reached").to_owned(), format!("Signal groups can have a maximum of {n} members.")),
     };
-    if crate::dialog::show(ui.ctx(), egui::Id::unique("group-size-limit"), &title, &body, None, &[("Okay", crate::dialog::Variant::StrongPrimary)]).is_some() {
+    if crate::dialog::show(ui.ctx(), egui::Id::unique("group-size-limit"), &title, &body, None, &[(tr("Okay"), crate::dialog::Variant::StrongPrimary)]).is_some() {
         app.panes.size_limit = None;
     }
 }
@@ -1349,10 +1350,10 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
     ui.add_space(12.);
     ui.horizontal(|ui| {
         ui.add_space(12.);
-        if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             *keep = false;
         }
-        ui.label(RichText::new("Choose members").font(theme::semibold(18.)));
+        ui.label(RichText::new(tr("Choose members")).font(theme::semibold(18.)));
     });
     ui.add_space(6.);
     let field = ui.horizontal(|ui| {
@@ -1406,7 +1407,7 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
     egui::ScrollArea::vertical().max_height(body_h).min_scrolled_height(body_h).auto_shrink(false).show(ui, |ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         if !people.is_empty() && !username {
-            list_header(ui, palette, "Contacts");
+            list_header(ui, palette, tr("Contacts"));
         }
         for c in people.iter().filter(|_| !username) {
             let Some(sid) = c.id.as_direct() else { continue };
@@ -1425,7 +1426,7 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
             }
         }
         if username || phone {
-            list_header(ui, palette, if username { "Find by username" } else { "Find by phone number" });
+            list_header(ui, palette, if username { tr("Find by username") } else { tr("Find by phone number") });
             let shown = query.trim().trim_start_matches('@').to_owned();
             if step_button(ui, palette, if username { "at" } else { "number" }, &shown) || enter {
                 app.send(Command::FindRecipient { query: query.trim().to_owned() });
@@ -1433,11 +1434,11 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
         }
         if people.is_empty() && !username && !phone {
             ui.add_space(28.);
-            ui.vertical_centered(|ui| body(ui, palette, "No contacts found"));
+            ui.vertical_centered(|ui| body(ui, palette, tr("No contacts found")));
         }
     });
     let mut done = false;
-    footer_button(ui, if members.is_empty() { "Skip" } else { "Next" }, true, |clicked| done = clicked);
+    footer_button(ui, if members.is_empty() { tr("Skip") } else { tr("Next") }, true, |clicked| done = clicked);
     done
 }
 
@@ -1467,10 +1468,10 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 ui.add_space(12.);
-                if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back to member selection").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back to member selection")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     *picking = true;
                 }
-                ui.label(RichText::new("Name this group").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Name this group")).font(theme::semibold(18.)));
             });
             let footer = 64.;
             let body_h = (ui.available_height() - footer).max(0.);
@@ -1503,7 +1504,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 ui.add_space(16.);
                 ui.horizontal(|ui| {
                     ui.add_space(16.);
-                    ui.label(RichText::new("Disappearing messages").font(theme::regular(14.)));
+                    ui.label(RichText::new(tr("Disappearing messages")).font(theme::regular(14.)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(16.);
                         let mut custom = false;
@@ -1515,7 +1516,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                     });
                 });
                 ui.add_space(8.);
-                list_header(ui, &palette, "Members");
+                list_header(ui, &palette, tr("Members"));
                 for m in members.iter() {
                     let (inner, _) = tile(ui, &palette, 52., egui::Id::unique("new-group-member").with(m));
                     let avatar = Rect::from_min_size(Pos2::new(inner.left() + 14., inner.center().y - 18.), Vec2::splat(36.));
@@ -1526,7 +1527,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 }
             });
             let ready = !name.trim().is_empty();
-            footer_button(ui, "Create", ready, |create| {
+            footer_button(ui, tr("Create"), ready, |create| {
                 if create {
                     app.send(Command::CreateGroup { title: name.trim().to_owned(), members: members.clone(), avatar: avatar.clone(), expire_timer: *timer });
                 }
@@ -1536,10 +1537,10 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 ui.add_space(12.);
-                if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back to inbox").clicked() {
+                if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back to inbox")).clicked() {
                     keep = false;
                 }
-                ui.label(RichText::new("New chat").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("New chat")).font(theme::semibold(18.)));
             });
             ui.add_space(6.);
             let field = ui.horizontal(|ui| {
@@ -1570,13 +1571,13 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 if q.is_empty() {
-                    if step_button(ui, &palette, "group", "New group") {
+                    if step_button(ui, &palette, "group", tr("New group")) {
                         next = Some(Compose::Group { picking: true, query: String::new(), members: Vec::new(), title: String::new(), timer: 0, avatar: None });
                     }
-                    if step_button(ui, &palette, "at", "Find by username") {
+                    if step_button(ui, &palette, "at", tr("Find by username")) {
                         next = Some(Compose::Find { phone: false, query: String::new(), searching: false, found: None, country: String::new() });
                     }
-                    if step_button(ui, &palette, "number", "Find by phone number") {
+                    if step_button(ui, &palette, "number", tr("Find by phone number")) {
                         let country = app.phone.as_deref().and_then(crate::countries::of_number).unwrap_or("US").to_owned();
                         next = Some(Compose::Find { phone: true, query: String::new(), searching: false, found: None, country });
                     }
@@ -1590,7 +1591,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 }
                 if !username {
                     if !contacts.is_empty() {
-                        list_header(ui, &palette, "Contacts");
+                        list_header(ui, &palette, tr("Contacts"));
                         for c in &contacts {
                             if conversation_tile(app, ui, &palette, c) {
                                 open = Some(c.id.clone());
@@ -1598,7 +1599,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                         }
                     }
                     if !groups.is_empty() {
-                        list_header(ui, &palette, "Groups");
+                        list_header(ui, &palette, tr("Groups"));
                         for c in &groups {
                             if conversation_tile(app, ui, &palette, c) {
                                 open = Some(c.id.clone());
@@ -1607,7 +1608,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                     }
                 }
                 if (username || phone) && link.is_none() {
-                    list_header(ui, &palette, if username { "Find by username" } else { "Find by phone number" });
+                    list_header(ui, &palette, if username { tr("Find by username") } else { tr("Find by phone number") });
                     let shown = if username { query.trim().trim_start_matches('@').to_owned() } else { query.trim().to_owned() };
                     if step_button(ui, &palette, if username { "at" } else { "number" }, &shown) || (enter && !*searching) {
                         *searching = true;
@@ -1636,16 +1637,16 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 }
                 if !q.is_empty() && contacts.is_empty() && groups.is_empty() && !username && !phone && link.is_none() {
                     ui.add_space(28.);
-                    ui.vertical_centered(|ui| body(ui, &palette, "No chats found"));
+                    ui.vertical_centered(|ui| body(ui, &palette, tr("No chats found")));
                 }
             });
         }
         Compose::Find { phone, query, searching, found, country } => {
-            let heading = if *phone { "Find by phone number" } else { "Find by username" };
+            let heading = if *phone { tr("Find by phone number") } else { tr("Find by username") };
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 ui.add_space(12.);
-                if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     next = Some(Compose::Chat { query: String::new(), searching: false, found: None });
                 }
                 ui.label(RichText::new(heading).font(theme::semibold(18.)));
@@ -1667,7 +1668,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             }
             let field = ui.horizontal(|ui| {
                 ui.add_space(16.);
-                ui.add(egui::TextEdit::singleline(query).hint_text(if *phone { "Phone number" } else { "Username" }).desired_width(ui.available_width() - 16.))
+                ui.add(egui::TextEdit::singleline(query).hint_text(if *phone { tr("Phone number") } else { tr("Username") }).desired_width(ui.available_width() - 16.))
             });
             if ui.ctx().memory(|m| m.focused().is_none()) {
                 field.inner.request_focus();
@@ -1679,7 +1680,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             if !*phone {
                 ui.add_space(6.);
                 egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 16, top: 0, bottom: 0 }).show(ui, |ui| {
-                    body(ui, &palette, "Enter a username followed by a dot and its set of numbers.");
+                    body(ui, &palette, tr("Enter a username followed by a dot and its set of numbers."));
                 });
             }
             if let Some(Err(_)) = found {
@@ -1697,7 +1698,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             ui.horizontal(|ui| {
                 ui.add_space(16.);
                 let ready = !query.trim().is_empty() && !*searching;
-                let label = if *searching { "…" } else { "Next" };
+                let label = if *searching { "…" } else { tr("Next") };
                 let clicked = ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, label, true).clicked()).inner;
                 if (clicked || enter) && ready {
                     *searching = true;
@@ -1763,7 +1764,7 @@ fn group_link_dialog(app: &mut App, ui: &mut Ui) {
                 body(ui, &palette, "An admin of this group must approve your request before you can join.");
             }
         });
-        answer = buttons(ui, &[if preview.approval { "Request to join" } else { "Join" }, "Cancel"]);
+        answer = buttons(ui, &[if preview.approval { "Request to join" } else { tr("Join") }, tr("Cancel")]);
     });
     match answer {
         Some(0) => app.send(Command::JoinGroupLink { url: preview.url }),
@@ -1807,7 +1808,7 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     // link that needs an admin's approval.
     let link = conversation.as_call_link().and_then(|room| app.panes.links.iter().find(|l| l.room_id == room)).cloned();
     let asks = link.as_ref().is_some_and(|l| l.admin_key.is_none() && l.restrictions == langis_store::CallLinkRestrictions::AdminApproval);
-    let join_label = if full { "Call full" } else if asks { "Ask to join" } else if group && !users.is_empty() { "Join" } else { "Start" };
+    let join_label = if full { tr("Call full") } else if asks { tr("Ask to join") } else if group && !users.is_empty() { tr("Join") } else { tr("Start") };
     // The Ring toggle: a group's (not a link's) call no one's in yet, the
     // group small enough to ring (Desktop's `isGroupTooLargeToRing`, 16).
     let ringable = conversation.is_group() && users.is_empty() && chat.as_ref().is_some_and(|c| c.members.len() <= 16);
@@ -1856,7 +1857,7 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         if !shown {
             let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
             widgets::paint_avatar(ui, Rect::from_center_size(frame.center(), Vec2::splat(96.)), &spec);
-            let note = if video { "Starting camera\u{2026}" } else { "Your camera is off" };
+            let note = if video { "Starting camera\u{2026}" } else { tr("Your camera is off") };
             ui.painter().text(frame.center() + Vec2::new(0., 72.), egui::Align2::CENTER_CENTER, note, theme::regular(13.), egui::Color32::from_white_alpha(200));
         }
         // `CallingPreCallInfo`.
@@ -1872,7 +1873,7 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         let who = if group {
             match users.len() {
                 0 if ringable && !listed.is_empty() => if ring { format!("Signal will ring {listed}") } else { format!("{listed} will be notified") },
-                0 => "No one else is here".to_owned(),
+                0 => tr("No one else is here").to_owned(),
                 1 => format!("{} is in this call", app.name(&users[0])),
                 2 => format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])),
                 3 => format!("{}, {}, and {} are in this call", app.name(&users[0]), app.name(&users[1]), app.name(&users[2])),
@@ -1891,7 +1892,7 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         let pill_w = label.size().x + 48.;
         let total = 56. + 16. + 56. + if ringable { 16. + 56. } else { 0. } + 24. + pill_w;
         let mut x = screen.center().x - total / 2.;
-        for (symbol_on, symbol_off, tip, on) in [("videocamera-fill", "videocamera-slash-fill", "Camera", &mut video), ("mic-fill", "mic-slash-fill", "Microphone", &mut audio)] {
+        for (symbol_on, symbol_off, tip, on) in [("videocamera-fill", "videocamera-slash-fill", "Camera", &mut video), ("mic-fill", "mic-slash-fill", tr("Microphone"), &mut audio)] {
             let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::splat(56.));
             let r = ui.interact(rect, ui.scope_id().with(("lobby-toggle", tip)), Sense::click());
             let fill = if *on { theme::rgb(0x5e5e5e) } else { white };
@@ -1999,7 +2000,7 @@ fn captcha_dialog(app: &mut App, ui: &mut Ui) {
         }
         ui.add_space(8.);
         widgets::text_field(ui, &mut token, "signalcaptcha://…", false);
-        answer = buttons(ui, &["Continue", "Skip verification"]);
+        answer = buttons(ui, &[tr("Continue"), tr("Skip verification")]);
     });
     match answer {
         Some(0) if !token.trim().is_empty() => {
@@ -2018,9 +2019,9 @@ fn critical_alert(app: &mut App, ui: &mut Ui) {
     let palette = Palette::of(ui.ctx());
     let mut ok = false;
     modal(ui, "critical-alert", 380., |ui| {
-        title(ui, "Open Signal on your phone");
+        title(ui, tr("Open Signal on your phone"));
         body(ui, &palette, "Your phone hasn't been used in a long time. Open Signal on it soon, or this device will be unlinked.");
-        ok = buttons(ui, &["OK"]).is_some();
+        ok = buttons(ui, &[tr("OK")]).is_some();
     });
     if ok {
         app.panes.critical_modal = false;
@@ -2037,7 +2038,7 @@ fn key_transparency_dialog(app: &mut App, ui: &mut Ui) {
     modal(ui, "kt-failed", 380., |ui| {
         title(ui, "Automatic Key Verification is currently unavailable");
         body(ui, &palette, "You can still verify safety numbers by comparing them with your contacts in person.");
-        ok = buttons(ui, &["OK"]).is_some();
+        ok = buttons(ui, &[tr("OK")]).is_some();
     });
     if ok {
         app.panes.key_transparency_failed = false;

@@ -7,6 +7,7 @@ use langis_core::keys::KeySource;
 use crate::app::{App, Phase};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// The provisioning URL as a QR code texture, black on white.
 pub fn qr_texture(ctx: &egui::Context, url: &str) -> Option<TextureHandle> {
@@ -81,7 +82,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             });
             ui.add_space(20.);
-            if widgets::pill_button(ui, "Continue", true).clicked() {
+            if widgets::pill_button(ui, tr("Continue"), true).clicked() {
                 if !*passphrase {
                     start = Some(KeySource::File);
                 } else if first.is_empty() {
@@ -148,7 +149,7 @@ fn loading(ui: &mut Ui, palette: &Palette) {
             let phase = ((t * 3. - i as f32 * 0.5).sin() + 1.) / 2.;
             ui.painter().circle_filled(egui::Pos2::new(center.x - 24. + i as f32 * 24., center.y), 7., palette.text_secondary.gamma_multiply(0.3 + 0.7 * phase));
         }
-        ui.painter().text(egui::Pos2::new(center.x, center.y + 32.), egui::Align2::CENTER_TOP, "Loading...", theme::regular(14.), palette.text_secondary);
+        ui.painter().text(egui::Pos2::new(center.x, center.y + 32.), egui::Align2::CENTER_TOP, tr("Loading..."), theme::regular(14.), palette.text_secondary);
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     });
 }
@@ -163,9 +164,9 @@ fn syncing(ui: &mut Ui, palette: &Palette) {
             ui.add_space((ui.available_height() / 2. - 80.).max(24.));
             crate::widgets::spinner(ui, 50.);
             ui.add_space(24.);
-            ui.label(RichText::new("Syncing contacts and groups").font(theme::semibold(20.)));
+            ui.label(RichText::new(tr("Syncing contacts and groups")).font(theme::semibold(20.)));
             ui.add_space(8.);
-            ui.label(RichText::new("Note: Your chat history will not be synced to this device").font(theme::regular(14.)).color(palette.text_secondary));
+            ui.label(RichText::new(tr("Note: Your chat history will not be synced to this device")).font(theme::regular(14.)).color(palette.text_secondary));
         });
     });
 }
@@ -221,7 +222,7 @@ fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHan
         ui.scope_builder(egui::UiBuilder::new().max_rect(text), |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             ui.add_space((text.height() - 196.).max(0.) / 2.);
-            let mut title = egui::text::LayoutJob::simple("Scan this code in the Signal app on your phone".into(), theme::semibold(20.), black, text.width());
+            let mut title = egui::text::LayoutJob::simple(tr("Scan this code in the Signal app on your phone").into(), theme::semibold(20.), black, text.width());
             title.sections[0].format.line_height = Some(26.);
             ui.label(title);
             ui.add_space(8.);
@@ -234,10 +235,10 @@ fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHan
                 ui.label(job);
             };
             step(ui, &[("1. Open Signal on your phone", false)]);
-            step(ui, &[("2. Tap into ", false), ("Settings", true), (", then tap ", false), ("Linked Devices", true)]);
-            step(ui, &[("3. Tap ", false), ("Link a New Device", true)]);
+            step(ui, &[("2. Tap into ", false), (tr("Settings"), true), (", then tap ", false), (tr("Linked Devices"), true)]);
+            step(ui, &[("3. Tap ", false), (tr("Link a New Device"), true)]);
             ui.add_space(8.);
-            let help = ui.add(egui::Label::new(RichText::new("Need help?").font(theme::regular(14.)).color(blue)).sense(egui::Sense::click()));
+            let help = ui.add(egui::Label::new(RichText::new(tr("Need help?")).font(theme::regular(14.)).color(blue)).sense(egui::Sense::click()));
             if help.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 crate::chat::open_externally(SUPPORT_PAGE);
             }

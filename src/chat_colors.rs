@@ -11,6 +11,7 @@ use langis_store::{ChatColor, ChatColors, ConversationId, CustomColor, HueSatura
 use langis_core::Command;
 
 use crate::app::{App, Loaded};
+use crate::i18n::tr;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Bubble {
@@ -214,9 +215,9 @@ fn sample_bubbles(ui: &mut egui::Ui, palette: &crate::theme::Palette, selected: 
             ui.set_width(ui.available_width());
             let width = ui.available_width();
             let samples = [
-                (true, "Here's a preview of the chat color.", "4h"),
-                (false, "Another bubble.", "2h"),
-                (true, "The color is visible to only you.", "Now"),
+                (true, tr("Here's a preview of the chat color."), "4h"),
+                (false, tr("Another bubble."), "2h"),
+                (true, tr("The color is visible to only you."), tr("Now")),
             ];
             let fixed = ui.max_rect();
             for (i, (outgoing, text, time)) in samples.iter().enumerate() {
@@ -308,13 +309,13 @@ pub fn picker(app: &mut App, ui: &mut egui::Ui, chat: Option<ConversationId>) {
             // `CustomColorBubble`'s menu.
             if let ChatColor::Custom { id, value } = color {
                 crate::menu::context(ui, &response, egui::Id::unique("custom-color-menu").with(id), |m| {
-                    if m.item(Some("pencil"), "Edit color") {
+                    if m.item(Some("pencil"), tr("Edit color")) {
                         app.color_editor = Some(Editor::new(Some(id.clone()), chat.clone(), *value));
                     }
-                    if m.item(Some("copy"), "Duplicate") {
+                    if m.item(Some("copy"), tr("Duplicate")) {
                         app.send(Command::EditChatColors(ChatColorEdit::AddCustom { id: crate::settings::new_id(), color: *value, chat: chat.clone() }));
                     }
-                    if m.item(Some("trash"), "Delete") {
+                    if m.item(Some("trash"), tr("Delete")) {
                         let used = colors.chats_with(id) + usize::from(matches!(&colors.default, ChatColor::Custom { id: d, .. } if d == id));
                         if used == 0 {
                             app.send(Command::EditChatColors(ChatColorEdit::RemoveCustom { id: id.clone() }));
@@ -338,7 +339,7 @@ pub fn picker(app: &mut App, ui: &mut egui::Ui, chat: Option<ConversationId>) {
     if let Some((id, used)) = ui.ctx().data(|d| d.get_temp::<(String, usize)>(delete)) {
         use crate::dialog::{self, Choice, Variant};
         let body = if used == 1 { "This custom color is used in 1 chat. Do you want to delete it for all chats?".to_owned() } else { format!("This custom color is used in {used} chats. Do you want to delete it for all chats?") };
-        let answer = dialog::confirm(ui.ctx(), delete.with("dialog"), "Delete color", &body, "Delete", Variant::StrongDestructive);
+        let answer = dialog::confirm(ui.ctx(), delete.with("dialog"), tr("Delete color"), &body, tr("Delete"), Variant::StrongDestructive);
         if answer == Some(Choice::Action) {
             app.send(Command::EditChatColors(ChatColorEdit::RemoveCustom { id }));
         }
@@ -350,22 +351,22 @@ pub fn picker(app: &mut App, ui: &mut egui::Ui, chat: Option<ConversationId>) {
     let ask = egui::Id::unique("chat-color-reset");
     axo_list::list(ui, None, None, |ui| {
         if let Some(chat) = &chat
-            && axo_list::item(ui, Item::new("Reset chat color"), End::Click).clicked()
+            && axo_list::item(ui, Item::new(tr("Reset chat color")), End::Click).clicked()
         {
             app.send(Command::EditChatColors(ChatColorEdit::Chat(chat.clone(), None)));
         }
-        if axo_list::item(ui, Item::new("Reset all chat colors"), End::Click).clicked() {
+        if axo_list::item(ui, Item::new(tr("Reset all chat colors")), End::Click).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(ask, true));
         }
     });
     if ui.ctx().data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
         use crate::dialog::{self, Answer, Variant};
-        let message = "Would you like to override all chat colors?";
+        let message = tr("Would you like to override all chat colors?");
         let answer = if chat.is_none() {
             // Desktop asks whether the default goes too.
-            dialog::show(ui.ctx(), ask.with("dialog"), "Reset Chat Colors", message, Some("Cancel"), &[("Reset default colors", Variant::StrongPrimary), ("Reset all chat colors", Variant::StrongPrimary)])
+            dialog::show(ui.ctx(), ask.with("dialog"), tr("Reset Chat Colors"), message, Some(tr("Cancel")), &[(tr("Reset default colors"), Variant::StrongPrimary), (tr("Reset all chat colors"), Variant::StrongPrimary)])
         } else {
-            dialog::show(ui.ctx(), ask.with("dialog"), "Reset all chat colors", message, Some("Cancel"), &[("Reset", Variant::StrongPrimary)])
+            dialog::show(ui.ctx(), ask.with("dialog"), tr("Reset all chat colors"), message, Some(tr("Cancel")), &[(tr("Reset"), Variant::StrongPrimary)])
         };
         match (answer, chat.is_none()) {
             (Some(Answer::Action(0)), true) => app.send(Command::EditChatColors(ChatColorEdit::ResetDefault)),

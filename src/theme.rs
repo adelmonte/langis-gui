@@ -190,6 +190,32 @@ const EMOJI_FONTS: [&str; 4] = [
 
 /// Inter (Desktop's font) first, then the system's color emoji if there
 /// is one, then egui's own (monochrome emoji and symbols).
+/// The system font fontconfig has for `locale`'s script, when Inter lacks
+/// it and one's installed (for example Noto Sans CJK).
+fn script_font(locale: &str) -> Option<FontData> {
+    let lang = match locale {
+        "ja" => "ja",
+        "ko" => "ko",
+        "zh-CN" => "zh-cn",
+        "zh-HK" | "yue" => "zh-hk",
+        "zh-Hant" => "zh-tw",
+        "ka-GE" => "ka",
+        _ => return None,
+    };
+    let run = |args: &[&str]| std::process::Command::new("fc-match").args(args).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    // Only a font that really covers it (fc-match always answers).
+    let covered = std::process::Command::new("fc-list").args([&format!(":lang={lang}"), "family"]).output().ok().is_some_and(|o| !o.stdout.is_empty());
+    if !covered {
+        return None;
+    }
+    let found = run(&["-f", "%{file}|%{index}", &format!("sans-serif:lang={lang}")])?;
+    let (file, index) = found.split_once('|')?;
+    let bytes = std::fs::read(file).ok()?;
+    let mut data = FontData::from_owned(bytes);
+    data.index = index.trim().parse().unwrap_or(0);
+    Some(data)
+}
+
 pub fn fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let mut fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
@@ -212,6 +238,16 @@ pub fn fonts() -> FontDefinitions {
     fonts.families.insert(FontFamily::Name(EMOJI.into()), emoji_family);
     fonts.font_data.insert(SYMBOLS.into(), FontData::from_static(include_bytes!("../assets/fonts/SignalSymbols-Regular.ttf")).into());
     fonts.families.insert(FontFamily::Name(SYMBOLS.into()), vec![SYMBOLS.into()]);
+    // A language Inter can't write (Chinese, Japanese, Korean, Georgian):
+    // the system's font for it after Inter, from fontconfig.
+    if let Some(data) = script_font(crate::i18n::locale()) {
+        fonts.font_data.insert("Script".into(), data.into());
+        let at = fallbacks.iter().position(|f| f.as_str() == "Color Emoji").map(|i| i + 1).unwrap_or(0);
+        fallbacks.insert(at, "Script".into());
+        if let Some(family) = fonts.families.get_mut(&FontFamily::Name(EMOJI.into())) {
+            family.push("Script".into());
+        }
+    }
     for (name, bytes) in faces {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
         let mut family = vec![name.to_owned()];

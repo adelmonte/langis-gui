@@ -9,6 +9,7 @@ use image::RgbaImage;
 
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -525,19 +526,19 @@ impl Editor {
                     let fill = if on { palette.accent } else { Color32::from_gray(60) };
                     ui.add(egui::Button::new(RichText::new(label).color(Color32::WHITE).font(theme::medium(13.))).fill(fill).corner_radius(CornerRadius::same(16))).clicked()
                 };
-                for (mode, label) in [(Mode::Draw, "Draw"), (Mode::Text, "Text"), (Mode::Crop, "Crop")] {
+                for (mode, label) in [(Mode::Draw, tr("Draw")), (Mode::Text, tr("Text")), (Mode::Crop, "Crop")] {
                     if pill(ui, label, self.mode == mode) {
                         self.mode = mode;
                         self.typing = None;
                     }
                 }
-                if pill(ui, "Sticker", self.sticker_picker) {
+                if pill(ui, tr("Sticker"), self.sticker_picker) {
                     self.sticker_picker = !self.sticker_picker;
                 }
                 ui.add_space(12.);
                 match self.mode {
                     Mode::Draw => {
-                        if pill(ui, if self.highlighter { "Highlighter" } else { "Pen" }, false) {
+                        if pill(ui, if self.highlighter { tr("Highlighter") } else { tr("Pen") }, false) {
                             self.highlighter = !self.highlighter;
                         }
                         if pill(ui, WIDTHS[self.width].1, false) {
@@ -547,9 +548,9 @@ impl Editor {
                     }
                     Mode::Text => {
                         let name = match self.text_style {
-                            TextStyle::Regular => "Regular",
-                            TextStyle::Highlight => "Highlight",
-                            TextStyle::Outline => "Outline",
+                            TextStyle::Regular => tr("Regular"),
+                            TextStyle::Highlight => tr("Highlight"),
+                            TextStyle::Outline => tr("Outline"),
                         };
                         if pill(ui, name, false) {
                             self.text_style = match self.text_style {
@@ -570,7 +571,7 @@ impl Editor {
                             let label = &mut self.edits.labels[i];
                             let field = ui.add(egui::TextEdit::singleline(&mut label.text).hint_text("Add text").desired_width(220.));
                             field.request_focus();
-                            if pill(ui, "Remove", false) {
+                            if pill(ui, tr("Remove"), false) {
                                 self.remember();
                                 self.edits.labels.remove(i);
                                 self.typing = None;
@@ -580,33 +581,33 @@ impl Editor {
                         }
                     }
                     Mode::Crop => {
-                        for (preset, label) in [(CropPreset::Freeform, "Freeform"), (CropPreset::Square, "Square"), (CropPreset::Vertical, "9:16")] {
+                        for (preset, label) in [(CropPreset::Freeform, tr("Freeform")), (CropPreset::Square, tr("Square")), (CropPreset::Vertical, tr("9:16"))] {
                             if pill(ui, label, self.preset == preset) {
                                 self.apply_preset(preset);
                             }
                         }
-                        if pill(ui, "Rotate", false) {
+                        if pill(ui, tr("Rotate"), false) {
                             self.rotate();
                         }
-                        if pill(ui, "Flip", false) {
+                        if pill(ui, tr("Flip"), false) {
                             self.flip();
                         }
-                        if pill(ui, "Reset", false) {
+                        if pill(ui, tr("Reset"), false) {
                             self.remember();
                             self.edits.crop = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
                         }
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Done", true).clicked() {
+                    if widgets::pill_button(ui, tr("Done"), true).clicked() {
                         result = Some(Some(self.bake()));
                     }
                     // White on the editor's dark bar, whatever the theme.
-                    if ui.add(egui::Button::new(RichText::new("Cancel").color(Color32::WHITE).font(theme::medium(14.))).fill(Color32::from_gray(60)).corner_radius(CornerRadius::same(16))).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(tr("Cancel")).color(Color32::WHITE).font(theme::medium(14.))).fill(Color32::from_gray(60)).corner_radius(CornerRadius::same(16))).clicked() {
                         result = Some(None);
                     }
                     let can_redo = !self.redo.is_empty();
-                    if ui.add_enabled(can_redo, egui::Button::new(RichText::new("Redo").color(Color32::WHITE))).clicked()
+                    if ui.add_enabled(can_redo, egui::Button::new(RichText::new(tr("Redo")).color(Color32::WHITE))).clicked()
                         && let Some(next) = self.redo.pop()
                     {
                         let turned_changed = (next.turns, next.flip) != (self.edits.turns, self.edits.flip);
@@ -616,7 +617,7 @@ impl Editor {
                         }
                     }
                     let can_undo = !self.undo.is_empty();
-                    if ui.add_enabled(can_undo, egui::Button::new(RichText::new("Undo").color(Color32::WHITE))).clicked()
+                    if ui.add_enabled(can_undo, egui::Button::new(RichText::new(tr("Undo")).color(Color32::WHITE))).clicked()
                         && let Some(prev) = self.undo.pop()
                     {
                         let turned_changed = (prev.turns, prev.flip) != (self.edits.turns, self.edits.flip);

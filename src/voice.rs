@@ -17,6 +17,7 @@ use crate::app::{App, PendingSend};
 use crate::chat::ChatView;
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
+use crate::i18n::tr;
 
 /// The sample rate recorded and encoded (mono).
 const RATE: u32 = 48_000;
@@ -73,7 +74,7 @@ impl Recording {
                 process.arg("-re");
             }
             process
-                .args(["-f", format, "-i", device, "-ac", "1", "-ar", &RATE.to_string(), "-f", "s16le", "-"])
+                .args(["-f", format, "-i", device, "-ac", tr("1"), "-ar", &RATE.to_string(), "-f", "s16le", "-"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
@@ -87,7 +88,7 @@ impl Recording {
             capture = spawn_capture("alsa", "default").map_err(|e| format!("Couldn't start recording: {e}"))?;
         }
         let mut encoder = Process::new("ffmpeg")
-            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "s16le", "-ar", &RATE.to_string(), "-ac", "1", "-i", "-", "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart"])
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "s16le", "-ar", &RATE.to_string(), "-ac", tr("1"), "-i", "-", "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart"])
             .arg(&file)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -196,7 +197,7 @@ pub fn draft_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatV
     let player = app.audio.active(DRAFT_ID).map(|p| (p.playing(), p.position()));
     let (playing, position) = player.unwrap_or((false, 0.));
     ui.horizontal(|ui| {
-        if crate::widgets::icon_button(ui, Icon::Trash, 20., "Discard").clicked() {
+        if crate::widgets::icon_button(ui, Icon::Trash, 20., tr("Discard")).clicked() {
             discard = true;
         }
         let width = ui.available_width() - 48.;
@@ -206,9 +207,9 @@ pub fn draft_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatV
         let pr = ui.interact(play, ui.scope_id().with("draft-play"), Sense::click());
         ui.painter().circle_filled(play.center(), 14., palette.fill_pressed);
         theme::paint_symbol(ui.painter(), if playing { "pause-fill" } else { "play-fill" }, play.center(), 14., palette.text);
-        if pr.on_hover_text(if playing { "Pause" } else { "Play" }).clicked() {
+        if pr.on_hover_text(if playing { tr("Pause") } else { tr("Play") }).clicked() {
             let path = draft.path.to_string_lossy().into_owned();
-            app.audio.toggle(DRAFT_ID, &c.id, "You".into(), &path, draft.duration, None);
+            app.audio.toggle(DRAFT_ID, &c.id, tr("You").into(), &path, draft.duration, None);
         }
         // The levels in bars, played ones in the text color.
         let bars = Rect::from_min_max(Pos2::new(play.right() + 10., rect.top() + 8.), Pos2::new(rect.right() - 60., rect.bottom() - 8.));
@@ -241,7 +242,7 @@ pub fn draft_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatV
     let max_id = egui::Id::unique("voice-max");
     if ui.ctx().data(|d| d.get_temp::<bool>(max_id)).unwrap_or(false) {
         use crate::dialog::{Answer, Variant};
-        match crate::dialog::show(ui.ctx(), max_id.with("dialog"), "", "Voice message recording stopped because the maximum time limit was reached.", Some("Discard"), &[("Send anyway", Variant::StrongPrimary)]) {
+        match crate::dialog::show(ui.ctx(), max_id.with("dialog"), "", tr("Voice message recording stopped because the maximum time limit was reached."), Some(tr("Discard")), &[(tr("Send anyway"), Variant::StrongPrimary)]) {
             Some(Answer::Action(_)) => {
                 ui.ctx().data_mut(|d| d.remove::<bool>(max_id));
                 go = true;
@@ -317,7 +318,7 @@ pub fn recording_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut C
         return;
     }
     ui.horizontal(|ui| {
-        if crate::widgets::icon_button(ui, Icon::Trash, 20., "Cancel").clicked() {
+        if crate::widgets::icon_button(ui, Icon::Trash, 20., tr("Cancel")).clicked() {
             cancel = true;
         }
         let width = ui.available_width() - 48.;

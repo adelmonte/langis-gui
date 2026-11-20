@@ -9,6 +9,7 @@ use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use crate::i18n::tr;
 
 /// `MessageAudio`'s `BAR_COUNT`.
 pub const BAR_COUNT: usize = 47;
@@ -142,7 +143,7 @@ fn decode(path: &str) -> Option<Vec<f32>> {
         Command::new("ffmpeg")
             // The first 30 minutes at most: 32 KB a second, so a long file
             // can't fill memory.
-            .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-t", "1800", "-i", path, "-vn", "-ac", "1", "-ar", &WAVEFORM_RATE.to_string(), "-f", "f32le", "-"])
+            .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-t", "1800", "-i", path, "-vn", "-ac", tr("1"), "-ar", &WAVEFORM_RATE.to_string(), "-f", "f32le", "-"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null()),
@@ -194,7 +195,7 @@ impl Player {
         let decoder = die_with_parent(
             Command::new("ffmpeg")
                 .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-ss", &format!("{:.3}", self.offset), "-i", &self.path, "-vn"])
-                .args(["-filter:a", &format!("atempo={}", self.rate), "-ac", "1", "-ar", &PLAY_RATE.to_string(), "-f", "f32le", "-"])
+                .args(["-filter:a", &format!("atempo={}", self.rate), "-ac", tr("1"), "-ar", &PLAY_RATE.to_string(), "-f", "f32le", "-"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null()),
@@ -207,7 +208,7 @@ impl Player {
         let Some(pcm) = decoder.stdout.take() else { return };
         let output = die_with_parent(
             Command::new("pw-play")
-                .args(["--raw", "--format", "f32", "--rate", &PLAY_RATE.to_string(), "--channels", "1"])
+                .args(["--raw", "--format", "f32", "--rate", &PLAY_RATE.to_string(), "--channels", tr("1")])
                 .args(["-P", "{ application.name = langis media.role = Music }", "-"])
                 .stdin(Stdio::from(pcm))
                 .stdout(Stdio::null())

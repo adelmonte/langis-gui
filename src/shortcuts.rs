@@ -7,6 +7,7 @@ use langis_core::{CallStatus, Command};
 
 use crate::app::{App, Tab};
 use crate::theme::{self, Palette};
+use crate::i18n::tr;
 
 const CTRL: Modifiers = Modifiers::COMMAND;
 const CTRL_SHIFT: Modifiers = Modifiers { command: true, shift: true, ..Modifiers::NONE };
@@ -366,24 +367,24 @@ pub fn guide(app: &mut App, ctx: &egui::Context) {
             ui.set_width(width);
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let (head, _) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::hover());
-            ui.painter().text(head.center(), Align2::CENTER_CENTER, "Keyboard shortcuts", theme::semibold(14.), palette.text);
+            ui.painter().text(head.center(), Align2::CENTER_CENTER, tr("Keyboard shortcuts"), theme::semibold(14.), palette.text);
             let x = Rect::from_center_size(Pos2::new(head.right() - 32., head.center().y), Vec2::splat(32.));
             let response = ui.interact(x, ui.scope_id().with("close"), Sense::click());
             if response.hovered() {
                 ui.painter().circle_filled(x.center(), 16., palette.fill);
             }
             theme::paint_symbol(ui.painter(), "x", x.center(), 20., palette.text);
-            close |= response.on_hover_text("Close").clicked();
+            close |= response.on_hover_text(tr("Close")).clicked();
             ui.add_space(8.);
             egui::ScrollArea::vertical().max_height((screen.height() - 160.).max(200.)).show(ui, |ui| {
                 for (section, rows) in GUIDE {
                     ui.add_space(12.);
                     let (title, _) = ui.allocate_exact_size(Vec2::new(width, 20.), Sense::hover());
-                    ui.painter().text(Pos2::new(title.left() + 24., title.center().y), Align2::LEFT_CENTER, *section, theme::semibold(14.), palette.text);
+                    ui.painter().text(Pos2::new(title.left() + 24., title.center().y), Align2::LEFT_CENTER, tr(section), theme::semibold(14.), palette.text);
                     ui.add_space(4.);
                     for (what, keys) in *rows {
                         let (row, _) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::hover());
-                        ui.painter().text(Pos2::new(row.left() + 24., row.center().y), Align2::LEFT_CENTER, *what, theme::regular(14.), palette.text);
+                        ui.painter().text(Pos2::new(row.left() + 24., row.center().y), Align2::LEFT_CENTER, tr(what), theme::regular(14.), palette.text);
                         let mut right = row.right() - 24.;
                         for key in keys.iter().rev() {
                             let galley = ui.painter().layout_no_wrap((*key).to_owned(), theme::medium(12.), palette.text);

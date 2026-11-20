@@ -8,6 +8,7 @@ use langis_store::{AttachmentMeta, ConversationId, Message};
 
 use crate::app::{App, Loaded};
 use crate::theme::{self, Palette};
+use crate::i18n::tr;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum Tab {
@@ -24,10 +25,10 @@ impl Tab {
     /// `EmptyState`'s title and description.
     fn empty(self) -> (&'static str, &'static str) {
         match self {
-            Tab::Media => ("No Media", "Photos, Videos, and GIFs that you send and receive will appear here"),
-            Tab::Audio => ("No Audio", "Voice Messages and Audio Files that you send and receive will appear here"),
-            Tab::Links => ("No Links", "Links that you send and receive will appear here"),
-            Tab::Files => ("No Files", "Files that you send and receive will appear here"),
+            Tab::Media => (tr("No Media"), tr("Photos, Videos, and GIFs that you send and receive will appear here")),
+            Tab::Audio => (tr("No Audio"), tr("Voice Messages and Audio Files that you send and receive will appear here")),
+            Tab::Links => (tr("No Links"), tr("Links that you send and receive will appear here")),
+            Tab::Files => (tr("No Files"), tr("Files that you send and receive will appear here")),
         }
     }
 }
@@ -105,16 +106,16 @@ fn section(millis: i64) -> String {
     let Some(time) = Local.timestamp_millis_opt(millis).single() else { return String::new() };
     let start = |days: i64| (now - chrono::Duration::days(days)).date_naive().and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(Local).single());
     if start(0).is_some_and(|t| time >= t) {
-        return "Today".into();
+        return tr("Today").into();
     }
     if start(1).is_some_and(|t| time >= t) {
-        return "Yesterday".into();
+        return tr("Yesterday").into();
     }
     if start(7).is_some_and(|t| time >= t) {
-        return "This Week".into();
+        return tr("This Week").into();
     }
     if time.year() == now.year() && time.month() == now.month() {
-        return "This Month".into();
+        return tr("This Month").into();
     }
     time.format("%B %Y").to_string()
 }
@@ -261,7 +262,7 @@ fn list_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: 
     heading(ui, palette, pad + 24., 6., 8., name);
     for e in items {
         let m = e.message;
-        let author = match &m.author { None => "You".to_owned(), Some(sid) => m.author_name.clone().unwrap_or_else(|| app.name(sid)) };
+        let author = match &m.author { None => tr("You").to_owned(), Some(sid) => m.author_name.clone().unwrap_or_else(|| app.name(sid)) };
         let a = e.index.map(|i| &m.attachments[i]);
         let (title, subtitle) = match (tab, a, &m.link_preview) {
             (Tab::Links, _, Some(p)) => {
@@ -269,7 +270,7 @@ fn list_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: 
                 (p.title.clone().unwrap_or_default(), format!("{}\n{author} · {domain}", p.url))
             }
             (Tab::Audio, Some(a), _) => {
-                let kind = if a.voice { "Voice Message" } else { "Audio" };
+                let kind = if a.voice { tr("Voice Message") } else { tr("Audio") };
                 (a.file_name.clone().unwrap_or_else(|| author.clone()), format!("{} · {kind}", crate::format::file_size(a.size)))
             }
             (_, Some(a), _) => {
@@ -355,7 +356,7 @@ fn list_section(app: &mut App, ui: &mut Ui, palette: &Palette, pad: f32, width: 
                 (Tab::Audio, Some(a)) => match &a.local_path {
                     Some(path) => {
                         let duration = app.audio.peaks(ui.ctx(), path).map(|p| p.duration).unwrap_or(0.);
-                        let title = match &m.author { None => "You".to_owned(), Some(sid) => app.name(sid) };
+                        let title = match &m.author { None => tr("You").to_owned(), Some(sid) => app.name(sid) };
                         let path = path.clone();
                         app.audio.toggle(m.id, conversation, title, &path, duration, None);
                     }
@@ -382,20 +383,20 @@ fn item_menu(app: &mut App, ui: &Ui, response: &egui::Response, m: &Message, ind
     }
     let mut todo = None;
     crate::menu::show(ui.ctx(), menu, |menu| {
-        if menu.item(Some("arrow-[end]"), "View in chat") {
+        if menu.item(Some("arrow-[end]"), tr("View in chat")) {
             todo = Some(0);
         }
-        if crate::actions::can_forward(m) && menu.item(Some("forward"), "Forward") {
+        if crate::actions::can_forward(m) && menu.item(Some("forward"), tr("Forward")) {
             todo = Some(1);
         }
         if tab == Tab::Links {
-            if menu.item(Some("copy"), "Copy link") {
+            if menu.item(Some("copy"), tr("Copy link")) {
                 todo = Some(4);
             }
-        } else if index.is_some() && menu.item(Some("download"), "Save") {
+        } else if index.is_some() && menu.item(Some("download"), tr("Save")) {
             todo = Some(2);
         }
-        if menu.item(Some("trash"), "Delete") {
+        if menu.item(Some("trash"), tr("Delete")) {
             todo = Some(3);
         }
     });

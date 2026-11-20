@@ -9,6 +9,7 @@ use crate::app::{App, Tab};
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
     if app.nav_collapsed {
@@ -142,21 +143,21 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 if app.panes.archived {
                     ui.add_space(12.);
-                    if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() {
+                    if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() {
                         app.panes.archived = false;
                     }
                     ui.label(RichText::new("Archived chats").font(theme::semibold(18.)));
                     return;
                 }
                 header_start(app, ui);
-                ui.label(RichText::new("Chats").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Chats")).font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Desktop's LeftPane header: AxoIconButton sm, compose and more.
                     ui.add_space(16.);
                     ui.spacing_mut().item_spacing.x = 8.;
-                    let more = widgets::axo_icon_button_sm(ui, "more", "More actions", false);
+                    let more = widgets::axo_icon_button_sm(ui, "more", tr("More actions"), false);
                     crate::menu::dropdown(ui, &more, egui::Id::unique("chat-list-more"), |m| crate::panes::list_menu(app, m));
-                    if widgets::axo_icon_button_sm(ui, "compose", "New chat", false).clicked() {
+                    if widgets::axo_icon_button_sm(ui, "compose", tr("New chat"), false).clicked() {
                         app.panes.compose = Some(crate::panes::Compose::Chat { query: String::new(), searching: false, found: None });
                     }
                 });
@@ -211,14 +212,14 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     ui.painter().text(Pos2::new(row.left() + 11. + 16., row.bottom() - 8.), egui::Align2::LEFT_BOTTOM, text, theme::semibold(14.), palette.text);
                 };
                 if !query.is_empty() && !rows.is_empty() {
-                    heading(ui, "Chats");
+                    heading(ui, tr("Chats"));
                 }
                 for (i, c) in rows.iter().enumerate() {
                     // Desktop's Pinned and Chats headers, when both are there.
                     if pinned_header && i == 0 {
-                        heading(ui, "Pinned");
+                        heading(ui, tr("Pinned"));
                     } else if pinned_header && !c.pinned && rows[i - 1].pinned {
-                        heading(ui, "Chats");
+                        heading(ui, tr("Chats"));
                     }
                     let typing = app.typing.get(&c.id).is_some_and(|t| !t.is_empty());
                     let selected = app.selected.as_ref() == Some(&c.id);
@@ -249,7 +250,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     if app.panes.archived || app.unread_only {
                         ui.add_space(24.);
                         ui.vertical_centered(|ui| {
-                            let text = if app.panes.archived { "No archived chats." } else { "No unread chats" };
+                            let text = if app.panes.archived { tr("No archived chats.") } else { tr("No unread chats") };
                             ui.label(RichText::new(text).color(palette.text_secondary));
                         });
                     } else {
@@ -260,15 +261,15 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                         ui.vertical_centered(|ui| {
                             ui.spacing_mut().item_spacing.y = 12.;
                             if let Some(folder) = folder {
-                                ui.label(RichText::new("No chats to display").font(theme::regular(16.)).color(palette.text));
-                                if widgets::axo_button(ui, "Folder Settings", widgets::Axo::SubtleSecondary).clicked() {
+                                ui.label(RichText::new(tr("No chats to display")).font(theme::regular(16.)).color(palette.text));
+                                if widgets::axo_button(ui, tr("Folder Settings"), widgets::Axo::SubtleSecondary).clicked() {
                                     app.tab = crate::app::Tab::Settings;
                                     app.settings.page = crate::settings::Page::ChatFolders;
                                     app.settings.folder = Some(crate::settings::folder_edit(&folder));
                                 }
                             } else {
-                                ui.label(RichText::new("No chats").font(theme::semibold(18.)).color(palette.text_secondary));
-                                ui.label(RichText::new("Recent chats will appear here.").font(theme::regular(14.)).color(palette.text_secondary));
+                                ui.label(RichText::new(tr("No chats")).font(theme::semibold(18.)).color(palette.text_secondary));
+                                ui.label(RichText::new(tr("Recent chats will appear here.")).font(theme::regular(14.)).color(palette.text_secondary));
                             }
                         });
                     }
@@ -328,7 +329,7 @@ fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String, unread_only: 
         end = clear.left() - 2.;
     }
     let field = Rect::from_min_max(rect.min + Vec2::new(30., 5.), Pos2::new(end, rect.bottom() - 5.));
-    let hint = if *unread_only { "Search unread chats" } else { "Search" };
+    let hint = if *unread_only { tr("Search unread chats") } else { tr("Search") };
     ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
         ui.add(egui::TextEdit::singleline(text).hint_text(RichText::new(hint).font(theme::regular(13.))).font(theme::regular(13.)).frame(egui::Frame::NONE).desired_width(field.width()).id(search_id()));
     });
@@ -348,8 +349,8 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
     let network = match app.connection {
         // Desktop's DialogRelink comes before the rest.
         _ if app.unlinked => Some((Some(Icon::WifiError), "Device unlinked", "Click to relink this device.")),
-        ConnectionState::Connecting => Some((None, "Connecting...", "Shouldn't be long")),
-        ConnectionState::Offline if !app.demo => Some((Some(Icon::WifiError), "Offline", "Check your network connection.")),
+        ConnectionState::Connecting => Some((None, tr("Connecting..."), tr("Shouldn't be long"))),
+        ConnectionState::Offline if !app.demo => Some((Some(Icon::WifiError), tr("Offline"), tr("Check your network connection."))),
         _ => None,
     };
     if let Some((icon, title, subtitle)) = network {
@@ -411,7 +412,7 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width() - 16.);
                 ui.label(RichText::new(text).font(theme::regular(13.)));
-                if skippable && ui.link("Skip").on_hover_text("Use this device without your message history").clicked() {
+                if skippable && ui.link(tr("Skip")).on_hover_text("Use this device without your message history").clicked() {
                     skip = true;
                 }
             });
@@ -494,13 +495,13 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     if c.blocked {
         // `__blocked`: the 16px block icon, 4px, then the text.
         Icon::Block.paint(ui, Rect::from_center_size(Pos2::new(left + 8., inner.top() + 29.), Vec2::splat(16.)), 16., palette.text_secondary);
-        job.append("Blocked", 20., body(palette.text_secondary));
+        job.append(tr("Blocked"), 20., body(palette.text_secondary));
     } else if !c.accepted {
         job.append("Message request", 0., egui::TextFormat { font_id: theme::semibold(13.), ..body(palette.text_secondary) });
     } else if typing {
         dots = true;
     } else if let Some(draft) = c.draft.as_deref().filter(|d| !d.is_empty()) {
-        job.append("Draft: ", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
+        job.append(tr("Draft: "), 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
         crate::chat::append_with_emoji(&mut job, &crate::format::one_line(draft), body(palette.text_secondary));
     } else {
         let preview = c.last_message_preview.as_deref().map(crate::format::one_line).unwrap_or_default();

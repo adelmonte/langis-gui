@@ -12,6 +12,7 @@ use crate::app::{App, Loaded};
 use crate::panes::{body, buttons, modal, title};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 pub struct ProfileEditor {
     pub loaded: bool,
@@ -186,15 +187,15 @@ pub fn page(app: &mut App, ui: &mut Ui) {
             e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim()));
         }
         ui.add_space(12.);
-        if widgets::axo_button(ui, "Edit photo", widgets::Axo::SubtleSecondary).clicked() {
+        if widgets::axo_button(ui, tr("Edit photo"), widgets::Axo::SubtleSecondary).clicked() {
             e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim()));
         }
     });
     ui.add_space(16.);
     let mut go = None;
     let full = format!("{} {}", e.given, e.family).trim().to_owned();
-    let about = if e.about.is_empty() && e.about_emoji.is_empty() { "About".to_owned() } else { format!("{} {}", e.about_emoji, e.about).trim().to_owned() };
-    axo_list::list(ui, None, Some("Your profile and changes to it will be visible to people you message, contacts and groups."), |ui| {
+    let about = if e.about.is_empty() && e.about_emoji.is_empty() { tr("About").to_owned() } else { format!("{} {}", e.about_emoji, e.about).trim().to_owned() };
+    axo_list::list(ui, None, Some(tr("Your profile and changes to it will be visible to people you message, contacts and groups.")), |ui| {
         if axo_list::item(ui, Item::new(&full).symbol("person"), End::Click).clicked() {
             go = Some(crate::settings::Page::ProfileName);
         }
@@ -204,8 +205,8 @@ pub fn page(app: &mut App, ui: &mut Ui) {
     });
     axo_list::gap(ui);
     let username = e.username.clone();
-    axo_list::list(ui, None, Some("People can now message you using your optional username so you don't have to give out your phone number."), |ui| {
-        let label = username.clone().unwrap_or_else(|| "Username".into());
+    axo_list::list(ui, None, Some(tr("People can now message you using your optional username so you don't have to give out your phone number.")), |ui| {
+        let label = username.clone().unwrap_or_else(|| tr("Username").into());
         let row = axo_list::item(ui, Item::new(&label).symbol("at"), End::Click);
         let menu = egui::Id::unique("profile-username-menu");
         if row.clicked() {
@@ -217,7 +218,7 @@ pub fn page(app: &mut App, ui: &mut Ui) {
         }
         crate::menu::show(ui.ctx(), menu, |m| {
             if let Some(name) = &username {
-                if m.item(Some("copy"), "Copy username") {
+                if m.item(Some("copy"), tr("Copy username")) {
                     ui.ctx().copy_text(name.clone());
                     app.toast("Username copied");
                 }
@@ -225,12 +226,12 @@ pub fn page(app: &mut App, ui: &mut Ui) {
                     let (nickname, digits) = name.split_once('.').map(|(n, d)| (n.to_owned(), d.to_owned())).unwrap_or((name.clone(), String::new()));
                     e.editing_username = Some(UsernameEdit { nickname, digits, typed_at: Instant::now(), asked: None, reservation: None, problem: None, saving: false });
                 }
-                if m.item(Some("trash"), "Delete") {
+                if m.item(Some("trash"), tr("Delete")) {
                     e.confirm_delete_username = true;
                 }
             }
         });
-        if username.is_some() && axo_list::item(ui, Item::new("QR code or link").symbol("qrcode"), End::Click).clicked() {
+        if username.is_some() && axo_list::item(ui, Item::new(tr("QR code or link")).symbol("qrcode"), End::Click).clicked() {
             open_link_screen(app);
         }
     });
@@ -260,18 +261,18 @@ pub fn name_page(app: &mut App, ui: &mut Ui) {
     if e.loaded {
         ui.add_space(16.);
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 0)).show(ui, |ui| {
-            counted_field(ui, &palette, &mut e.given, "First name (required)", NAME_MAX, 9).request_focus();
+            counted_field(ui, &palette, &mut e.given, tr("First name (required)"), NAME_MAX, 9).request_focus();
             ui.add_space(12.);
-            counted_field(ui, &palette, &mut e.family, "Last name (optional)", NAME_MAX, 9);
+            counted_field(ui, &palette, &mut e.family, tr("Last name (optional)"), NAME_MAX, 9);
             let changed = (e.given.as_str(), e.family.as_str()) != (e.saved.0.as_str(), e.saved.1.as_str());
             ui.add_space(8.);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let ok = changed && !e.given.trim().is_empty();
-                if ui.add_enabled_ui(ok, |ui| widgets::pill_button(ui, "Save", true).clicked()).inner && ok {
+                if ui.add_enabled_ui(ok, |ui| widgets::pill_button(ui, tr("Save"), true).clicked()).inner && ok {
                     send_profile(app, &mut e, AvatarChange::Keep);
                 }
                 ui.add_space(8.);
-                if widgets::pill_button(ui, "Cancel", false).clicked() {
+                if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                     e.given = e.saved.0.clone();
                     e.family = e.saved.1.clone();
                     app.settings.page = crate::settings::Page::Profile;
@@ -313,20 +314,20 @@ pub fn about_page(app: &mut App, ui: &mut Ui) {
                     ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                 }
                 ui.painter().text(egui::pos2(rect.left() + 12., rect.center().y), egui::Align2::LEFT_CENTER, emoji, theme::emoji(18.), palette.text);
-                ui.painter().text(egui::pos2(rect.left() + 44., rect.center().y), egui::Align2::LEFT_CENTER, text, theme::regular(14.), palette.text);
+                ui.painter().text(egui::pos2(rect.left() + 44., rect.center().y), egui::Align2::LEFT_CENTER, tr(text), theme::regular(14.), palette.text);
                 if hit.clicked() {
                     e.about_emoji = emoji.to_owned();
-                    e.about = text.to_owned();
+                    e.about = tr(text).to_owned();
                 }
             }
             let changed = (e.about.as_str(), e.about_emoji.as_str()) != (e.saved.2.as_str(), e.saved.3.as_str());
             ui.add_space(12.);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled_ui(changed, |ui| widgets::pill_button(ui, "Save", true).clicked()).inner && changed {
+                if ui.add_enabled_ui(changed, |ui| widgets::pill_button(ui, tr("Save"), true).clicked()).inner && changed {
                     send_profile(app, &mut e, AvatarChange::Keep);
                 }
                 ui.add_space(8.);
-                if widgets::pill_button(ui, "Cancel", false).clicked() {
+                if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                     e.about = e.saved.2.clone();
                     e.about_emoji = e.saved.3.clone();
                     app.settings.page = crate::settings::Page::Profile;
@@ -365,7 +366,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if e.editing_username.is_some() {
         let mut done = false;
         let closed = modal(ui, "username-editor", 400., |ui| {
-            title(ui, "Username");
+            title(ui, tr("Username"));
             done = username(app, ui, &palette, &mut e);
         });
         if closed || done {
@@ -375,7 +376,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if e.confirm_delete_username {
         let name = e.username.clone().unwrap_or_default();
         let description = format!("This will remove your username and disable your QR code and link. \u{201c}{name}\u{201d} will be available for others to claim. Are you sure?");
-        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("delete-username"), "", &description, "Delete", crate::dialog::Variant::StrongDestructive) {
+        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("delete-username"), "", &description, tr("Delete"), crate::dialog::Variant::StrongDestructive) {
             Some(crate::dialog::Choice::Action) => {
                 e.confirm_delete_username = false;
                 app.send(Command::DeleteUsername);
@@ -420,13 +421,13 @@ fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor
     if let Some(problem) = &edit.problem {
         ui.label(RichText::new(problem).font(theme::regular(12.)).color(palette.destructive));
     } else {
-        body(ui, palette, "Usernames are always paired with a set of numbers.");
+        body(ui, palette, tr("Usernames are always paired with a set of numbers."));
     }
     let ready = edit.reservation.is_some() && !edit.saving;
     let mut close = false;
     ui.add_space(16.);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let label = if edit.saving { "…" } else { "Done" };
+        let label = if edit.saving { "…" } else { tr("Done") };
         if ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, label, true).clicked()).inner
             && ready
             && let Some(r) = edit.reservation.clone()
@@ -435,7 +436,7 @@ fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor
             app.send(Command::ConfirmUsername(r));
         }
         ui.add_space(4.);
-        if widgets::pill_button(ui, "Cancel", false).clicked() {
+        if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
             close = true;
         }
     });
@@ -482,7 +483,7 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
         let Some((name, link)) = &state else {
             crate::widgets::spinner(ui, 24.);
             body(ui, &palette, "Set a username in your profile to get a link and QR code.");
-            close = buttons(ui, &["Done"]).is_some();
+            close = buttons(ui, &[tr("Done")]).is_some();
             return;
         };
         let color = if (1..=8).contains(&link.color) { link.color } else { 1 };
@@ -520,14 +521,14 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 if let Some(url) = link.url()
-                    && widgets::pill_button(ui, "Copy link", false).clicked()
+                    && widgets::pill_button(ui, tr("Copy link"), false).clicked()
                 {
                     ui.ctx().copy_text(url);
                     app.toast("Username link copied.");
                 }
                 // Desktop's Save: the card as a picture.
                 if let Some(url) = link.url()
-                    && widgets::pill_button(ui, "Save", false).clicked()
+                    && widgets::pill_button(ui, tr("Save"), false).clicked()
                     && let Some(png) = qr_card_png(name, &url, fg, bg)
                     && let Some(to) = rfd::FileDialog::new().set_file_name(format!("{}-qr.png", name.replace(['/', '\\'], "_"))).save_file()
                 {
@@ -536,12 +537,12 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
                         Err(_) => app.toast("The QR code couldn't be saved."),
                     }
                 }
-                if widgets::pill_button(ui, "Reset", false).clicked() {
+                if widgets::pill_button(ui, tr("Reset"), false).clicked() {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("username-link-reset"), true));
                 }
             });
         });
-        close = buttons(ui, &["Done"]).is_some();
+        close = buttons(ui, &[tr("Done")]).is_some();
     });
     // Desktop asks before resetting: the old QR code and link stop working.
     if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("username-link-reset"))).unwrap_or(false) {
@@ -550,7 +551,7 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
             egui::Id::unique("username-link-reset-dialog"),
             "",
             "If you reset your QR code, your existing QR code and link will no longer work.",
-            "Reset",
+            tr("Reset"),
             crate::dialog::Variant::StrongDestructive,
         ) {
             Some(crate::dialog::Choice::Action) => {

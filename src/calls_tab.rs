@@ -10,6 +10,7 @@ use crate::icons::Icon;
 use crate::panes::{body, menu_row};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// One row of the history.
 struct Row {
@@ -30,7 +31,7 @@ fn rows(app: &App) -> Vec<Row> {
     let mut out = Vec::new();
     for m in &app.panes.calls {
         let Some(notice) = &m.notice else { continue };
-        let title = app.conversation(&m.conversation_id).map(|c| c.title.clone()).unwrap_or_else(|| "Unknown".into());
+        let title = app.conversation(&m.conversation_id).map(|c| c.title.clone()).unwrap_or_else(|| tr("Unknown").into());
         let (detail, missed, video) = match notice {
             Notice::Call { incoming, video, outcome, .. } => {
                 let kind = if *video { "video call" } else { "voice call" };
@@ -49,7 +50,7 @@ fn rows(app: &App) -> Vec<Row> {
                     Some(GroupCallStatus::Declined) => "Declined group call",
                     Some(GroupCallStatus::OutgoingRing) => "Outgoing group call",
                     _ if *incoming => "Incoming group call",
-                    _ => "Group call",
+                    _ => tr("Group call"),
                 };
                 (detail.to_owned(), matches!(status, Some(GroupCallStatus::Missed)), true)
             }
@@ -61,14 +62,14 @@ fn rows(app: &App) -> Vec<Row> {
     for call in &app.panes.adhoc {
         let Some(link) = app.panes.links.iter().find(|l| l.room_id == call.room_id) else { continue };
         let detail = match call.status {
-            AdhocCallStatus::Pending => "Call link",
+            AdhocCallStatus::Pending => tr("Call link"),
             AdhocCallStatus::Joined => "Joined call link",
-            AdhocCallStatus::Generic => "Call link",
+            AdhocCallStatus::Generic => tr("Call link"),
         };
         out.push(Row {
             conversation: ConversationId::call_link(&link.room_id),
             title: link_title(&link.name),
-            status: "Call link",
+            status: tr("Call link"),
             missed: false,
             video: true,
             at: call.at,
@@ -97,13 +98,13 @@ fn rows(app: &App) -> Vec<Row> {
 
 fn status_of(detail: &str) -> &'static str {
     if detail.starts_with("Missed") {
-        "Missed"
+        tr("Missed")
     } else if detail.starts_with("Declined") {
-        "Declined"
+        tr("Declined")
     } else if detail.starts_with("Incoming") {
-        "Incoming"
+        tr("Incoming")
     } else {
-        "Outgoing"
+        tr("Outgoing")
     }
 }
 
@@ -117,10 +118,10 @@ fn new_call(app: &mut App, ui: &mut Ui, palette: &Palette) {
     ui.add_space(12.);
     ui.horizontal(|ui| {
         ui.add_space(12.);
-        if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             app.panes.new_call = None;
         }
-        ui.label(RichText::new("New Call").font(theme::semibold(18.)));
+        ui.label(RichText::new(tr("New Call")).font(theme::semibold(18.)));
     });
     let Some(mut query) = app.panes.new_call.clone() else { return };
     ui.add_space(6.);
@@ -140,10 +141,10 @@ fn new_call(app: &mut App, ui: &mut Ui, palette: &Palette) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         if direct.is_empty() && groups.is_empty() {
             ui.add_space(28.);
-            let text = if q.is_empty() { "No recent conversations.".to_owned() } else { format!("No results for \u{201c}{}\u{201d}", query.trim()) };
+            let text = if q.is_empty() { tr("No recent conversations.").to_owned() } else { format!("No results for \u{201c}{}\u{201d}", query.trim()) };
             ui.vertical_centered(|ui| body(ui, palette, &text));
         }
-        for (header, list) in [("Contacts", &direct), ("Groups", &groups)] {
+        for (header, list) in [(tr("Contacts"), &direct), (tr("Groups"), &groups)] {
             if list.is_empty() {
                 continue;
             }
@@ -165,11 +166,11 @@ fn new_call(app: &mut App, ui: &mut Ui, palette: &Palette) {
                     icon.paint(ui, b.shrink(4.), 20., if in_call { palette.text_secondary } else { palette.text });
                     r.on_hover_text(label).clicked() && !in_call
                 };
-                if button(ui, Icon::Video, "Start a video call") {
+                if button(ui, Icon::Video, tr("Start a video call")) {
                     call(app, &c.id, true);
                     app.panes.new_call = None;
                 }
-                if c.kind == ConversationKind::Direct && button(ui, Icon::Phone, "Start a call") {
+                if c.kind == ConversationKind::Direct && button(ui, Icon::Phone, tr("Start a call")) {
                     call(app, &c.id, false);
                     app.panes.new_call = None;
                 }
@@ -191,11 +192,11 @@ fn clear_dialog(app: &mut App, ctx: &egui::Context) {
     }
     let ours = app.panes.links.iter().any(|l| l.admin_key.is_some());
     let body = if ours {
-        "This will permanently delete all call history. Call links you\u{2019}ve created will no longer work for people who have them."
+        tr("This will permanently delete all call history. Call links you\u{2019}ve created will no longer work for people who have them.")
     } else {
-        "This will permanently delete all call history."
+        tr("This will permanently delete all call history.")
     };
-    match crate::dialog::confirm(ctx, egui::Id::unique("clear-calls"), "Clear call history?", body, "Clear", crate::dialog::Variant::StrongDestructive) {
+    match crate::dialog::confirm(ctx, egui::Id::unique("clear-calls"), tr("Clear call history?"), body, tr("Clear"), crate::dialog::Variant::StrongDestructive) {
         Some(crate::dialog::Choice::Action) => {
             app.send(Command::ClearCallHistory);
             app.panes.calls.clear();
@@ -240,17 +241,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 crate::sidebar::header_start(app, ui);
-                ui.label(RichText::new("Calls").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Calls")).font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(16.);
                     ui.spacing_mut().item_spacing.x = 8.;
-                    let more = widgets::axo_icon_button_sm(ui, "more", "More actions", false);
+                    let more = widgets::axo_icon_button_sm(ui, "more", tr("More actions"), false);
                     crate::menu::dropdown(ui, &more, egui::Id::unique("calls-more"), |m| {
-                        if m.item(Some("trash"), "Clear call history") {
+                        if m.item(Some("trash"), tr("Clear call history")) {
                             app.panes.clear_calls = true;
                         }
                     });
-                    if widgets::axo_icon_button_sm(ui, "phone-plus", "New Call", false).clicked() {
+                    if widgets::axo_icon_button_sm(ui, "phone-plus", tr("New Call"), false).clicked() {
                         app.panes.new_call = Some(String::new());
                     }
                 });
@@ -258,7 +259,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.add_space(6.);
             ui.horizontal(|ui| {
                 ui.add_space(16.);
-                let hint = if app.panes.calls_missed_only { "Search missed calls" } else { "Search" };
+                let hint = if app.panes.calls_missed_only { tr("Search missed calls") } else { tr("Search") };
                 ui.add(egui::TextEdit::singleline(&mut app.panes.call_search).hint_text(hint).desired_width(ui.available_width() - 16. - 36.));
                 // Desktop's missed-calls filter.
                 let (rect, r) = ui.allocate_exact_size(Vec2::splat(28.), Sense::click());
@@ -278,7 +279,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 // `CallsList__FilteredByMissedHeader`.
                 ui.horizontal(|ui| {
                     ui.add_space(27.);
-                    ui.label(RichText::new("Filtered by missed").font(theme::semibold(13.)).color(palette.text_secondary));
+                    ui.label(RichText::new(tr("Filtered by missed")).font(theme::semibold(13.)).color(palette.text_secondary));
                 });
                 ui.add_space(4.);
             }
@@ -291,7 +292,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             let circle = Rect::from_min_size(inner.min + Vec2::new(14., 6.), Vec2::splat(40.));
             ui.painter().circle_filled(circle.center(), 20., palette.fill_secondary);
             Icon::Link.paint(ui, circle, 20., palette.text);
-            ui.painter().text(Pos2::new(circle.right() + 12., circle.center().y), egui::Align2::LEFT_CENTER, "Create a Call Link", theme::medium(14.), palette.text);
+            ui.painter().text(Pos2::new(circle.right() + 12., circle.center().y), egui::Align2::LEFT_CENTER, tr("Create a Call Link"), theme::medium(14.), palette.text);
             if response.clicked() {
                 app.send(Command::CreateCallLink);
                 app.toast("Creating a call link…");
@@ -308,10 +309,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         if !q.is_empty() {
                             body(ui, &palette, &if missed_only { format!("No results for \u{201c}{q}\u{201d} in missed calls") } else { format!("No results for \u{201c}{q}\u{201d}") });
                         } else if missed_only {
-                            body(ui, &palette, "No missed calls");
+                            body(ui, &palette, tr("No missed calls"));
                         } else {
-                            ui.label(RichText::new("No calls").font(theme::semibold(16.)).color(palette.text_secondary));
-                            body(ui, &palette, "Recent calls will appear here.");
+                            ui.label(RichText::new(tr("No calls")).font(theme::semibold(16.)).color(palette.text_secondary));
+                            body(ui, &palette, tr("Recent calls will appear here."));
                         }
                     });
                 }
@@ -373,13 +374,13 @@ fn call_details(app: &mut App, ui: &mut Ui, palette: &Palette, conversation: &Co
                 ui.painter().text(Pos2::new(rect.center().x, rect.bottom() - 10.), egui::Align2::CENTER_BOTTOM, label, theme::regular(12.), palette.text);
                 r.clicked()
             };
-            if tile(ui, "message", "Message") {
+            if tile(ui, "message", tr("Message")) {
                 app.open(c.id.clone());
             }
-            if !group && tile(ui, "phone", "Voice") {
+            if !group && tile(ui, tr("phone"), tr("Voice")) {
                 crate::panes::open_lobby(app, c.id.clone(), false);
             }
-            if tile(ui, "videocamera", "Video") {
+            if tile(ui, "videocamera", tr("Video")) {
                 crate::panes::open_lobby(app, c.id.clone(), true);
             }
         });
@@ -438,11 +439,11 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
     // Desktop's subtitle: "(n) " for a group, the status, then the time or
     // Active.
     let count = if row.group.len() > 1 { format!("({}) ", row.group.len()) } else { String::new() };
-    let when = if active { "Active".to_owned() } else { crate::format::short_timestamp(row.at) };
+    let when = if active { tr("Active").to_owned() } else { crate::format::short_timestamp(row.at) };
     let detail = format!("{count}{} \u{b7} {when}", row.status);
     painter.text(Pos2::new(x, rect.top() + 32.), egui::Align2::LEFT_TOP, detail, theme::regular(12.), color);
     if active {
-        let label = ui.painter().layout_no_wrap("Join".into(), theme::semibold(13.), egui::Color32::WHITE);
+        let label = ui.painter().layout_no_wrap(tr("Join").into(), theme::semibold(13.), egui::Color32::WHITE);
         let pill = Rect::from_center_size(Pos2::new(rect.right() - 12. - (label.size().x + 24.) / 2., rect.center().y), label.size() + Vec2::new(24., 12.));
         let hit = ui.interact(pill, ui.scope_id().with(("join-active", i)), Sense::click());
         ui.painter().rect_filled(pill, CornerRadius::same(255), if hit.hovered() { palette.accent.gamma_multiply(0.85) } else { palette.accent });
@@ -461,7 +462,7 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
     }
     let icon = if row.conversation.as_call_link().is_some() { Icon::Video } else if row.video { Icon::Video } else { Icon::Phone };
     icon.paint(ui, button, 18., palette.text);
-    if hit.on_hover_text(if row.conversation.as_call_link().is_some() { "Join" } else { "Call back" }).clicked() {
+    if hit.on_hover_text(if row.conversation.as_call_link().is_some() { tr("Join") } else { tr("Call back") }).clicked() {
         call(app, &row.conversation.clone(), row.video);
         return false;
     }
@@ -493,7 +494,7 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                     ui.add(egui::Label::new(RichText::new(&url).font(theme::regular(13.)).color(palette.text_secondary)).truncate());
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Join", true).clicked() {
+                    if widgets::pill_button(ui, tr("Join"), true).clicked() {
                         crate::panes::open_lobby(app, ConversationId::call_link(room), true);
                     }
                 });
@@ -504,7 +505,7 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                 if admin {
                     ui.horizontal(|ui| {
                         ui.add_space(10.);
-                        ui.label("Call name");
+                        ui.label(tr("Call name"));
                         let field = ui.add(egui::TextEdit::singleline(&mut app.panes.link_name).hint_text("Signal call").desired_width(260.));
                         if field.lost_focus() && app.panes.link_name.trim() != link.name {
                             app.send(Command::UpdateCallLink { room_id: room.to_owned(), name: Some(app.panes.link_name.trim().to_owned()), restrictions: None });
@@ -514,7 +515,7 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                     let mut approve = link.restrictions == CallLinkRestrictions::AdminApproval;
                     ui.horizontal(|ui| {
                         ui.add_space(10.);
-                        ui.label("Require admin approval");
+                        ui.label(tr("Require admin approval"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(10.);
                             if widgets::switch(ui, &mut approve).changed() {
@@ -525,15 +526,15 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                     });
                     ui.add_space(6.);
                 }
-                if menu_row(ui, Some(Icon::Copy), "Copy link", false).clicked() {
+                if menu_row(ui, Some(Icon::Copy), tr("Copy link"), false).clicked() {
                     ui.ctx().copy_text(url.clone());
                     app.toast("Call link copied.");
                 }
                 // Desktop's `CallLinkDetails__ShareLinkViaSignal`.
-                if menu_row(ui, Some(Icon::Forward), "Share link via Signal", false).clicked() {
+                if menu_row(ui, Some(Icon::Forward), tr("Share link via Signal"), false).clicked() {
                     app.panes.share_text = Some((url.clone(), Vec::new(), String::new()));
                 }
-                let label = if admin { "Delete link" } else { "Remove link" };
+                let label = if admin { tr("Delete link") } else { "Remove link" };
                 if menu_row(ui, Some(Icon::Trash), label, true).clicked() {
                     app.panes.confirm_delete_link = Some(room.to_owned());
                 }
@@ -546,7 +547,7 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                 .adhoc
                 .iter()
                 .filter(|c| c.room_id == room)
-                .map(|c| (c.at, match c.status { AdhocCallStatus::Joined => "Joined", _ => "Call link" }))
+                .map(|c| (c.at, match c.status { AdhocCallStatus::Joined => "Joined", _ => tr("Call link") }))
                 .collect();
             if !calls.is_empty() {
                 ui.add_space(16.);
@@ -574,9 +575,9 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
     // Desktop's `DeleteLinkModal`.
     if app.panes.confirm_delete_link.as_deref() == Some(room) {
         let (title, body_text, action) = if admin {
-            ("Delete link?", "This link will no longer work for anyone who has it.", "Delete")
+            ("Delete link?", tr("This link will no longer work for anyone who has it."), tr("Delete"))
         } else {
-            ("Remove link?", "This link will be removed from your call history. You can join again if someone shares it with you.", "Remove")
+            ("Remove link?", "This link will be removed from your call history. You can join again if someone shares it with you.", tr("Remove"))
         };
         match crate::dialog::confirm(ui.ctx(), egui::Id::unique("delete-call-link"), title, body_text, action, crate::dialog::Variant::StrongDestructive) {
             Some(crate::dialog::Choice::Action) => {
@@ -621,8 +622,8 @@ fn presenting_bar(app: &mut App, ui: &Ui, area: Rect) -> f32 {
         return 0.;
     }
     let white = egui::Color32::WHITE;
-    let text = ui.painter().layout_no_wrap("You're presenting to everyone.".into(), theme::regular(13.), white);
-    let button = ui.painter().layout_no_wrap("Stop sharing".into(), theme::semibold(13.), white);
+    let text = ui.painter().layout_no_wrap(tr("You're presenting to everyone.").into(), theme::regular(13.), white);
+    let button = ui.painter().layout_no_wrap(tr("Stop sharing").into(), theme::semibold(13.), white);
     let width = 16. + 16. + 8. + text.size().x + 16. + button.size().x + 24. + 12.;
     let rect = Rect::from_center_size(Pos2::new(area.center().x, area.top() + 20. + 22.), Vec2::new(width, 44.));
     let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("presenting-bar")));
@@ -653,7 +654,7 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
     app.panes.call_reactions.retain(|(_, at)| now.duration_since(*at).as_secs_f32() < 4.);
     for (i, (r, at)) in app.panes.call_reactions.iter().enumerate() {
         let age = now.duration_since(*at).as_secs_f32();
-        let name = if Some(r.demux_id) == call.local_demux_id { "You".to_owned() } else { app.name(&r.aci) };
+        let name = if Some(r.demux_id) == call.local_demux_id { tr("You").to_owned() } else { app.name(&r.aci) };
         let pos = Pos2::new(area.left() + 24., area.bottom() - 220. - i as f32 * 40. - age * 12.);
         let job = {
             let mut job = egui::text::LayoutJob::default();
@@ -679,14 +680,14 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
             .collect();
         let first = |i: usize| others.get(i).map(|(_, n)| n.split_whitespace().next().unwrap_or(n).to_owned()).unwrap_or_default();
         let text = match (mine, others.len()) {
-            (true, 0) => "You raised a hand.".to_owned(),
+            (true, 0) => tr("You raised a hand.").to_owned(),
             (true, 1) => format!("You and {} raised a hand.", first(0)),
             (true, n) => format!("You, {}, and {} more raised a hand.", first(0), n - 1),
             (false, 1) => format!("{} raised a hand.", first(0)),
             (false, 2) => format!("{} and {} raised a hand.", first(0), first(1)),
             (false, n) => format!("{}, {}, and {} more raised a hand.", first(0), first(1), n - 2),
         };
-        let button = if mine { "Lower" } else { "Open queue" };
+        let button = if mine { tr("Lower") } else { tr("Open queue") };
         let galley = ui.painter().layout_no_wrap(text, theme::regular(13.), white);
         let label = ui.painter().layout_no_wrap(button.to_owned(), theme::semibold(13.), theme::rgb(0xb0c8f9));
         let rect = Rect::from_min_size(area.min + Vec2::new(16., 16.), Vec2::new(16. + 16. + 8. + galley.size().x + 16. + label.size().x + 16., 40.));
@@ -721,7 +722,7 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                     for (i, d) in call.raised_hands.iter().enumerate() {
                         let me = Some(*d) == call.local_demux_id;
                         let (name, aci) = if me {
-                            ("You".to_owned(), app.aci.clone())
+                            (tr("You").to_owned(), app.aci.clone())
                         } else {
                             let aci = call.participants.iter().find(|p| p.demux_id == *d).map(|p| p.aci.clone()).unwrap_or_default();
                             (app.name(&aci), aci)
@@ -735,7 +736,7 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                         if me {
                             let lower = Rect::from_min_size(Pos2::new(row.right() - 60., row.center().y - 12.), Vec2::new(56., 24.));
                             let r = ui.interact(lower, ui.scope_id().with("lower-own-hand"), Sense::click());
-                            ui.painter().text(lower.center(), egui::Align2::CENTER_CENTER, "Lower", theme::semibold(13.), theme::rgb(0xb0c8f9));
+                            ui.painter().text(lower.center(), egui::Align2::CENTER_CENTER, tr("Lower"), theme::semibold(13.), theme::rgb(0xb0c8f9));
                             if r.clicked() {
                                 app.send(Command::RaiseHand(false));
                             }
@@ -783,7 +784,7 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                 ui.horizontal(|ui| {
                     ui.add_space(5.);
                     let n = call.participants.len() + 1;
-                    let title = if n <= 1 { "No one else is here".to_owned() } else { format!("In this call \u{b7} {n} {}", if n == 1 { "person" } else { "people" }) };
+                    let title = if n <= 1 { tr("No one else is here").to_owned() } else { format!("In this call \u{b7} {n} {}", if n == 1 { "person" } else { "people" }) };
                     ui.label(RichText::new(title).font(theme::semibold(14.)).color(white));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (x, r) = ui.allocate_exact_size(Vec2::splat(18.), Sense::click());
@@ -821,7 +822,7 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                     };
                     let me = (app.me.0.clone(), app.me.1.clone());
                     let my_video = app.call_view.video_on.unwrap_or(call.video);
-                    row(ui, "You", &app.aci, me.1.as_deref(), call.sharing, my_video, app.call_view.audio_on, true);
+                    row(ui, tr("You"), &app.aci, me.1.as_deref(), call.sharing, my_video, app.call_view.audio_on, true);
                     for p in &call.participants {
                         let name = app.name(&p.aci);
                         let photo = app.conversation(&ConversationId::direct(&p.aci)).and_then(|c| c.avatar_path.clone());
@@ -873,10 +874,10 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                                 theme::paint_symbol(ui.painter(), symbol, r.center(), 18., white);
                                 resp.on_hover_text(tip).clicked()
                             };
-                            if round(ui, "check", palette.green, "Approve join request") {
+                            if round(ui, "check", palette.green, tr("Approve join request")) {
                                 act.push((aci.to_owned(), true));
                             }
-                            if round(ui, "x", palette.destructive, "Deny join request") {
+                            if round(ui, "x", palette.destructive, tr("Deny join request")) {
                                 act.push((aci.to_owned(), false));
                             }
                         });
@@ -902,15 +903,15 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                     });
                     ui.add_space(6.);
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new(RichText::new("Deny all").color(white)).fill(theme::rgb(0x4a4a4a)).corner_radius(CornerRadius::same(15))).clicked() {
+                        if ui.add(egui::Button::new(RichText::new(tr("Deny all")).color(white)).fill(theme::rgb(0x4a4a4a)).corner_radius(CornerRadius::same(15))).clicked() {
                             app.panes.pending_all = Some(false);
                         }
-                        if ui.add(egui::Button::new(RichText::new("Approve all").color(white)).fill(palette.green).corner_radius(CornerRadius::same(15))).clicked() {
+                        if ui.add(egui::Button::new(RichText::new(tr("Approve all")).color(white)).fill(palette.green).corner_radius(CornerRadius::same(15))).clicked() {
                             app.panes.pending_all = Some(true);
                         }
                     });
                 } else {
-                    person(ui, &pending[0], Some("Would like to join..."), &mut act);
+                    person(ui, &pending[0], Some(tr("Would like to join...")), &mut act);
                     if n > 1 {
                         ui.add_space(6.);
                         let more = n - 1;
@@ -935,8 +936,8 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
             } else {
                 (format!("Deny {n} {}?", if n == 1 { "request" } else { "requests" }), format!("{n} {} will not be added to the call.", if n == 1 { "person" } else { "people" }))
             };
-            let label = if approve { "Approve all" } else { "Deny all" };
-            match crate::dialog::show(ui.ctx(), egui::Id::unique("pending-all"), &title, &body, Some("Cancel"), &[(label, if approve { Variant::StrongPrimary } else { Variant::StrongDestructive })]) {
+            let label = if approve { tr("Approve all") } else { tr("Deny all") };
+            match crate::dialog::show(ui.ctx(), egui::Id::unique("pending-all"), &title, &body, Some(tr("Cancel")), &[(label, if approve { Variant::StrongPrimary } else { Variant::StrongDestructive })]) {
                 Some(Answer::Action(_)) => {
                     app.panes.pending_all = None;
                     for aci in &pending {
@@ -952,6 +953,6 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
         }
     }
     if call.link.as_ref().is_some_and(|l| l.waiting) {
-        ui.painter().text(area.center() + Vec2::new(0., 80.), egui::Align2::CENTER_CENTER, "Waiting to be let in…", theme::medium(15.), white);
+        ui.painter().text(area.center() + Vec2::new(0., 80.), egui::Align2::CENTER_CENTER, tr("Waiting to be let in…"), theme::medium(15.), white);
     }
 }

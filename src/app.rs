@@ -14,6 +14,7 @@ use langis_store::{Conversation, ConversationId, Message};
 
 use crate::chat::ChatView;
 use crate::settings::SettingsView;
+use crate::i18n::tr;
 
 /// Where the app is: before the backend runs, linking, or in the account.
 pub enum Phase {
@@ -216,6 +217,8 @@ impl App {
         }
         egui_extras::install_image_loaders(&ctx);
         let thumbs = crate::thumbs::Thumbs::install(&ctx);
+        // The language first: the fonts follow it (a CJK one from the system).
+        crate::i18n::set_locale(crate::i18n::resolve(&crate::i18n::saved()));
         crate::theme::install(&ctx);
         let (loaded_tx, loaded) = channel();
         let (data_dir, scratch) = if args.demo {
@@ -366,7 +369,7 @@ impl App {
         use langis_core::{ChatChange, Command};
         self.send(Command::SetChat { conversation: conversation.clone(), change: ChatChange::Archived(archive) });
         if archive {
-            self.toast_action("Chat archived", "Undo", Command::SetChat { conversation, change: ChatChange::Archived(false) });
+            self.toast_action(tr("Chat archived"), tr("Undo"), Command::SetChat { conversation, change: ChatChange::Archived(false) });
         } else {
             self.toast("Chat returned to inbox");
         }
@@ -378,7 +381,7 @@ impl App {
     }
 
     pub fn name(&self, service_id: &str) -> String {
-        self.names.get(service_id).cloned().unwrap_or_else(|| "Unknown".into())
+        self.names.get(service_id).cloned().unwrap_or_else(|| tr("Unknown").into())
     }
 
     pub fn conversation(&self, id: &ConversationId) -> Option<&Conversation> {
@@ -553,7 +556,7 @@ impl App {
                 // Desktop's presenting toasts: someone, or we, stopped.
                 if let (Some(old), Some(new)) = (self.call.as_ref(), update.as_ref()) {
                     if old.sharing && !new.sharing {
-                        self.panes.call_toasts.push(("You stopped presenting".into(), Instant::now()));
+                        self.panes.call_toasts.push((tr("You stopped presenting").into(), Instant::now()));
                     }
                     for p in old.participants.iter().filter(|p| p.presenting) {
                         if !new.participants.iter().any(|n| n.demux_id == p.demux_id && n.presenting) {
@@ -586,7 +589,7 @@ impl App {
                         } else {
                             self.conversation(&u.conversation).map(|c| c.title.clone()).unwrap_or_else(|| "Someone".into())
                         };
-                        let body = if u.video { "Incoming video call" } else { "Incoming voice call" };
+                        let body = if u.video { tr("Incoming video call") } else { tr("Incoming voice call") };
                         let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into() });
                     }
                     if self.sound.attention {
@@ -1079,7 +1082,7 @@ impl App {
         let Some(path) = voice.local_path.clone() else { return };
         let Some(peaks) = self.audio.peaks(&self.ctx, &path) else { return };
         let (next_id, incoming) = (next.id, next.direction == langis_store::Direction::Incoming);
-        let title = if incoming { next.author.as_deref().map(|a| self.name(a)).unwrap_or_default() } else { "You".to_owned() };
+        let title = if incoming { next.author.as_deref().map(|a| self.name(a)).unwrap_or_default() } else { tr("You").to_owned() };
         self.audio.toggle(next_id, &conversation, title, &path, peaks.duration, None);
         if incoming {
             self.send(Command::MarkViewed { message_id: next_id });
@@ -1173,7 +1176,7 @@ impl App {
         if !self.confirm_close {
             return;
         }
-        let answer = dialog::show(ctx, egui::Id::unique("close-during-call"), "Close langis and end the call?", "", Some("Not now"), &[("Close", Variant::StrongDestructive)]);
+        let answer = dialog::show(ctx, egui::Id::unique("close-during-call"), "Close langis and end the call?", "", Some(tr("Not now")), &[(tr("Close"), Variant::StrongDestructive)]);
         match answer {
             Some(Answer::Action(_)) => {
                 self.confirm_close = false;

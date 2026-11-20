@@ -18,6 +18,7 @@ use crate::chat::ChatView;
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// How long after the last keystroke "typing" stops (Desktop's
 /// `TYPING_IDLE_TIMEOUT`, a little under its 15s pause timer).
@@ -377,7 +378,7 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                         ui.add_space(((ui.available_width() - line) / 2.).max(0.));
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.label(RichText::new("Only ").font(theme::regular(14.)).color(palette.text_secondary));
-                        let admins = ui.add(egui::Label::new(RichText::new("admins").font(theme::semibold(14.)).color(palette.text_secondary).underline()).sense(Sense::click()));
+                        let admins = ui.add(egui::Label::new(RichText::new(tr("admins")).font(theme::semibold(14.)).color(palette.text_secondary).underline()).sense(Sense::click()));
                         ui.label(RichText::new(" can send messages").font(theme::regular(14.)).color(palette.text_secondary));
                         if admins.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             crate::details::open(app, c.id.clone());
@@ -440,7 +441,7 @@ fn editing_line(ui: &mut Ui, palette: &Palette, chat: &ChatView) {
 fn reply_bar(app: &App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
     let Some(q) = chat.quote.and_then(|id| chat.messages.iter().find(|m| m.id == id)).cloned() else { return };
     let who = match &q.author {
-        None => "You".to_owned(),
+        None => tr("You").to_owned(),
         Some(a) => app.name(a),
     };
     let text = if q.body.is_empty() { q.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { crate::format::one_line(&q.body) };
@@ -486,9 +487,9 @@ fn preview_card(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
         egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 58.), Sense::hover());
             let color = if palette.dark { theme::rgb(0xbebebe) } else { theme::rgb(0x5e5e5e) };
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Loading Preview...", theme::regular(14.), color);
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tr("Loading Preview..."), theme::regular(14.), color);
             let x = Rect::from_center_size(Pos2::new(rect.right() - 12., rect.center().y), Vec2::splat(24.));
-            close = ui.put(x, |ui: &mut Ui| widgets::icon_button(ui, Icon::XCompact, 16., "Close")).clicked();
+            close = ui.put(x, |ui: &mut Ui| widgets::icon_button(ui, Icon::XCompact, 16., tr("Close"))).clicked();
         });
         if close {
             chat.preview.dismissed.insert(url);
@@ -689,7 +690,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                     // taller than the input, and scroll it.
                     ui.spacing_mut().interact_size.y = 20.;
                     let output = egui::TextEdit::multiline(&mut chat.composer)
-                            .hint_text(if editing { "Edit message" } else { "Message" })
+                            .hint_text(if editing { tr("Edit message") } else { tr("Message") })
                             .frame(egui::Frame::NONE)
                             .margin(egui::Margin::ZERO)
                             .desired_rows(1)
@@ -873,14 +874,14 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             ui.add_space(4. + 4.);
         } else if !dirty {
             let mut mic = false;
-            at_bottom(ui, 32., &mut |ui| mic = widgets::axo_icon_button(ui, "mic", "Voice message").clicked());
+            at_bottom(ui, 32., &mut |ui| mic = widgets::axo_icon_button(ui, "mic", tr("Voice message")).clicked());
             if mic {
                 crate::voice::start(app, chat);
             }
             ui.add_space(4. + 4.);
         }
         let mut plus = None;
-        at_bottom(ui, 32., &mut |ui| plus = Some(widgets::axo_icon_button(ui, "plus", "Add attachment or poll")));
+        at_bottom(ui, 32., &mut |ui| plus = Some(widgets::axo_icon_button(ui, "plus", tr("Add attachment or poll"))));
         let plus = plus.unwrap();
         ui.add_space(4.);
         attach_menu(app, ui, &plus, chat, c);
@@ -1031,16 +1032,16 @@ fn insert_at_cursor(ctx: &egui::Context, id: egui::Id, chat: &mut ChatView, text
 fn attach_menu(app: &mut App, ui: &Ui, plus: &egui::Response, chat: &mut ChatView, _c: &langis_store::Conversation) {
     let mut choice = None;
     crate::menu::dropdown(ui, plus, egui::Id::unique("composer-add-menu"), |m| {
-        if m.item(Some("photo"), "Photos & videos") {
+        if m.item(Some("photo"), tr("Photos & videos")) {
             choice = Some(0);
         }
-        if m.item(Some("file"), "File") {
+        if m.item(Some("file"), tr("File")) {
             choice = Some(3);
         }
-        if m.item(Some("poll"), "Poll") {
+        if m.item(Some("poll"), tr("Poll")) {
             choice = Some(1);
         }
-        if m.item(Some("person-circle"), "Contact") {
+        if m.item(Some("person-circle"), tr("Contact")) {
             choice = Some(4);
         }
     });
@@ -1172,7 +1173,7 @@ pub fn remove_preview(chat: &mut ChatView) {
 fn attach(app: &mut App, chat: &mut ChatView, media: bool) {
     let mut dialog = rfd::FileDialog::new().set_title("Add attachment");
     if media {
-        dialog = dialog.add_filter("Photos & videos", &["jpg", "jpeg", "png", "gif", "webp", "heic", "avif", "mp4", "mov", "webm", "mkv", "m4v"]);
+        dialog = dialog.add_filter(tr("Photos & videos"), &["jpg", "jpeg", "png", "gif", "webp", "heic", "avif", "mp4", "mov", "webm", "mkv", "m4v"]);
     }
     let Some(paths) = dialog.pick_files() else { return };
     for path in paths {
@@ -1273,7 +1274,7 @@ fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
 fn gif_replace_confirm(ui: &Ui, chat: &mut ChatView) {
     let Some(picked) = chat.gif_replacing.clone() else { return };
     use crate::dialog::{Answer, Variant};
-    match crate::dialog::show(ui.ctx(), egui::Id::unique("replace-with-gif"), "Replace attachment?", "Adding this GIF will replace the item in your current draft message.", Some("Cancel"), &[("Replace", Variant::StrongPrimary)]) {
+    match crate::dialog::show(ui.ctx(), egui::Id::unique("replace-with-gif"), tr("Replace attachment?"), tr("Adding this GIF will replace the item in your current draft message."), Some(tr("Cancel")), &[(tr("Replace"), Variant::StrongPrimary)]) {
         Some(Answer::Action(_)) => {
             chat.gif_replacing = None;
             chat.staged.clear();
@@ -1304,7 +1305,7 @@ fn gif_tile(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
                 }
             }
         }
-        ui.painter().text(rect.left_bottom() + Vec2::new(6., -6.), egui::Align2::LEFT_BOTTOM, "GIF", theme::semibold(11.), Color32::WHITE);
+        ui.painter().text(rect.left_bottom() + Vec2::new(6., -6.), egui::Align2::LEFT_BOTTOM, tr("GIF"), theme::semibold(11.), Color32::WHITE);
         let x = Rect::from_center_size(rect.right_top() + Vec2::new(-10., 10.), Vec2::splat(18.));
         ui.painter().circle_filled(x.center(), 9., Color32::from_black_alpha(140));
         theme::paint_symbol(ui.painter(), "x", x.center(), 12., Color32::WHITE);

@@ -6,6 +6,7 @@ use langis_store::{Conversation, ConversationKind};
 
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
+use crate::i18n::tr;
 
 /// What an avatar shows.
 pub struct AvatarSpec<'a> {
@@ -165,7 +166,7 @@ pub fn group_description(ui: &mut Ui, title: &str, text: &str, width: f32, cente
     let open_id = egui::Id::unique(("group-description", title));
     let cut = linked_text(ui, text, 14., palette.text, width, 2, center);
     if cut {
-        let r = ui.add(egui::Label::new(RichText::new("read more").font(theme::semibold(14.)).color(palette.text)).sense(Sense::click()));
+        let r = ui.add(egui::Label::new(RichText::new(tr("read more")).font(theme::semibold(14.)).color(palette.text)).sense(Sense::click()));
         if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(open_id, true));
         }

@@ -13,6 +13,7 @@ use crate::icons::Icon;
 use crate::panes::{body, buttons, menu_row, modal, title};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// Desktop's `getStoryDuration`: 5 seconds for a photo; a text story 1
 /// more for each 15 characters past the first 15, and 2 more with a link
@@ -217,7 +218,7 @@ fn argb(c: u32) -> Color32 {
 
 fn who(app: &App, k: &str, stories: &[Story]) -> String {
     if k == "me" {
-        return "My Story".into();
+        return tr("My Story").into();
     }
     if let Some(group) = stories.first().and_then(|s| s.group.as_ref()) {
         return app.conversation(group).map(|c| c.title.clone()).unwrap_or_else(|| "Group".into());
@@ -245,24 +246,24 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 crate::sidebar::header_start(app, ui);
-                ui.label(RichText::new("Stories").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Stories")).font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(14.);
-                    let more = widgets::icon_button(ui, Icon::More, 20., "More actions");
+                    let more = widgets::icon_button(ui, Icon::More, 20., tr("More actions"));
                     crate::menu::dropdown(ui, &more, egui::Id::unique("stories-more"), |m| {
-                        if m.item(Some("lock"), "Story privacy") {
+                        if m.item(Some("lock"), tr("Story privacy")) {
                             app.panes.stories.privacy = true;
                         }
                     });
                     if !app.panes.stories.disabled {
                         // Desktop's StoriesAddStoryButton: a photo or video, or text.
-                        let add = widgets::icon_button(ui, Icon::Plus, 20., "Add a story");
+                        let add = widgets::icon_button(ui, Icon::Plus, 20., tr("Add a story"));
                         let mut pick = None;
                         crate::menu::dropdown(ui, &add, egui::Id::unique("stories-add"), |m| {
-                            if m.item(Some("photo"), "Photo or video") {
+                            if m.item(Some("photo"), tr("Photo or video")) {
                                 pick = Some(true);
                             }
-                            if m.item(Some("text-square"), "Text story") {
+                            if m.item(Some("text-square"), tr("Text story")) {
                                 pick = Some(false);
                             }
                         });
@@ -279,7 +280,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.add_space(24.);
                 ui.vertical_centered(|ui| {
                     body(ui, &palette, "Stories are turned off.");
-                    if ui.link("Turn on stories").clicked() {
+                    if ui.link(tr("Turn on stories")).clicked() {
                         app.send(Command::SetStoriesDisabled(false));
                     }
                 });
@@ -292,7 +293,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Some((_, s)) => crate::format::short_timestamp(s.last().map(|s| s.sent_at).unwrap_or_default()),
                     None => "Tap to add".into(),
                 };
-                if story_row(app, ui, &palette, "My Stories", &subtitle, None, mine.and_then(|(_, s)| s.last()), false).clicked() {
+                if story_row(app, ui, &palette, tr("My Stories"), &subtitle, None, mine.and_then(|(_, s)| s.last()), false).clicked() {
                     match mine {
                         // Desktop's `MyStories` page lists them.
                         Some(_) => {
@@ -306,7 +307,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 let hidden = app.panes.stories.hidden.clone();
                 let is_hidden = |stories: &[Story]| stories.first().and_then(|s| s.group.clone().or_else(|| s.author.as_deref().map(ConversationId::direct))).is_some_and(|c| hidden.contains(&c));
                 let (unread, read): (Vec<_>, Vec<_>) = all.iter().filter(|(k, s)| k != "me" && !is_hidden(s)).partition(|(_, s)| s.iter().any(|s| !s.read));
-                for (heading, section) in [("", unread), ("Viewed", read)] {
+                for (heading, section) in [("", unread), (tr("Viewed"), read)] {
                     if section.is_empty() {
                         continue;
                     }
@@ -340,7 +341,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
                 if all.iter().all(|(k, _)| k == "me") {
                     ui.add_space(24.);
-                    ui.vertical_centered(|ui| body(ui, &palette, "No recent stories to show right now"));
+                    ui.vertical_centered(|ui| body(ui, &palette, tr("No recent stories to show right now")));
                 }
             });
         });
@@ -373,7 +374,7 @@ fn new_composer(app: &mut App) {
 
 /// Desktop's "Photo or video" story: a file picked, into the creator.
 fn new_media_story(app: &mut App) {
-    let Some(path) = rfd::FileDialog::new().add_filter("Media", &["png", "jpg", "jpeg", "webp", "gif", "mp4", "mov"]).pick_file() else { return };
+    let Some(path) = rfd::FileDialog::new().add_filter(tr("Media"), &["png", "jpg", "jpeg", "webp", "gif", "mp4", "mov"]).pick_file() else { return };
     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(u64::MAX);
     if size > crate::composer::MAX_FILE_BYTES {
         app.toast("That file is too large.");
@@ -418,10 +419,10 @@ fn other_row(app: &mut App, ui: &mut Ui, palette: &Palette, k: &str, stories: &[
         crate::menu::open_at(ui.ctx(), menu, at);
     }
     crate::menu::show(ui.ctx(), menu, |m| {
-        if m.item(Some(if hidden { "eye" } else { "eye-slash" }), if hidden { "Show story" } else { "Hide story" }) {
+        if m.item(Some(if hidden { "eye" } else { "eye-slash" }), if hidden { "Show story" } else { tr("Hide story") }) {
             app.send(Command::SetChat { conversation: chat.clone(), change: langis_core::ChatChange::HideStory(!hidden) });
         }
-        if m.item(Some("message"), "Go to chat") {
+        if m.item(Some("message"), tr("Go to chat")) {
             app.open(chat.clone());
         }
     });
@@ -494,10 +495,10 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
     let mut view = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(full.shrink2(Vec2::new(32., 24.))), |ui| {
         ui.horizontal(|ui| {
-            if widgets::icon_button(ui, Icon::ChevronLeft, 20., "Back").clicked() {
+            if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() {
                 app.panes.stories.my_stories = false;
             }
-            ui.label(RichText::new("My Stories").font(theme::semibold(18.)));
+            ui.label(RichText::new(tr("My Stories")).font(theme::semibold(18.)));
         });
         ui.add_space(12.);
         // Desktop's MyStories: a section for each list or group they went
@@ -512,16 +513,16 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                     ids.dedup();
                     ids.iter()
                         .map(|id| match app.panes.stories.lists.iter().find(|l| l.id == *id) {
-                            Some(l) if l.is_my_story() => "My Story".to_owned(),
+                            Some(l) if l.is_my_story() => tr("My Story").to_owned(),
                             Some(l) => l.name.clone(),
-                            None if *id == langis_core::MY_STORY_ID => "My Story".to_owned(),
-                            None => "Custom story".to_owned(),
+                            None if *id == langis_core::MY_STORY_ID => tr("My Story").to_owned(),
+                            None => tr("Custom story").to_owned(),
                         })
                         .collect()
                 }
             };
             if names.is_empty() {
-                names.push("My Story".into());
+                names.push(tr("My Story").into());
             }
             names.dedup();
             for name in names {
@@ -531,7 +532,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                 }
             }
         }
-        sections.sort_by_key(|(n, _)| n != "My Story");
+        sections.sort_by_key(|(n, _)| n != tr("My Story"));
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (section, indices) in &sections {
                 ui.add_space(8.);
@@ -544,7 +545,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                     ui.painter().rect_filled(row, CornerRadius::same(12), palette.fill);
                 }
                 story_thumb(ui, s, Rect::from_min_size(row.min + Vec2::new(10., 6.), Vec2::new(40., 72.)));
-                let views = if app.panes.stories.receipts { format!("{} views", s.views.len()) } else { "Views off".to_owned() };
+                let views = if app.panes.stories.receipts { format!("{} views", s.views.len()) } else { tr("Views off").to_owned() };
                 ui.painter().text(Pos2::new(row.left() + 64., row.top() + 22.), egui::Align2::LEFT_TOP, views, theme::semibold(14.), palette.text);
                 ui.painter().text(Pos2::new(row.left() + 64., row.top() + 44.), egui::Align2::LEFT_TOP, crate::format::short_timestamp(s.sent_at), theme::regular(12.), palette.text_secondary);
                 if r.clicked() {
@@ -559,14 +560,14 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                 crate::menu::show(ui.ctx(), menu, |m| {
                     if let StoryContent::Media { attachment, .. } = &s.content
                         && let Some(path) = &attachment.local_path
-                        && m.item(Some("download"), "Download")
+                        && m.item(Some("download"), tr("Download"))
                     {
                         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "story".into());
                         if let Some(to) = rfd::FileDialog::new().set_file_name(&name).save_file() {
                             let _ = std::fs::copy(path, to);
                         }
                     }
-                    if m.item(Some("trash"), "Delete") {
+                    if m.item(Some("trash"), tr("Delete")) {
                         delete = Some(s.id);
                     }
                 });
@@ -858,18 +859,18 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     let mut menu_choice = None;
     crate::menu::dropdown(ui, &more_hit, egui::Id::unique("story-viewer-menu"), |m| {
         // Desktop's StoryViewer context menu.
-        if m.item(Some("info"), "Info") {
+        if m.item(Some("info"), tr("Info")) {
             menu_choice = Some("info");
         }
         if mine {
-            if m.item(Some("trash"), "Delete") {
+            if m.item(Some("trash"), tr("Delete")) {
                 menu_choice = Some("delete");
             }
         } else {
-            if m.item(Some("x-circle"), "Hide story") {
+            if m.item(Some("x-circle"), tr("Hide story")) {
                 menu_choice = Some("hide");
             }
-            if m.item(Some("open"), "Go to chat") {
+            if m.item(Some("open"), tr("Go to chat")) {
                 menu_choice = Some("chat");
             }
         }
@@ -899,7 +900,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     }
     let pause_hit = ui.interact(pause, ui.scope_id().with("story-pause"), Sense::click());
     theme::paint_symbol(ui.painter(), if app.panes.stories.paused.is_some() { "play-fill" } else { "pause-fill" }, pause.center(), 18., Color32::WHITE);
-    if pause_hit.on_hover_text(if app.panes.stories.paused.is_some() { "Play" } else { "Pause" }).clicked() {
+    if pause_hit.on_hover_text(if app.panes.stories.paused.is_some() { tr("Play") } else { tr("Pause") }).clicked() {
         match app.panes.stories.paused.take() {
             // Resuming moves the start on by the time paused.
             Some(at) => app.panes.stories.viewer = Some((k.to_owned(), index, since + at.elapsed())),
@@ -910,7 +911,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
         let mute = Rect::from_center_size(Pos2::new(pause.left() - 18., pause.center().y), Vec2::splat(28.));
         let r = ui.interact(mute, ui.scope_id().with("story-mute"), Sense::click());
         theme::paint_symbol(ui.painter(), if player.muted { "speaker-slash" } else { "speaker" }, mute.center(), 18., Color32::WHITE);
-        if r.on_hover_text(if player.muted { "Unmute" } else { "Mute" }).clicked() {
+        if r.on_hover_text(if player.muted { tr("Unmute") } else { tr("Mute") }).clicked() {
             let muted = !player.muted;
             player.set_muted(muted);
         }
@@ -972,9 +973,9 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
                 }
                 // `StoryViewer__reply-placeholder` / `__reply-group`.
                 let first = story.author_name.as_deref().or(Some(name.as_str())).and_then(|n| n.split_whitespace().next()).unwrap_or_default().to_owned();
-                let hint = if story.group.is_some() { "Reply to Group".to_owned() } else { format!("Reply to {first}") };
+                let hint = if story.group.is_some() { tr("Reply to Group").to_owned() } else { format!("Reply to {first}") };
                 let field = ui.add(egui::TextEdit::singleline(&mut app.panes.stories.reply).id(egui::Id::unique("story-reply-field")).hint_text(hint).desired_width(ui.available_width() - 70.));
-                let send = ui.button("Send").clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                let send = ui.button(tr("Send")).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                 if send && !app.panes.stories.reply.trim().is_empty() {
                     let body = std::mem::take(&mut app.panes.stories.reply);
                     app.send(Command::ReplyToStory { id: story.id, body: body.trim().to_owned(), emoji: None });
@@ -986,7 +987,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
         if !mine && story.group.is_some() {
             let n = story.replies.len();
             let text = match n {
-                0 => "Reply to Group".to_owned(),
+                0 => tr("Reply to Group").to_owned(),
                 1 => "1 reply".to_owned(),
                 n => format!("{n} replies"),
             };
@@ -1016,7 +1017,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     info_modal(app, ui, &story);
     if app.panes.stories.confirm_hide == Some(story.id) {
         let body = format!("Hide story? New story updates from {name} won\u{2019}t appear at the top of the stories list anymore.");
-        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("hide-story"), "", &body, "Hide", crate::dialog::Variant::StrongPrimary) {
+        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("hide-story"), "", &body, tr("Hide"), crate::dialog::Variant::StrongPrimary) {
             Some(crate::dialog::Choice::Action) => {
                 app.panes.stories.confirm_hide = None;
                 let chat = story.group.clone().or_else(|| story.author.as_ref().map(|a| ConversationId::direct(a)));
@@ -1073,10 +1074,10 @@ fn info_modal(app: &mut App, ui: &mut Ui, story: &Story) {
             });
         };
         let full = |at: i64| chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%a, %b %-d, %Y %-I:%M %p").to_string()).unwrap_or_default();
-        row(ui, "Sent", full(story.sent_at));
+        row(ui, tr("Sent"), full(story.sent_at));
         if story.author.is_some() {
-            row(ui, "Received", full(story.received_at));
-            row(ui, "From", story.author_name.clone().unwrap_or_else(|| story.author.as_deref().map(|a| app.name(a)).unwrap_or_default()));
+            row(ui, tr("Received"), full(story.received_at));
+            row(ui, tr("From"), story.author_name.clone().unwrap_or_else(|| story.author.as_deref().map(|a| app.name(a)).unwrap_or_default()));
         }
         if let StoryContent::Media { attachment, .. } = &story.content {
             row(ui, "File size", crate::format::file_size(attachment.size));
@@ -1091,7 +1092,7 @@ fn info_modal(app: &mut App, ui: &mut Ui, story: &Story) {
                         ui.label(RichText::new(app.name(&r.service_id)).font(theme::regular(13.)));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if viewed {
-                                ui.label(RichText::new("Viewed").font(theme::regular(12.)).color(palette.text_secondary));
+                                ui.label(RichText::new(tr("Viewed")).font(theme::regular(12.)).color(palette.text_secondary));
                             }
                         });
                     });
@@ -1114,10 +1115,10 @@ fn reply_menu(app: &mut App, label: &egui::Response, story: i64, r: &langis_stor
     }
     let mut todo = None;
     crate::menu::show(&label.ctx, menu, |m| {
-        if m.item(Some("trash"), "Delete for me") {
+        if m.item(Some("trash"), tr("Delete for me")) {
             todo = Some(false);
         }
-        if r.author.is_none() && m.item(Some("trash"), "Delete for everyone") {
+        if r.author.is_none() && m.item(Some("trash"), tr("Delete for everyone")) {
             todo = Some(true);
         }
     });
@@ -1144,7 +1145,7 @@ fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
             // The tabs, as Desktop's `Tabs` (underlined, centered).
             ui.horizontal(|ui| {
                 let half = (ui.available_width() - 28.) / 2.;
-                for (i, label) in ["Views", "Replies"].iter().enumerate() {
+                for (i, label) in [tr("Views"), tr("Replies")].iter().enumerate() {
                     let (r, hit) = ui.allocate_exact_size(Vec2::new(half, 32.), Sense::click());
                     let on = tab == i;
                     ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, *label, theme::semibold(14.), if on { palette.text } else { palette.text_secondary });
@@ -1156,20 +1157,20 @@ fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::icon_button(ui, Icon::X, 18., "Close").clicked() {
+                    if widgets::icon_button(ui, Icon::X, 18., tr("Close")).clicked() {
                         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("langis-modal-close"), true));
                     }
                 });
             });
             ui.add_space(12.);
         } else {
-            title(ui, if views { "Views" } else { "Replies" });
+            title(ui, if views { tr("Views") } else { tr("Replies") });
         }
         egui::ScrollArea::vertical().max_height(420.).min_scrolled_height(200.).auto_shrink([false, true]).show(ui, |ui| {
             if tab == 0 {
                 if story.views.is_empty() {
                     ui.add_space(24.);
-                    ui.vertical_centered(|ui| body(ui, &palette, "No views yet"));
+                    ui.vertical_centered(|ui| body(ui, &palette, tr("No views yet")));
                 }
                 for v in &story.views {
                     ui.horizontal(|ui| {
@@ -1191,7 +1192,7 @@ fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
             } else {
                 if story.replies.is_empty() {
                     ui.add_space(24.);
-                    ui.vertical_centered(|ui| body(ui, &palette, "No replies yet"));
+                    ui.vertical_centered(|ui| body(ui, &palette, tr("No replies yet")));
                 }
                 for r in &story.replies {
                     reply_row(app, ui, &palette, story.id, r);
@@ -1203,7 +1204,7 @@ fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
             ui.add_space(10.);
             ui.horizontal(|ui| {
                 let field = ui.add(egui::TextEdit::singleline(&mut app.panes.stories.reply).hint_text("Reply to Group").desired_width(ui.available_width() - 64.));
-                let send = widgets::pill_button(ui, "Send", true).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                let send = widgets::pill_button(ui, tr("Send"), true).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                 if send && !app.panes.stories.reply.trim().is_empty() {
                     let body = std::mem::take(&mut app.panes.stories.reply);
                     app.send(Command::ReplyToStory { id: story.id, body: body.trim().to_owned(), emoji: None });
@@ -1221,7 +1222,7 @@ fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
 fn reply_row(app: &mut App, ui: &mut Ui, palette: &Palette, story: i64, r: &langis_store::StoryReply) {
     let row = ui.horizontal_top(|ui| {
         let (name, color) = match &r.author {
-            None => ("You".to_owned(), palette.text),
+            None => (tr("You").to_owned(), palette.text),
             Some(a) => (r.author_name.clone().unwrap_or_else(|| app.name(a)), theme::name_color(a, palette.dark)),
         };
         match r.author.as_ref().and_then(|a| app.conversation(&ConversationId::direct(a))) {
@@ -1239,7 +1240,7 @@ fn reply_row(app: &mut App, ui: &mut Ui, palette: &Palette, story: i64, r: &lang
                 ui.label(RichText::new("This message was deleted.").font(theme::italic(14.)).color(palette.text_secondary));
             } else if let Some(emoji) = &r.emoji {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Reacted to the story").font(theme::regular(14.)).color(palette.text_secondary));
+                    ui.label(RichText::new(tr("Reacted to the story")).font(theme::regular(14.)).color(palette.text_secondary));
                     let mut job = egui::text::LayoutJob::default();
                     crate::chat::append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::regular(20.), color: palette.text, ..Default::default() });
                     ui.label(job);
@@ -1265,8 +1266,8 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
 
 fn target_label(app: &App, t: &StoryTarget) -> String {
     match t {
-        StoryTarget::MyStory => "My Story".into(),
-        StoryTarget::List(id) => app.panes.stories.lists.iter().find(|l| &l.id == id).map(|l| l.name.clone()).unwrap_or_else(|| "Custom story".into()),
+        StoryTarget::MyStory => tr("My Story").into(),
+        StoryTarget::List(id) => app.panes.stories.lists.iter().find(|l| &l.id == id).map(|l| l.name.clone()).unwrap_or_else(|| tr("Custom story").into()),
         StoryTarget::Group(id) => app.conversation(id).map(|c| c.title.clone()).unwrap_or_default(),
     }
 }
@@ -1362,7 +1363,7 @@ fn composer(app: &mut App, ui: &mut Ui) {
                             .margin(0)
                             .desired_rows(1)
                             .align(egui::Align2::CENTER_TOP)
-                            .hint_text(RichText::new("Add text").font(font.clone()).color(color.gamma_multiply(0.6)))
+                            .hint_text(RichText::new(tr("Add text")).font(font.clone()).color(color.gamma_multiply(0.6)))
                             .char_limit(TEXT_MAX)
                             .layouter(&mut layouter),
                     );
@@ -1446,14 +1447,14 @@ fn composer(app: &mut App, ui: &mut Ui) {
                     c.background = (c.background + 1) % (BACKGROUNDS.len() + GRADIENTS.len());
                 }
                 // Link: Desktop's popover to type or paste one.
-                let link = round(ui, "Add link", &|p, at| theme::paint_symbol(p, "link", at, 18., Color32::WHITE));
+                let link = round(ui, tr("Add link"), &|p, at| theme::paint_symbol(p, "link", at, 18., Color32::WHITE));
                 if link.clicked() {
                     c.link_field = Some(c.link.clone().unwrap_or_default());
                 }
             } else {
                 // A photo opens in Desktop's MediaEditor (draw, text,
                 // stickers, crop).
-                if c.media.as_ref().is_some_and(|(_, t, _)| t.starts_with("image/") && t != "image/gif") && widgets::pill_button(ui, "Edit", false).clicked() {
+                if c.media.as_ref().is_some_and(|(_, t, _)| t.starts_with("image/") && t != "image/gif") && widgets::pill_button(ui, tr("Edit"), false).clicked() {
                     c.editor = c.media.as_ref().and_then(|(bytes, _, _)| crate::media_editor::Editor::open(0, bytes));
                 }
                 if widgets::pill_button(ui, "Use text instead", false).clicked() {
@@ -1463,7 +1464,7 @@ fn composer(app: &mut App, ui: &mut Ui) {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let ready = !empty;
-                let next = ui.add_enabled(ready, egui::Button::new(RichText::new("Next").font(theme::medium(14.)).color(Color32::WHITE)).fill(theme::rgb(0x4655ff)).corner_radius(CornerRadius::same(18)).min_size(Vec2::new(80., 36.)));
+                let next = ui.add_enabled(ready, egui::Button::new(RichText::new(tr("Next")).font(theme::medium(14.)).color(Color32::WHITE)).fill(theme::rgb(0x4655ff)).corner_radius(CornerRadius::same(18)).min_size(Vec2::new(80., 36.)));
                 if next.clicked() {
                     c.sending = true;
                 }
@@ -1480,7 +1481,7 @@ fn composer(app: &mut App, ui: &mut Ui) {
                     r.request_focus();
                     ui.add_space(8.);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let done = ui.add(egui::Button::new(RichText::new("Done").color(Color32::WHITE)).fill(theme::rgb(0x4655ff)).corner_radius(CornerRadius::same(14))).clicked()
+                        let done = ui.add(egui::Button::new(RichText::new(tr("Done")).color(Color32::WHITE)).fill(theme::rgb(0x4655ff)).corner_radius(CornerRadius::same(14))).clicked()
                             || ui.input(|i| i.key_pressed(egui::Key::Enter));
                         if done {
                             let url = field.trim();
@@ -1491,7 +1492,7 @@ fn composer(app: &mut App, ui: &mut Ui) {
                             }
                             keep = false;
                         }
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        if ui.button(tr("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                             keep = false;
                         }
                     });
@@ -1524,7 +1525,7 @@ fn composer(app: &mut App, ui: &mut Ui) {
         c.confirm_discard = true;
     }
     if c.confirm_discard {
-        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("discard-story"), "", "Are you sure you want to discard this story?", "Discard", crate::dialog::Variant::StrongDestructive) {
+        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("discard-story"), "", "Are you sure you want to discard this story?", tr("Discard"), crate::dialog::Variant::StrongDestructive) {
             Some(crate::dialog::Choice::Action) => return,
             Some(crate::dialog::Choice::Cancel) => c.confirm_discard = false,
             None => {}
@@ -1542,11 +1543,11 @@ fn composer(app: &mut App, ui: &mut Ui) {
 fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
     let mut answer = None;
     let closed = modal(ui, "story-send", 380., |ui| {
-        title(ui, "Send story");
+        title(ui, tr("Send story"));
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Send to").font(theme::semibold(13.)));
+            ui.label(RichText::new(tr("Send to")).font(theme::semibold(13.)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.link("New group story").clicked() {
+                if ui.link(tr("New group story")).clicked() {
                     c.new_group = Some((Vec::new(), String::new()));
                 }
             });
@@ -1579,9 +1580,9 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
                     }
                     if let StoryTarget::Group(g) = &t {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let more = widgets::icon_button(ui, Icon::More, 16., "More");
+                            let more = widgets::icon_button(ui, Icon::More, 16., tr("More"));
                             crate::menu::dropdown(ui, &more, egui::Id::unique(("story-group-menu", g.0.as_str())), |m| {
-                                if m.item(Some("minus-circle"), "Remove group story") {
+                                if m.item(Some("minus-circle"), tr("Remove group story")) {
                                     remove = Some(g.clone());
                                 }
                             });
@@ -1596,13 +1597,13 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
             app.panes.stories.send_modes.retain(|(id, _)| *id != g);
             app.panes.stories.send_modes.push((g, langis_store::StorySendMode::Never));
         }
-        answer = buttons(ui, &["Send story", "Cancel"]);
+        answer = buttons(ui, &[tr("Send story"), tr("Cancel")]);
     });
     // New group story: pick groups, added for stories from now on.
     if let Some((mut picked, mut query)) = c.new_group.take() {
         let mut done = None;
         let closed_picker = modal(ui, "new-group-story", 380., |ui| {
-            title(ui, "New group story");
+            title(ui, tr("New group story"));
             widgets::text_field(ui, &mut query, "Search groups", false);
             ui.add_space(6.);
             let q = query.trim().to_lowercase();
@@ -1618,7 +1619,7 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
                     }
                 }
             });
-            done = buttons(ui, &["Add", "Cancel"]);
+            done = buttons(ui, &[tr("Add"), tr("Cancel")]);
         });
         match done {
             Some(0) if !picked.is_empty() => {
@@ -1673,8 +1674,8 @@ fn privacy(app: &mut App, ui: &mut Ui) {
     let my = lists.iter().find(|l| l.is_my_story()).cloned().unwrap_or_else(StoryList::my_story);
     let mut done = false;
     let closed = modal(ui, "story-privacy", 440., |ui| {
-        title(ui, "Story privacy");
-        ui.label(RichText::new("My Story").font(theme::semibold(14.)));
+        title(ui, tr("Story privacy"));
+        ui.label(RichText::new(tr("My Story")).font(theme::semibold(14.)));
         let mode = if my.block_list && my.members.is_empty() {
             0
         } else if my.block_list {
@@ -1683,7 +1684,7 @@ fn privacy(app: &mut App, ui: &mut Ui) {
             2
         };
         let mut pick = mode;
-        ui.radio_value(&mut pick, 0, "All Signal connections");
+        ui.radio_value(&mut pick, 0, tr("All Signal connections"));
         ui.radio_value(&mut pick, 1, format!("All except… ({})", if my.block_list { my.members.len() } else { 0 }));
         ui.radio_value(&mut pick, 2, format!("Only share with… ({})", if my.block_list { 0 } else { my.members.len() }));
         if pick != mode {
@@ -1710,16 +1711,16 @@ fn privacy(app: &mut App, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 ui.label(format!("{} ({})", l.name, l.members.len()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("Delete").clicked() {
+                    if ui.small_button(tr("Delete")).clicked() {
                         app.send(Command::DeleteStoryList { id: l.id.clone() });
                     }
-                    if ui.small_button("Edit").clicked() {
+                    if ui.small_button(tr("Edit")).clicked() {
                         app.panes.stories.editing = Some(l.clone());
                     }
                 });
             });
         }
-        if menu_row(ui, Some(Icon::PlusCircle), "New custom story", false).clicked() {
+        if menu_row(ui, Some(Icon::PlusCircle), tr("New custom story"), false).clicked() {
             app.panes.stories.editing = Some(StoryList { id: new_uuid(), name: String::new(), members: Vec::new(), block_list: false, allows_replies: true });
         }
         ui.add_space(12.);
@@ -1733,14 +1734,14 @@ fn privacy(app: &mut App, ui: &mut Ui) {
                 }
             });
         });
-        body(ui, &palette, "See and share when stories are viewed. If disabled, you won't see when others view your story.");
+        body(ui, &palette, tr("See and share when stories are viewed. If disabled, you won't see when others view your story."));
         ui.add_space(8.);
-        if menu_row(ui, None, "Turn off stories", true).clicked() {
+        if menu_row(ui, None, tr("Turn off stories"), true).clicked() {
             app.send(Command::SetStoriesDisabled(true));
             app.panes.stories.disabled = true;
             done = true;
         }
-        done |= buttons(ui, &["Done"]).is_some();
+        done |= buttons(ui, &[tr("Done")]).is_some();
     });
     if done || closed {
         app.panes.stories.privacy = false;
@@ -1755,9 +1756,9 @@ fn list_editor(app: &mut App, ui: &mut Ui) {
     let people = crate::panes::people(app);
     let mut answer = None;
     let closed = modal(ui, "story-list", 400., |ui| {
-        title(ui, if list.is_my_story() { if list.block_list { "Hide story from" } else { "Share story with" } } else { "Custom story" });
+        title(ui, if list.is_my_story() { if list.block_list { tr("Hide story from") } else { "Share story with" } } else { tr("Custom story") });
         if !list.is_my_story() {
-            widgets::text_field(ui, &mut list.name, "Story name (required)", false);
+            widgets::text_field(ui, &mut list.name, tr("Story name (required)"), false);
             ui.add_space(6.);
         }
         body(ui, &palette, &format!("{} chosen", list.members.len()));
@@ -1773,7 +1774,7 @@ fn list_editor(app: &mut App, ui: &mut Ui) {
                 }
             }
         });
-        answer = buttons(ui, &["Save", "Cancel"]);
+        answer = buttons(ui, &[tr("Save"), tr("Cancel")]);
     });
     match answer {
         Some(0) if list.is_my_story() || !list.name.trim().is_empty() => {

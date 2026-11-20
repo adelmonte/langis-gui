@@ -12,6 +12,7 @@ use crate::app::{App, PendingSend};
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// Messages per page of the timeline.
 pub const PAGE: u32 = 60;
@@ -743,29 +744,29 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                     // AxoIconButton md circles, 4px apart (12 on a wide header).
                     ui.add_space(16.);
                     ui.spacing_mut().item_spacing.x = if rect.width() >= 500. { 12. } else { 4. };
-                    let more = widgets::axo_icon_button(ui, "more", "More");
+                    let more = widgets::axo_icon_button(ui, "more", tr("More"));
                     header_menu(app, ui, &more, c);
-                    if widgets::axo_icon_button(ui, "search", "Search in chat").clicked() {
+                    if widgets::axo_icon_button(ui, "search", tr("Search in chat")).clicked() {
                         app.find_requested = true;
                     }
                     if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
                         let group = c.kind == ConversationKind::Group;
                         let in_other = app.call.as_ref().is_some_and(|call| call.conversation != c.id);
                         let going = group && app.panes.active_calls.get(&c.id).is_some_and(|u| !u.is_empty());
-                        let tip = |t: &'static str| if in_other { "You are already in a call" } else { t };
+                        let tip = |t: &'static str| if in_other { tr("You are already in a call") } else { t };
                         ui.add_enabled_ui(!in_other, |ui| {
                             if going {
                                 // Desktop's strong-affirmative "Join" button.
-                                if join_button(ui).on_hover_text(tip("Join")).clicked() {
+                                if join_button(ui).on_hover_text(tip(tr("Join"))).clicked() {
                                     crate::panes::open_lobby(app, c.id.clone(), true);
                                 }
                                 return;
                             }
                             // Groups get video only (OutgoingCallButtonStyle.JustVideo).
-                            if !group && widgets::axo_icon_button(ui, "phone", tip("Start a voice call")).clicked() {
+                            if !group && widgets::axo_icon_button(ui, tr("phone"), tip("Start a voice call")).clicked() {
                                 crate::panes::open_lobby(app, c.id.clone(), false);
                             }
-                            if widgets::axo_icon_button(ui, "videocamera", tip("Start a video call")).clicked() {
+                            if widgets::axo_icon_button(ui, "videocamera", tip(tr("Start a video call"))).clicked() {
                                 crate::panes::open_lobby(app, c.id.clone(), true);
                             }
                         });
@@ -779,7 +780,7 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
 /// Desktop's header "Join" while a group call is on.
 fn join_button(ui: &mut Ui) -> egui::Response {
     let font = theme::medium(13.);
-    let galley = ui.painter().layout_no_wrap("Join".to_owned(), font, Color32::WHITE);
+    let galley = ui.painter().layout_no_wrap(tr("Join").to_owned(), font, Color32::WHITE);
     let size = Vec2::new(12. + 16. + 6. + galley.size().x + 12., 30.);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let dark = ui.visuals().dark_mode;
@@ -826,7 +827,7 @@ fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
             }
             crate::glyphs::pin(ui, Rect::from_center_size(Pos2::new(rect.left() + 38., rect.center().y), Vec2::splat(18.)), palette.text);
             let who = match &m.author {
-                None => "You".to_owned(),
+                None => tr("You").to_owned(),
                 Some(a) => app.name(a),
             };
             ui.painter().text(Pos2::new(rect.left() + 56., rect.top() + 8.), Align2::LEFT_TOP, who, theme::semibold(13.), palette.text);
@@ -849,13 +850,13 @@ fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
                 jump = true;
             }
             crate::menu::show(ui.ctx(), menu, |m| {
-                if m.item(Some("pin-slash"), "Unpin") {
+                if m.item(Some("pin-slash"), tr("Unpin")) {
                     unpin = true;
                 }
-                if m.item(Some("arrow-[end]"), "Go to message") {
+                if m.item(Some("arrow-[end]"), tr("Go to message")) {
                     go = true;
                 }
-                if m.item(Some("list-bullet"), "See all messages") {
+                if m.item(Some("list-bullet"), tr("See all messages")) {
                     all = true;
                 }
             });
@@ -1180,8 +1181,8 @@ enum HeroClick {
 /// Desktop's `SharedGroupNames`: the groups you share with someone.
 fn shared_groups_text(groups: &[String], accepted: bool) -> String {
     match groups {
-        [] if accepted => "No groups in common".into(),
-        [] => "No groups in common. Review requests carefully.".into(),
+        [] if accepted => tr("No groups in common").into(),
+        [] => tr("No groups in common. Review requests carefully.").into(),
         [a] => format!("Member of {a}"),
         [a, b] => format!("Member of {a} and {b}"),
         [a, b, c] => format!("Member of {a}, {b}, and {c}"),
@@ -1193,8 +1194,8 @@ fn shared_groups_text(groups: &[String], accepted: bool) -> String {
 /// Desktop's `GroupMembersNames` (`icu:ConversationHero--group-members-*`).
 fn group_members_text(others: &[String], you: bool) -> String {
     match (others, you) {
-        ([], false) => "No group members".into(),
-        ([], true) => "No other group members yet".into(),
+        ([], false) => tr("No group members").into(),
+        ([], true) => tr("No other group members yet").into(),
         ([a], false) => a.clone(),
         ([a], true) => format!("{a} and you"),
         ([a, b], false) => format!("{a} and {b}"),
@@ -1231,7 +1232,7 @@ fn chat_intro(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 ui.painter().circle_filled(at.center(), 38., palette.background);
                 widgets::paint_avatar(ui, at, &widgets::AvatarSpec::of(c));
                 ui.add_space(12.);
-                let title = if note { "Note to Self".to_owned() } else { c.title.clone() };
+                let title = if note { tr("Note to Self").to_owned() } else { c.title.clone() };
                 let mut job = egui::text::LayoutJob::default();
                 job.append(&title, 0., egui::TextFormat { font_id: theme::medium(20.), color: palette.text, line_height: Some(24.), ..Default::default() });
                 if direct {
@@ -1251,7 +1252,7 @@ fn chat_intro(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 }
                 if note {
                     ui.add_space(8.);
-                    ui.label(RichText::new("You can add notes for yourself in this chat. If your account has any linked devices, new notes will be synced.").font(theme::regular(14.)).color(palette.text));
+                    ui.label(RichText::new(tr("You can add notes for yourself in this chat. If your account has any linked devices, new notes will be synced.")).font(theme::regular(14.)).color(palette.text));
                     return;
                 }
                 // Desktop shows the warning when the name isn't one you gave
@@ -1260,7 +1261,7 @@ fn chat_intro(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                     ui.add_space(8.);
                     let safety = if palette.dark { theme::rgb(0xeb977d) } else { theme::rgb(0xb94b29) };
                     let tint = if palette.dark { Color32::from_rgba_unmultiplied(0xeb, 0x97, 0x7d, 36) } else { Color32::from_rgba_unmultiplied(0xb9, 0x4b, 0x29, 26) };
-                    let text = ui.painter().layout_no_wrap("Name not verified".into(), theme::medium(14.), safety);
+                    let text = ui.painter().layout_no_wrap(tr("Name not verified").into(), theme::medium(14.), safety);
                     let size = Vec2::new(10. + 16. + 4. + text.size().x + 10., 28.);
                     let (pill, r) = ui.allocate_exact_size(size, Sense::click());
                     ui.painter().rect_filled(pill, CornerRadius::same(14), if r.is_pointer_button_down_on() { tint.gamma_multiply(1.5) } else { tint });
@@ -1300,7 +1301,7 @@ fn chat_intro(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 }
                 if !c.accepted {
                     ui.add_space(12.);
-                    if widgets::axo_button(ui, "Safety tips", widgets::Axo::SubtleSecondary).clicked() {
+                    if widgets::axo_button(ui, tr("Safety tips"), widgets::Axo::SubtleSecondary).clicked() {
                         click = Some(HeroClick::Dialog(HeroDialog::SafetyTips));
                     }
                 }
@@ -1319,32 +1320,32 @@ pub fn hero_dialog(ctx: &egui::Context, chat: &mut ChatView) {
     let Some(dialog) = chat.hero_dialog else { return };
     let (title, items): (&str, Vec<(&str, &str)>) = match dialog {
         HeroDialog::SafetyTips => (
-            "Safety tips",
+            tr("Safety tips"),
             vec![
-                ("Don\u{2019}t respond to chats from Signal", "Signal will never message you for your registration code, PIN, or recovery key. Never respond to a chat pretending to be Signal."),
-                ("Review names and photos", "Look out for the \u{201c}Name not verified\u{201d} notice. Everyone sets their own profile name in Signal."),
-                ("Look out for scams", "Avoid vague messages that try to get you to reply. Be aware of financial tips and suspicious web links."),
+                (tr("Don\u{2019}t respond to chats from Signal"), tr("Signal will never message you for your registration code, PIN, or recovery key. Never respond to a chat pretending to be Signal.")),
+                (tr("Review names and photos"), tr("Look out for the \u{201c}Name not verified\u{201d} notice. Everyone sets their own profile name in Signal.")),
+                (tr("Look out for scams"), tr("Avoid vague messages that try to get you to reply. Be aware of financial tips and suspicious web links.")),
             ],
         ),
         HeroDialog::NameWarning { group: false } => (
-            "Profile names on Signal are chosen by their account holder:",
+            tr("Profile names on Signal are chosen by their account holder:"),
             vec![
-                ("", "Signal can\u{2019}t verify names and photos"),
-                ("", "Signal will never contact you for your registration code, PIN, or recovery key"),
-                ("", "Be cautious of accounts that impersonate others"),
-                ("", "Don't share personal information with people you don't know"),
+                ("", tr("Signal can\u{2019}t verify names and photos")),
+                ("", tr("Signal will never contact you for your registration code, PIN, or recovery key")),
+                ("", tr("Be cautious of accounts that impersonate others")),
+                ("", tr("Don't share personal information with people you don't know")),
             ],
         ),
         HeroDialog::NameWarning { group: true } => (
-            "Group names are chosen by members of the group.",
+            tr("Group names are chosen by members of the group."),
             vec![
-                ("", "Be cautious of groups that impersonate organizations and businesses"),
-                ("", "Profile names of members in groups are not verified"),
-                ("", "Don't share personal information with people you don't know"),
+                ("", tr("Be cautious of groups that impersonate organizations and businesses")),
+                ("", tr("Profile names of members in groups are not verified")),
+                ("", tr("Don't share personal information with people you don't know")),
             ],
         ),
     };
-    let ok = if dialog == HeroDialog::SafetyTips { "Done" } else { "OK" };
+    let ok = if dialog == HeroDialog::SafetyTips { tr("Done") } else { tr("OK") };
     let answer = crate::dialog::show_with(ctx, egui::Id::unique("hero-dialog"), title, "", None, &[(ok, crate::dialog::Variant::StrongPrimary)], |ui| {
         let palette = Palette::of(ui.ctx());
         for (head, body) in &items {
@@ -1449,7 +1450,7 @@ fn message(
     let meta_color = if outgoing && !m.deleted { palette.bubble_out_meta() } else { palette.text_secondary };
 
     let author_name = (!outgoing && ctx.group && !collapsed_above).then(|| {
-        m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into())
+        m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| tr("Unknown").into())
     });
 
     // What goes in the bubble, top to bottom.
@@ -1471,10 +1472,10 @@ fn message(
         // Desktop's `Message` names who deleted it: the admin, else its author.
         let text = match &m.deleted_by_admin {
             Some(langis_store::DeletedByAdmin { by: Some(admin) }) => format!("Admin {} deleted this message", ctx.app.name(admin)),
-            Some(_) => "You deleted this message".to_owned(),
-            None if outgoing => "You deleted this message".to_owned(),
+            Some(_) => tr("You deleted this message").to_owned(),
+            None if outgoing => tr("You deleted this message").to_owned(),
             None => {
-                let name = m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into());
+                let name = m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| tr("Unknown").into());
                 format!("{name} deleted this message")
             }
         };
@@ -1670,8 +1671,8 @@ fn message(
     // Desktop's line under a long message's start, while the rest isn't here.
     let long_line = m.long_text.as_ref().filter(|_| !m.deleted).map(|l| match l.state {
         langis_store::LongTextState::Downloading => ("Downloading the rest…", false),
-        langis_store::LongTextState::Failed => ("Download Full Message", true),
-        langis_store::LongTextState::TooBig => ("Message too long to display more", false),
+        langis_store::LongTextState::Failed => (tr("Download Full Message"), true),
+        langis_store::LongTextState::TooBig => (tr("Message too long to display more"), false),
     });
     let long_h = if long_line.is_some() { 20. } else { 0. };
     let text_h = galley.as_ref().map(|g| g.size().y).unwrap_or(0.) + long_h;
@@ -1861,7 +1862,7 @@ fn message(
     }
     if let Some(content) = content {
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., content_h));
-        let sender = (!outgoing).then(|| m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into()));
+        let sender = (!outgoing).then(|| m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| tr("Unknown").into()));
         if let Some(action) = content_block(ui, palette, content, sender.as_deref(), rect, outgoing, in_color, meta_color, ui.scope_id().with(("content", m.id))).map(|a| match a {
             Action::ContactDetail(_) => Action::ContactDetail(m.id),
             a => a,
@@ -1914,7 +1915,7 @@ fn message(
         let r = ui.interact(button, ui.scope_id().with(("cta", m.id)), Sense::click());
         let fill = if outgoing { Color32::from_white_alpha(if r.hovered() { 70 } else { 50 }) } else if r.hovered() { palette.fill_pressed } else { palette.fill };
         ui.painter().rect_filled(button, CornerRadius::same(16), fill);
-        ui.painter().text(button.center(), Align2::CENTER_CENTER, cta.text.clone().unwrap_or_else(|| "Donate Now".into()), theme::semibold(14.), in_color);
+        ui.painter().text(button.center(), Align2::CENTER_CENTER, cta.text.clone().unwrap_or_else(|| tr("Donate Now").into()), theme::semibold(14.), in_color);
         if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             actions.push(Action::Open("https://signal.org/donate/".into()));
         }
@@ -2015,17 +2016,17 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     let a = m.attachments.first();
     // Desktop's `renderTapToViewText`.
     let kind = match a.map(|a| a.content_type.as_str()) {
-        Some(t) if t.starts_with("video/") || t == "image/gif" => "View Once Video",
-        _ => "View Once Photo",
+        Some(t) if t.starts_with("video/") || t == "image/gif" => tr("View Once Video"),
+        _ => tr("View Once Photo"),
     };
     let ready = !outgoing && state == ViewOnce::Ready;
     let downloaded = a.is_some_and(|a| a.local_path.is_some());
     let (icon, label) = match state {
-        ViewOnce::Ready if outgoing => (Icon::ViewOnceDashBold, "View Once Media"),
+        ViewOnce::Ready if outgoing => (Icon::ViewOnceDashBold, tr("View Once Media")),
         ViewOnce::Ready if downloaded => (Icon::ViewOnce, kind),
         ViewOnce::Ready => (Icon::ArrowDown, kind),
-        ViewOnce::Viewed | ViewOnce::Gone => (Icon::ViewOnceViewedBold, if outgoing { "View Once Media" } else { "Viewed" }),
-        ViewOnce::Invalid => (Icon::ViewOnceDashBold, "View Once Media"),
+        ViewOnce::Viewed | ViewOnce::Gone => (Icon::ViewOnceViewedBold, if outgoing { tr("View Once Media") } else { tr("Viewed") }),
+        ViewOnce::Invalid => (Icon::ViewOnceDashBold, tr("View Once Media")),
     };
     let text_color = if outgoing { palette.bubble_out_text() } else if ready { palette.text } else { palette.text_secondary };
     let meta_color = if outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
@@ -2038,7 +2039,7 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     // In a group, the author's name over it; reactions and the failed line
     // under it, as any bubble.
     let name_galley = (show_avatar).then(|| {
-        let name = m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into());
+        let name = m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| tr("Unknown").into());
         let color = m.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.text);
         ui.painter().layout_no_wrap(name, theme::semibold(13.), color)
     });
@@ -2247,7 +2248,7 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
         ui.painter().galley(at.min + Vec2::new(6., 2.), size, Color32::WHITE);
     } else if gif {
         // Desktop's GIF badge in the corner.
-        let label = ui.painter().layout_no_wrap("GIF".into(), theme::semibold(11.), Color32::WHITE);
+        let label = ui.painter().layout_no_wrap(tr("GIF").into(), theme::semibold(11.), Color32::WHITE);
         let at = Rect::from_min_size(rect.left_bottom() + Vec2::new(8., -26.), label.size() + Vec2::new(12., 6.));
         ui.painter().rect_filled(at, CornerRadius::same(6), Color32::from_black_alpha(140));
         ui.painter().galley(at.min + Vec2::new(6., 3.), label, Color32::WHITE);
@@ -2278,7 +2279,7 @@ fn audio_row(ui: &Ui, ctx: &Ctx<'_>, m: &Message, a: &langis_store::AttachmentMe
     let peaks = a.local_path.as_deref().and_then(|p| ctx.app.audio.peaks(ui.ctx(), p));
     let active = ctx.app.audio.active(m.id);
     let playing = active.is_some_and(|p| p.playing());
-    let title = if outgoing { "You".to_owned() } else { m.author.as_deref().map(|a| ctx.app.name(a)).unwrap_or_default() };
+    let title = if outgoing { tr("You").to_owned() } else { m.author.as_deref().map(|a| ctx.app.name(a)).unwrap_or_default() };
     let mut action = None;
 
     // `PlaybackButton`, variant message.
@@ -2378,7 +2379,7 @@ fn file_row(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: 
         .filter(|e| e.len() <= 4)
         .unwrap_or_default();
     ui.painter().text(icon.center() + Vec2::new(0., 6.), Align2::CENTER_CENTER, ext, theme::semibold(8.), palette.accent);
-    let name = a.file_name.clone().unwrap_or_else(|| if a.voice { "Voice message".into() } else { "File".into() });
+    let name = a.file_name.clone().unwrap_or_else(|| if a.voice { tr("Voice message").into() } else { tr("File").into() });
     let mut job = egui::text::LayoutJob::simple_singleline(name, theme::medium(14.), text);
     job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 42.);
     let name = ui.fonts_mut(|f| f.layout_job(job));
@@ -2444,7 +2445,7 @@ fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, re
     ui.painter().rect_filled(bar, CornerRadius { nw: 8, sw: 4, ne: 0, se: 0 }, bar_color);
     let text_color = if palette.dark { theme::rgb(0xe9e9e9) } else { theme::rgb(0x1b1b1b) };
     let author = match &q.author {
-        None => "You".to_owned(),
+        None => tr("You").to_owned(),
         Some(a) => ctx.app.names.get(a).cloned().unwrap_or_else(|| q.author_name.clone()),
     };
     let side = Rect::from_min_size(Pos2::new(rect.right() - QUOTE_THUMB, rect.top()), Vec2::new(QUOTE_THUMB, rect.height().min(QUOTE_THUMB)));
@@ -2515,7 +2516,7 @@ fn content_block(
     };
     match content {
         MessageContent::Contact(c) => {
-            let name = c.display_nickname().or_else(|| c.display_name()).or_else(|| c.organization.clone()).unwrap_or_else(|| "Unknown contact".into());
+            let name = c.display_nickname().or_else(|| c.display_name()).or_else(|| c.organization.clone()).unwrap_or_else(|| tr("Unknown contact").into());
             let row = Rect::from_min_size(Pos2::new(rect.left(), rect.top() + 4.), Vec2::new(rect.width(), 52.));
             let spec = widgets::AvatarSpec { name: &name, color: 0, photo: c.avatar.as_ref().and_then(|a| a.local_path.as_deref()), group: false, note_to_self: false };
             widgets::paint_avatar(ui, Rect::from_min_size(row.min, Vec2::splat(52.)), &spec);
@@ -2534,14 +2535,14 @@ fn content_block(
                 let b = ui.interact(button, id.with("message"), Sense::click());
                 let fill = if outgoing { Color32::from_white_alpha(if b.hovered() { 70 } else { 50 }) } else if b.hovered() { palette.fill_pressed } else { palette.fill };
                 ui.painter().rect_filled(button, CornerRadius::same(16), fill);
-                ui.painter().text(button.center(), Align2::CENTER_CENTER, "Message", theme::semibold(14.), text);
+                ui.painter().text(button.center(), Align2::CENTER_CENTER, tr("Message"), theme::semibold(14.), text);
                 if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     action = Some(Action::Chat(langis_store::ConversationId::direct(aci)));
                 }
             }
         }
         MessageContent::Payment(p) => {
-            line(rect.top() + 4., "Payment".into(), theme::semibold(14.), text);
+            line(rect.top() + 4., tr("Payment").into(), theme::semibold(14.), text);
             let note = match p {
                 langis_store::PaymentEvent::Notification { note: Some(n) } if !n.is_empty() => n.clone(),
                 _ => p.description(sender, None),
@@ -2550,10 +2551,10 @@ fn content_block(
         }
         MessageContent::GiftBadge(g) => {
             // Desktop's donation message (`renderGiftBadge`).
-            line(rect.top() + 4., "Donation".into(), theme::semibold(14.), text);
+            line(rect.top() + 4., tr("Donation").into(), theme::semibold(14.), text);
             match g.state {
                 GiftBadgeState::Unopened | GiftBadgeState::Failed => {
-                    let hint = if outgoing { "Tap this message on mobile to view your donation" } else { "View this message on mobile to open it" };
+                    let hint = if outgoing { tr("Tap this message on mobile to view your donation") } else { tr("View this message on mobile to open it") };
                     line(rect.top() + 24., hint.into(), theme::regular(13.), secondary);
                 }
                 GiftBadgeState::Opened | GiftBadgeState::Redeemed => {
@@ -2567,10 +2568,10 @@ fn content_block(
                     } else if minutes > 0 {
                         plural(minutes, "minute", "minutes")
                     } else {
-                        "Expired".into()
+                        tr("Expired").into()
                     };
                     line(rect.top() + 24., remaining, theme::regular(13.), secondary);
-                    line(rect.top() + 42., if outgoing { "View".into() } else { "\u{2713} Redeemed".into() }, theme::semibold(13.), text);
+                    line(rect.top() + 42., if outgoing { tr("View").into() } else { "\u{2713} Redeemed".into() }, theme::semibold(13.), text);
                 }
             }
         }
@@ -2797,9 +2798,9 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
         Notice::Call { incoming, video, outcome, .. } if !ctx.group => {
             // In this chat's call now: back to it.
             if ctx.app.call.as_ref().is_some_and(|c| c.conversation == *ctx.chat_id) {
-                return Some(("Return to call", NoticeButton::Return));
+                return Some((tr("Return to call"), NoticeButton::Return));
             }
-            let label = if *incoming && *outcome == CallOutcome::Missed { "Call back" } else { "Call again" };
+            let label = if *incoming && *outcome == CallOutcome::Missed { tr("Call back") } else { tr("Call again") };
             Some((label, NoticeButton::Call { video: *video }))
         }
         // While the group's call goes on: Join, or Return when we're in it.
@@ -2808,25 +2809,25 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
             let latest = ctx.app.chat.as_ref().is_none_or(|c| !c.messages.iter().any(|o| o.sent_at > m.sent_at && matches!(o.notice, Some(Notice::GroupCall { .. }))));
             let ours = ctx.app.call.as_ref().is_some_and(|c| c.conversation == *ctx.chat_id);
             match (going && latest, ours) {
-                (true, false) => Some(("Join", NoticeButton::Join)),
-                (_, true) if latest => Some(("Return to call", NoticeButton::Return)),
+                (true, false) => Some((tr("Join"), NoticeButton::Join)),
+                (_, true) if latest => Some((tr("Return to call"), NoticeButton::Return)),
                 _ => None,
             }
         }
-        Notice::SafetyNumberChanged { who } => Some(("View safety number", NoticeButton::Safety(who.clone()))),
-        Notice::PollEnded { by, sent_at, .. } => Some(("View poll", NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
-        Notice::Pinned { author, sent_at, .. } => Some(("Go to message", NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),
+        Notice::SafetyNumberChanged { who } => Some((tr("View safety number"), NoticeButton::Safety(who.clone()))),
+        Notice::PollEnded { by, sent_at, .. } => Some((tr("View poll"), NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
+        Notice::Pinned { author, sent_at, .. } => Some((tr("Go to message"), NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),
         Notice::SessionRefreshed => Some((
-            "Learn more",
+            tr("Learn more"),
             NoticeButton::Explain(
-                "Chat session refreshed",
+                tr("Chat session refreshed"),
                 "Signal encrypts each message with keys that change as you chat. One of them couldn't be used, so the session was reset; a message from them may not have arrived. Ask them to send it again if something is missing.",
             ),
         )),
         Notice::DeliveryIssue { .. } => Some((
-            "Learn more",
+            tr("Learn more"),
             NoticeButton::Explain(
-                "Delivery issue",
+                tr("Delivery issue"),
                 "A message, sticker, reaction or receipt they sent couldn't be decrypted, and it won't be sent again. They can resend it if it mattered.",
             ),
         )),
@@ -2841,12 +2842,12 @@ fn status_line(m: &Message) -> Option<(&'static str, Option<Action>)> {
         return None;
     }
     match m.status {
-        DeliveryStatus::Failed if m.deleted => Some(("Delete failed, click for details", Some(Action::Info(m.id)))),
-        DeliveryStatus::Failed if m.edited => Some(("Edit failed, click for details", Some(Action::Info(m.id)))),
-        DeliveryStatus::Failed => Some(("Send failed", Some(Action::Retry(m.id)))),
-        DeliveryStatus::PartialSent if m.deleted => Some(("Partially deleted, click for details", Some(Action::Info(m.id)))),
-        DeliveryStatus::PartialSent => Some(("Partially sent, click for details", Some(Action::Info(m.id)))),
-        DeliveryStatus::Paused => Some(("Send paused", None)),
+        DeliveryStatus::Failed if m.deleted => Some((tr("Delete failed, click for details"), Some(Action::Info(m.id)))),
+        DeliveryStatus::Failed if m.edited => Some((tr("Edit failed, click for details"), Some(Action::Info(m.id)))),
+        DeliveryStatus::Failed => Some((tr("Send failed"), Some(Action::Retry(m.id)))),
+        DeliveryStatus::PartialSent if m.deleted => Some((tr("Partially deleted, click for details"), Some(Action::Info(m.id)))),
+        DeliveryStatus::PartialSent => Some((tr("Partially sent, click for details"), Some(Action::Info(m.id)))),
+        DeliveryStatus::Paused => Some((tr("Send paused"), None)),
         _ => None,
     }
 }
@@ -2880,7 +2881,7 @@ fn typing_bubble(ui: &mut Ui, ctx: &Ctx<'_>, authors: &[String]) {
             ui.painter().text(at.center(), Align2::CENTER_CENTER, format!("+{more}"), theme::semibold(11.), palette.text);
         }
         let names: Vec<String> = authors.iter().map(|a| ctx.app.name(a)).collect();
-        ui.interact(row, ui.scope_id().with("typing"), Sense::hover()).on_hover_text(format!("{} typing", names.join(", ")));
+        ui.interact(row, ui.scope_id().with("typing"), Sense::hover()).on_hover_text(format!("{} typing", names.join(tr(", "))));
     }
     ui.painter().rect_filled(bubble, CornerRadius::same(18), palette.bubble_in);
     let t = ui.input(|i| i.time) as f32;
@@ -2999,7 +3000,7 @@ pub fn rich_text(m: &Message, name: &dyn Fn(&str) -> String, color: Color32, lin
         let format = egui::TextFormat { font_id: theme::regular(size), color, line_height: Some(size * 1.43), ..Default::default() };
         job.append("... ", 0., format.clone());
         chars += 4;
-        job.append("Read more", 0., egui::TextFormat { font_id: theme::semibold(size), ..format });
+        job.append(tr("Read more"), 0., egui::TextFormat { font_id: theme::semibold(size), ..format });
         out_links.push((chars..chars + 9, READ_MORE.to_owned()));
     }
     Rich { job, links: out_links, spoilers }

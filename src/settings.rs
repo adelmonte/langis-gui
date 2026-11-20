@@ -1,7 +1,7 @@
 //! Desktop's Preferences (`ts/components/Preferences.dom.tsx`): the
 //! profile card and the pages on the left, each page an `AxoPanel` of
 //! `PreferencesList`s on the right. Rows for what langis doesn't do (spell
-//! check, sounds, badges, donations, backups, the language) are left out.
+//! check, sounds, badges, donations, backups) are left out.
 
 use egui::RichText;
 use egui::{Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
@@ -14,6 +14,7 @@ use crate::axo_list::{self, End, Item};
 use crate::dialog::{self, Choice, Variant};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// Ours: whether to show desktop notifications (on unless "false").
 pub const SETTING_NOTIFICATIONS: &str = "ui.notifications";
@@ -83,15 +84,15 @@ impl Page {
 
     fn title(self) -> &'static str {
         match self {
-            Page::Profile => "Profile",
+            Page::Profile => tr("Profile"),
             Page::ProfileName => "Your name",
-            Page::ProfileAbout => "About",
-            Page::ChatColor => "Chat Color",
-            Page::ChatFolders => "Chat folders",
-            Page::ChatFolderEdit => "Edit folder",
-            Page::WhileMuted => "While muted",
-            Page::PhoneNumber => "Phone Number",
-            Page::Blocked => "Blocked",
+            Page::ProfileAbout => tr("About"),
+            Page::ChatColor => tr("Chat Color"),
+            Page::ChatFolders => tr("Chat folders"),
+            Page::ChatFolderEdit => tr("Edit folder"),
+            Page::WhileMuted => tr("While muted"),
+            Page::PhoneNumber => tr("Phone Number"),
+            Page::Blocked => tr("Blocked"),
             other => Page::NAV.iter().find(|(p, _, _)| *p == other).map(|(_, _, l)| *l).unwrap_or(""),
         }
     }
@@ -166,6 +167,9 @@ pub struct SettingsView {
     folder_leaving: bool,
     /// The emoji picker for the folder's name.
     folder_emoji: Option<crate::emoji_picker::Picker>,
+    /// Desktop's PreferencesLanguageDialog: its search, and the language
+    /// picked (empty: the system's).
+    language: Option<(String, String)>,
 }
 
 struct FolderChats {
@@ -265,7 +269,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.add_space(12.);
             ui.horizontal(|ui| {
                 crate::sidebar::header_start(app, ui);
-                ui.label(egui::RichText::new("Settings").font(theme::semibold(18.)));
+                ui.label(egui::RichText::new(tr("Settings")).font(theme::semibold(18.)));
             });
             ui.add_space(14.);
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -288,7 +292,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }
         let page = app.settings.page;
         let title = match (&app.settings.folder, page) {
-            (Some((_, true, _)), Page::ChatFolderEdit) => "Create a folder",
+            (Some((_, true, _)), Page::ChatFolderEdit) => tr("Create a folder"),
             _ => page.title(),
         };
         if axo_list::panel_header(ui, title, page != page.top()) {
@@ -326,6 +330,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     ask(app, ui.ctx());
     folder_dialogs(app, ui);
+    language_dialog(app, ui);
     help_window(app, ui);
 }
 
@@ -390,27 +395,27 @@ fn help_window(app: &mut App, ui: &mut Ui) {
         }
         Some(Help::DebugLog { log, uploading, link }) => {
             close = crate::panes::modal(ui, "debug-log", 560., |ui| {
-                crate::panes::title(ui, "Debug Log");
+                crate::panes::title(ui, tr("Debug Log"));
                 match link {
                     Some(Ok(url)) => {
                         // Desktop's submitted state: the link and Copy Link.
-                        ui.label(RichText::new("Debug log submitted").font(theme::semibold(14.)));
+                        ui.label(RichText::new(tr("Debug log submitted")).font(theme::semibold(14.)));
                         ui.add_space(8.);
                         let mut shown = url.clone();
                         ui.add(egui::TextEdit::singleline(&mut shown).desired_width(f32::INFINITY));
                         ui.add_space(12.);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if widgets::pill_button(ui, "Copy Link", true).clicked() {
+                            if widgets::pill_button(ui, tr("Copy Link"), true).clicked() {
                                 ui.ctx().copy_text(url.clone());
                                 submit = Some(String::new());
                             }
                         });
                     }
                     _ => {
-                        ui.label(RichText::new("When you click Submit, your log will be posted online for 30 days at a unique, unpublished URL. You may Save it locally first.").font(theme::regular(13.)).color(palette.text_secondary));
+                        ui.label(RichText::new(tr("When you click Submit, your log will be posted online for 30 days at a unique, unpublished URL. You may Save it locally first.")).font(theme::regular(13.)).color(palette.text_secondary));
                         if let Some(Err(why)) = link {
                             ui.add_space(6.);
-                            ui.colored_label(palette.destructive, "Something went wrong with the upload! Please email support@signal.org and attach your log as a text file.").on_hover_text(why.as_str());
+                            ui.colored_label(palette.destructive, tr("Something went wrong with the upload! Please email support@signal.org and attach your log as a text file.")).on_hover_text(why.as_str());
                         }
                         ui.add_space(10.);
                         match log {
@@ -427,10 +432,10 @@ fn help_window(app: &mut App, ui: &mut Ui) {
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     if *uploading {
                                         crate::widgets::spinner(ui, 24.);
-                                    } else if widgets::pill_button(ui, "Submit", true).clicked() {
+                                    } else if widgets::pill_button(ui, tr("Submit"), true).clicked() {
                                         submit = Some(text.clone());
                                     }
-                                    if widgets::pill_button(ui, "Save", false).clicked() {
+                                    if widgets::pill_button(ui, tr("Save"), false).clicked() {
                                         save = Some(text.clone());
                                     }
                                 });
@@ -562,7 +567,7 @@ fn account_switch(app: &mut App, ui: &mut Ui, s: &Snapshot, setting: AccountSett
 
 fn account(app: &mut App, ui: &mut Ui) {
     axo_list::list(ui, None, None, |ui| {
-        let item = Item::new("This is a linked device").symbol("device-laptop").description("To manage your account settings, open Signal on your primary device.");
+        let item = Item::new(tr("This is a linked device")).symbol("device-laptop").description(tr("To manage your account settings, open Signal on your primary device."));
         if axo_list::item(ui, item, End::Arrow(None)).clicked() {
             app.settings.ask = Some(Ask::LinkedDevice);
         }
@@ -570,12 +575,12 @@ fn account(app: &mut App, ui: &mut Ui) {
 }
 
 fn general(app: &mut App, ui: &mut Ui) {
-    let footer = "To change the name of this device, open Signal on your phone and navigate to Settings > Linked devices";
+    let footer = tr("To change the name of this device, open Signal on your phone and navigate to Settings > Linked devices");
     axo_list::list(ui, None, Some(footer), |ui| {
         if let Some(phone) = &app.phone {
-            axo_list::item(ui, Item::new("Phone Number"), End::Value(&langis_core::share_contact::format_phone(phone, Some(phone))));
+            axo_list::item(ui, Item::new(tr("Phone Number")), End::Value(&langis_core::share_contact::format_phone(phone, Some(phone))));
         }
-        axo_list::item(ui, Item::new("Device Name"), End::Value(&crate::app::device_name()));
+        axo_list::item(ui, Item::new(tr("Device Name")), End::Value(&crate::app::device_name()));
     });
     // Desktop's Open at login and Start minimized, as an XDG autostart
     // entry (~/.config/autostart/langis.desktop).
@@ -585,7 +590,7 @@ fn general(app: &mut App, ui: &mut Ui) {
         let current = entry.as_ref().and_then(|p| std::fs::read_to_string(p).ok());
         let mut at_login = current.is_some();
         let mut minimized = current.as_deref().is_some_and(|t| t.contains("--minimized"));
-        let mut changed = axo_list::switch(ui, Item::new("Open at computer login"), &mut at_login);
+        let mut changed = axo_list::switch(ui, Item::new(tr("Open at computer login")), &mut at_login);
         changed |= axo_list::switch(ui, Item::new("Start minimized").description("When opened at login, start in the background").disabled(!at_login), &mut minimized);
         if changed && let Some(entry) = entry {
             let result = if at_login {
@@ -613,8 +618,8 @@ fn general(app: &mut App, ui: &mut Ui) {
     });
     // Desktop's Help menu (Debug Log, About), here in Settings.
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Help"), None, |ui| {
-        if axo_list::item(ui, Item::new("Debug log").symbol("file"), End::Click).clicked() {
+    axo_list::list(ui, Some(tr("Help")), None, |ui| {
+        if axo_list::item(ui, Item::new(tr("Debug log")).symbol("file"), End::Click).clicked() {
             open_debug_log(app);
         }
         if axo_list::item(ui, Item::new("About langis-gui").symbol("info"), End::Click).clicked() {
@@ -623,8 +628,8 @@ fn general(app: &mut App, ui: &mut Ui) {
     });
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
-        let item = Item::new("Delete application data").description("This will delete all data in the application, removing all messages and saved account information.");
-        if axo_list::item(ui, item, End::Action("Delete data", true)).clicked() {
+        let item = Item::new(tr("Delete application data")).description(tr("This will delete all data in the application, removing all messages and saved account information."));
+        if axo_list::item(ui, item, End::Action(tr("Delete data"), true)).clicked() {
             app.settings.ask = Some(Ask::DeleteData);
         }
     });
@@ -638,16 +643,22 @@ fn appearance(app: &mut App, ui: &mut Ui) {
     let colors = app.chat_colors.clone();
     let zoom = ui.ctx().zoom_factor();
     axo_list::list(ui, None, None, |ui| {
+        // Desktop's Language row: the choice, or System Language.
+        let saved = crate::i18n::saved();
+        let value = if saved.is_empty() { tr("System Language").to_owned() } else { crate::i18n::display_name(&saved) };
+        if axo_list::item(ui, Item::new(tr("Language")).symbol("globe"), End::Arrow(Some(&value))).clicked() {
+            app.settings.language = Some((String::new(), saved));
+        }
         let themes = ["system", "light", "dark"];
         let chosen = themes.iter().position(|t| *t == app.theme).or(Some(0));
-        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("theme"), Item::new("Theme").symbol("contrast"), &["System", "Light", "Dark"], chosen) {
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("theme"), Item::new(tr("Theme")).symbol("contrast"), &[tr("System"), tr("Light"), tr("Dark")], chosen) {
             let theme = themes[i].to_owned();
             app.theme = theme.clone();
             app.apply_theme();
             app.send(Command::SetLocalSetting(langis_core::LocalSetting::Theme(langis_core::Theme::from_setting(Some(&theme)))));
         }
         let bubble = crate::chat_colors::of(&colors.default, &colors);
-        if axo_list::item(ui, Item::new("Chat color").symbol("palette"), End::Swatch(bubble)).clicked() {
+        if axo_list::item(ui, Item::new(tr("Chat color")).symbol("palette"), End::Swatch(bubble)).clicked() {
             app.settings.page = Page::ChatColor;
         }
         let mut labels: Vec<String> = ZOOMS.iter().map(|(_, l)| (*l).to_owned()).collect();
@@ -659,7 +670,7 @@ fn appearance(app: &mut App, ui: &mut Ui) {
         }
         let chosen = values.iter().position(|z| (z - zoom).abs() < 0.001);
         let options: Vec<&str> = labels.iter().map(String::as_str).collect();
-        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("zoom"), Item::new("Zoom level").symbol("zoom-in"), &options, chosen) {
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("zoom"), Item::new(tr("Zoom level")).symbol("zoom-in"), &options, chosen) {
             ui.ctx().set_zoom_factor(values[i]);
             write(app, SETTING_ZOOM, values[i].to_string());
         }
@@ -668,20 +679,20 @@ fn appearance(app: &mut App, ui: &mut Ui) {
 
 fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
-        account_switch(app, ui, s, AccountSetting::PreferContactAvatars, Item::new("Use address book photos").description("Display contact photos from your address book if available."));
-        account_switch(app, ui, s, AccountSetting::KeepMutedChatsArchived, Item::new("Keep muted chats archived").description("Muted chats that are archived will remain archived when a new message arrives."));
+        account_switch(app, ui, s, AccountSetting::PreferContactAvatars, Item::new(tr("Use address book photos")).description(tr("Display contact photos from your address book if available.")));
+        account_switch(app, ui, s, AccountSetting::KeepMutedChatsArchived, Item::new(tr("Keep muted chats archived")).description(tr("Muted chats that are archived will remain archived when a new message arrives.")));
     });
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Text input"), None, |ui| {
-        account_switch(app, ui, s, AccountSetting::LinkPreviews, Item::new("Generate link previews").description("Retrieve link previews directly from websites for messages you send."));
+    axo_list::list(ui, Some(tr("Text input")), None, |ui| {
+        account_switch(app, ui, s, AccountSetting::LinkPreviews, Item::new(tr("Generate link previews")).description(tr("Retrieve link previews directly from websites for messages you send.")));
         // Desktop's text input rows, kept as `ui.` settings.
         let mut convert = app.input.auto_convert;
-        if axo_list::switch(ui, Item::new("Convert typed emoticons to emoji").description("For example, :-) will be converted to 🙂"), &mut convert) {
+        if axo_list::switch(ui, Item::new(tr("Convert typed emoticons to emoji")).description("For example, :-) will be converted to 🙂"), &mut convert) {
             app.input.auto_convert = convert;
             write(app, SETTING_AUTO_CONVERT_EMOJI, convert.to_string());
         }
         let mut spell = app.input.spell;
-        if axo_list::switch(ui, Item::new("Spell check text entered in message composition box"), &mut spell) {
+        if axo_list::switch(ui, Item::new(tr("Spell check text entered in message composition box")), &mut spell) {
             app.input.spell = spell;
             write(app, crate::spell::SETTING_SPELL_CHECK, spell.to_string());
         }
@@ -690,7 +701,7 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             app.input.formatting = formatting;
             write(app, SETTING_TEXT_FORMATTING, formatting.to_string());
         }
-        let tones = ["Default", "Light", "Medium light", "Medium", "Medium dark", "Dark"];
+        let tones = [tr("Default"), tr("Light"), "Medium light", tr("Medium"), "Medium dark", tr("Dark")];
         let chosen = app.input.skin_tone.map(|t| langis_emoji::SkinTone::ALL.iter().position(|x| *x == t).unwrap_or(0) + 1).unwrap_or(0);
         if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("skin-tone"), Item::new("Default emoji skin tone"), &tones, Some(chosen)) {
             app.input.skin_tone = (i > 0).then(|| langis_emoji::SkinTone::ALL[i - 1]);
@@ -701,18 +712,18 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     // Images are shrunk without loss before sending; how hard is the choice
     // here (Desktop's "Sent media quality" is the nearest).
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Media"), None, |ui| {
-        let levels = ["max", "fast", "off"];
+    axo_list::list(ui, Some(tr("Media")), None, |ui| {
+        let levels = ["max", "fast", tr("off")];
         let chosen = levels.iter().position(|l| *l == s.optimization).or(Some(0));
         let item = Item::new("Sent image optimization").description("Every level keeps the picture as it is and removes its metadata; smaller takes longer");
-        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("optimization"), item, &["Smallest", "Faster", "Off"], chosen) {
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("optimization"), item, &["Smallest", "Faster", tr("Off")], chosen) {
             app.send(Command::SetLocalSetting(langis_core::LocalSetting::ImageOptimization(langis_core::media::Optimization::from_setting(Some(levels[i])))));
             app.settings.stale = true;
         }
     });
     // GIF search needs your own Giphy key.
     axo_list::gap(ui);
-    axo_list::list(ui, Some("GIFs"), Some("Get a key at developers.giphy.com. Without one, GIF search is off."), |ui| {
+    axo_list::list(ui, Some(tr("GIFs")), Some("Get a key at developers.giphy.com. Without one, GIF search is off."), |ui| {
         let id = egui::Id::unique("settings").with("giphy-key");
         let mut key = ui.ctx().data_mut(|d| d.get_temp_mut_or_insert_with(id, || s.giphy_key.clone()).clone());
         ui.horizontal(|ui| {
@@ -729,13 +740,13 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     });
     axo_list::gap(ui);
     let count = app.panes.folders.iter().filter(|f| f.folder_type == langis_store::ChatFolderType::Custom).count();
-    axo_list::list(ui, Some("Chat folders"), None, |ui| {
+    axo_list::list(ui, Some(tr("Chat folders")), None, |ui| {
         let (label, value) = if count > 0 {
-            ("Add or edit folders", Some(if count == 1 { "1 folder".to_owned() } else { format!("{count} folders") }))
+            (tr("Add or edit folders"), Some(if count == 1 { "1 folder".to_owned() } else { format!("{count} folders") }))
         } else {
-            ("Add a chat folder", None)
+            (tr("Add a chat folder"), None)
         };
-        let item = Item::new(label).description("Organize your chats into folders and quickly switch between them on your chat list.");
+        let item = Item::new(label).description(tr("Organize your chats into folders and quickly switch between them on your chat list."));
         if axo_list::item(ui, item, End::Arrow(value.as_deref())).clicked() {
             app.settings.page = Page::ChatFolders;
         }
@@ -745,8 +756,8 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
         // Desktop's Export chat history (plain text): each chat a text file,
         // its files beside it.
-        let item = Item::new("Export chat history").description("Save every chat as a text file, with its downloaded files, to a folder you choose.");
-        if axo_list::item(ui, item, End::Action("Export", false)).clicked()
+        let item = Item::new(tr("Export chat history")).description("Save every chat as a text file, with its downloaded files, to a folder you choose.");
+        if axo_list::item(ui, item, End::Action(tr("Export"), false)).clicked()
             && let Some(folder) = rfd::FileDialog::new().set_title("Export chat history to").pick_folder()
         {
             let dir = folder.join(format!("Signal chats {}", chrono::Local::now().format("%Y-%m-%d %H%M")));
@@ -760,8 +771,8 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
                 })))
             });
         }
-        let item = Item::new("Import contacts").description(synced.as_deref().unwrap_or("Import all Signal groups and contacts from your mobile device."));
-        if axo_list::item(ui, item, End::Action("Import now", false)).clicked() {
+        let item = Item::new(tr("Import contacts")).description(synced.as_deref().unwrap_or(tr("Import all Signal groups and contacts from your mobile device.")));
+        if axo_list::item(ui, item, End::Action(tr("Import now"), false)).clicked() {
             app.send(Command::SyncContacts);
             app.toast("Asking your phone for its contacts…");
         }
@@ -773,7 +784,7 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
     use langis_store::{ChatFolderParams, ChatFolderType};
     let palette = Palette::of(ui.ctx());
     let intro = ui.painter().layout(
-        "Organize your chats into folders and quickly switch between them on your chat list".to_owned(),
+        tr("Organize your chats into folders and quickly switch between them on your chat list").to_owned(),
         theme::regular(12.),
         palette.text_secondary,
         ui.available_width() - 32.,
@@ -782,15 +793,15 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
     ui.painter().galley(r.min + Vec2::new(16., 0.), intro, palette.text_secondary);
     axo_list::gap(ui);
     let folders: Vec<_> = app.panes.folders.clone();
-    axo_list::list(ui, Some("Folders"), None, |ui| {
-        if axo_list::item(ui, Item::new("Create a folder").symbol("plus"), End::Arrow(None)).clicked() {
+    axo_list::list(ui, Some(tr("Folders")), None, |ui| {
+        if axo_list::item(ui, Item::new(tr("Create a folder")).symbol("plus"), End::Arrow(None)).clicked() {
             app.settings.folder = Some((new_id(), true, ChatFolderParams::defaults()));
         }
         let order: Vec<String> = folders.iter().map(|f| f.id.clone()).collect();
         let mut reorder: Option<Vec<String>> = None;
         for (i, f) in folders.iter().enumerate() {
             if f.folder_type == ChatFolderType::All {
-                axo_list::item(ui, Item::new("All chats").symbol("folder"), End::None);
+                axo_list::item(ui, Item::new(tr("All chats")).symbol("folder"), End::None);
                 continue;
             }
             let summary = folder_summary(f);
@@ -800,7 +811,7 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
                 app.settings.folder = Some(edit());
             }
             crate::menu::context(ui, &r.row, egui::Id::unique("settings").with(("folder-menu", &f.id)), |m| {
-                if m.item(Some("pencil"), "Edit folder") {
+                if m.item(Some("pencil"), tr("Edit folder")) {
                     app.settings.folder = Some(edit());
                 }
                 // Desktop drags folders into order; here they move a step.
@@ -814,7 +825,7 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
                     o.swap(i, i + 1);
                     reorder = Some(o);
                 }
-                if m.item(Some("trash"), "Delete") {
+                if m.item(Some("trash"), tr("Delete")) {
                     app.settings.ask = Some(Ask::DeleteFolder(f.id.clone(), f.name.clone()));
                 }
             });
@@ -825,9 +836,9 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
     });
     axo_list::gap(ui);
     let suggested = [
-        ("Unread", "Unread messages from all chats", ChatFolderParams { name: "Unread".into(), show_only_unread: true, include_all_individual_chats: true, include_all_group_chats: true, ..ChatFolderParams::defaults() }),
-        ("1:1 chats", "Only messages from direct chats", ChatFolderParams { name: "1:1 chats".into(), include_all_individual_chats: true, ..ChatFolderParams::defaults() }),
-        ("Groups", "Only messages from group chats", ChatFolderParams { name: "Groups".into(), include_all_group_chats: true, ..ChatFolderParams::defaults() }),
+        (tr("Unread"), tr("Unread messages from all chats"), ChatFolderParams { name: tr("Unread").into(), show_only_unread: true, include_all_individual_chats: true, include_all_group_chats: true, ..ChatFolderParams::defaults() }),
+        (tr("1:1 chats"), tr("Only messages from direct chats"), ChatFolderParams { name: tr("1:1 chats").into(), include_all_individual_chats: true, ..ChatFolderParams::defaults() }),
+        (tr("Groups"), tr("Only messages from group chats"), ChatFolderParams { name: tr("Groups").into(), include_all_group_chats: true, ..ChatFolderParams::defaults() }),
     ];
     let has = |p: &ChatFolderParams| {
         folders.iter().any(|f| {
@@ -840,9 +851,9 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
     };
     let missing: Vec<_> = suggested.into_iter().filter(|(_, _, p)| !has(p)).collect();
     if !missing.is_empty() {
-        axo_list::list(ui, Some("Suggested folders"), None, |ui| {
+        axo_list::list(ui, Some(tr("Suggested folders")), None, |ui| {
             for (name, description, params) in missing {
-                if axo_list::item(ui, Item::new(name).symbol("folder").description(description), End::Action("Add", false)).clicked() {
+                if axo_list::item(ui, Item::new(name).symbol("folder").description(description), End::Action(tr("Add"), false)).clicked() {
                     app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::Create { id: new_id(), params }));
                 }
             }
@@ -864,7 +875,59 @@ fn folder_summary(f: &langis_store::ChatFolder) -> String {
     if f.show_only_unread {
         parts.push("unread only".to_owned());
     }
-    if parts.is_empty() { "No chats".into() } else { parts.join(", ") }
+    if parts.is_empty() { tr("No chats").into() } else { parts.join(tr(", ")) }
+}
+
+/// Desktop's `PreferencesLanguageDialog`: "System Language", then every
+/// language by its own name (and its name in the current one), searched;
+/// Set switches to it. (Desktop restarts to apply; here it applies at once.)
+fn language_dialog(app: &mut App, ui: &mut Ui) {
+    let Some((mut query, mut picked)) = app.settings.language.take() else { return };
+    let palette = Palette::of(ui.ctx());
+    let mut answer = None;
+    let closed = crate::panes::modal(ui, "language", 440., |ui| {
+        crate::panes::title(ui, tr("Language"));
+        widgets::text_field(ui, &mut query, tr("Search languages"), false);
+        ui.add_space(8.);
+        let q = query.trim().to_lowercase();
+        let system = crate::i18n::resolve("");
+        let mut rows: Vec<(String, String, String)> = vec![(String::new(), tr("System Language").to_owned(), crate::i18n::display_name(system))];
+        for (code, native, english, _) in crate::i18n::LOCALES {
+            rows.push(((*code).to_owned(), (*native).to_owned(), format!("{} \u{b7} {english}", crate::i18n::display_name(code))));
+        }
+        let shown: Vec<_> = rows.into_iter().filter(|(_, a, b)| q.is_empty() || a.to_lowercase().contains(&q) || b.to_lowercase().contains(&q)).collect();
+        egui::ScrollArea::vertical().max_height(380.).auto_shrink([false, true]).show(ui, |ui| {
+            if shown.is_empty() {
+                ui.add_space(20.);
+                ui.vertical_centered(|ui| ui.label(egui::RichText::new(format!("No results for \u{201c}{}\u{201d}", query.trim())).color(palette.text_secondary)));
+            }
+            for (code, title, subtitle) in &shown {
+                let (rect, hit) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.), Sense::click());
+                if hit.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                }
+                ui.painter().text(Pos2::new(rect.left() + 12., rect.center().y - 8.), Align2::LEFT_CENTER, title, theme::regular(14.), palette.text);
+                ui.painter().text(Pos2::new(rect.left() + 12., rect.center().y + 10.), Align2::LEFT_CENTER, subtitle, theme::regular(12.), palette.text_secondary);
+                if *code == picked {
+                    theme::paint_symbol(ui.painter(), "check", Pos2::new(rect.right() - 20., rect.center().y), 18., palette.badge);
+                }
+                if hit.clicked() {
+                    picked = code.clone();
+                }
+            }
+        });
+        answer = crate::panes::buttons(ui, &[tr("Set"), tr("Cancel")]);
+    });
+    match answer {
+        Some(0) => {
+            crate::i18n::choose(&picked);
+            crate::theme::install(ui.ctx());
+            app.settings.stale = true;
+        }
+        Some(_) => {}
+        None if closed => {}
+        None => app.settings.language = Some((query, picked)),
+    }
 }
 
 /// Desktop's folder name limit.
@@ -905,14 +968,14 @@ fn folder_page(app: &mut App, ui: &mut Ui) {
     let mut remove_included: Option<langis_store::ConversationId> = None;
     let mut remove_excluded: Option<langis_store::ConversationId> = None;
     let mut open_chats: Option<bool> = None;
-    axo_list::list(ui, Some("Included chats"), Some("Choose chats that you want to appear in this folder"), |ui| {
-        if axo_list::item(ui, Item::new("Add chats").symbol("plus"), End::Click).clicked() {
+    axo_list::list(ui, Some(tr("Included chats")), Some(tr("Choose chats that you want to appear in this folder")), |ui| {
+        if axo_list::item(ui, Item::new(tr("Add chats")).symbol("plus"), End::Click).clicked() {
             open_chats = Some(false);
         }
-        if params.include_all_individual_chats && axo_list::item(ui, Item::new("All 1:1 chats").symbol("person"), End::Action("Remove", false)).clicked() {
+        if params.include_all_individual_chats && axo_list::item(ui, Item::new("All 1:1 chats").symbol("person"), End::Action(tr("Remove"), false)).clicked() {
             params.include_all_individual_chats = false;
         }
-        if params.include_all_group_chats && axo_list::item(ui, Item::new("All groups").symbol("group"), End::Action("Remove", false)).clicked() {
+        if params.include_all_group_chats && axo_list::item(ui, Item::new("All groups").symbol("group"), End::Action(tr("Remove"), false)).clicked() {
             params.include_all_group_chats = false;
         }
         for cid in params.included.clone() {
@@ -924,8 +987,8 @@ fn folder_page(app: &mut App, ui: &mut Ui) {
     });
     if params.include_all_individual_chats || params.include_all_group_chats || !params.excluded.is_empty() {
         axo_list::gap(ui);
-        axo_list::list(ui, Some("Exceptions"), Some("Choose chats that you do not want to appear in this folder"), |ui| {
-            if axo_list::item(ui, Item::new("Exclude chats").symbol("minus"), End::Click).clicked() {
+        axo_list::list(ui, Some(tr("Exceptions")), Some(tr("Choose chats that you do not want to appear in this folder")), |ui| {
+            if axo_list::item(ui, Item::new(tr("Exclude chats")).symbol("minus"), End::Click).clicked() {
                 open_chats = Some(true);
             }
             for cid in params.excluded.clone() {
@@ -944,14 +1007,14 @@ fn folder_page(app: &mut App, ui: &mut Ui) {
     }
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
-        axo_list::switch(ui, Item::new("Only show unread chats").description("When enabled, only chats with unread messages will be shown in this folder."), &mut params.show_only_unread);
-        axo_list::switch(ui, Item::new("Include muted chats"), &mut params.show_muted_chats);
+        axo_list::switch(ui, Item::new(tr("Only show unread chats")).description("When enabled, only chats with unread messages will be shown in this folder."), &mut params.show_only_unread);
+        axo_list::switch(ui, Item::new(tr("Include muted chats")), &mut params.show_muted_chats);
     });
     let mut delete = false;
     if !new {
         axo_list::gap(ui);
         axo_list::list(ui, None, None, |ui| {
-            let mut item = Item::new("Delete folder");
+            let mut item = Item::new(tr("Delete folder"));
             item.destructive = true;
             if axo_list::item(ui, item, End::Click).clicked() {
                 delete = true;
@@ -968,11 +1031,11 @@ fn folder_page(app: &mut App, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(24.);
             let ready = changed && !params.name.trim().is_empty();
-            if ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, if new { "Create" } else { "Save" }, true).clicked()).inner && ready {
+            if ui.add_enabled_ui(ready, |ui| widgets::pill_button(ui, if new { tr("Create") } else { tr("Save") }, true).clicked()).inner && ready {
                 answer = Some(0);
             }
             ui.add_space(8.);
-            if widgets::pill_button(ui, "Cancel", false).clicked() {
+            if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                 answer = Some(1);
             }
         });
@@ -1021,7 +1084,7 @@ fn folder_chat_row(ui: &mut Ui, palette: &Palette, c: &langis_store::Conversatio
     ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y), Align2::LEFT_CENTER, &c.title, theme::regular(14.), palette.text);
     let button = Rect::from_min_max(Pos2::new(rect.right() - 16. - 76., rect.center().y - 15.), Pos2::new(rect.right() - 16., rect.center().y + 15.));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(button));
-    widgets::axo_button(&mut child, "Remove", widgets::Axo::SubtleSecondary).clicked()
+    widgets::axo_button(&mut child, tr("Remove"), widgets::Axo::SubtleSecondary).clicked()
 }
 
 /// The folder page's dialogs: Desktop's Add chats / Exclude chats (the chat
@@ -1032,14 +1095,14 @@ fn folder_dialogs(app: &mut App, ui: &mut Ui) {
         let palette = Palette::of(ui.ctx());
         let mut answer = None;
         let closed = crate::panes::modal(ui, "folder-chats", 420., |ui| {
-            crate::panes::title(ui, if fc.exclude { "Exclude chats" } else { "Add chats" });
-            widgets::text_field(ui, &mut fc.query, "Search", false);
+            crate::panes::title(ui, if fc.exclude { tr("Exclude chats") } else { tr("Add chats") });
+            widgets::text_field(ui, &mut fc.query, tr("Search"), false);
             ui.add_space(8.);
             if !fc.exclude {
-                ui.label(egui::RichText::new("Chat types").font(theme::semibold(13.)).color(palette.text_secondary));
+                ui.label(egui::RichText::new(tr("Chat types")).font(theme::semibold(13.)).color(palette.text_secondary));
                 ui.add_space(4.);
                 ui.horizontal(|ui| {
-                    for (label, on) in [("1:1 chats", &mut fc.individual), ("Groups", &mut fc.groups)] {
+                    for (label, on) in [(tr("1:1 chats"), &mut fc.individual), (tr("Groups"), &mut fc.groups)] {
                         let fill = if *on { palette.badge } else { palette.fill_secondary };
                         let text = if *on { egui::Color32::WHITE } else { palette.text };
                         let shown = label.to_owned();
@@ -1050,7 +1113,7 @@ fn folder_dialogs(app: &mut App, ui: &mut Ui) {
                 });
                 ui.add_space(8.);
             }
-            ui.label(egui::RichText::new("Chats").font(theme::semibold(13.)).color(palette.text_secondary));
+            ui.label(egui::RichText::new(tr("Chats")).font(theme::semibold(13.)).color(palette.text_secondary));
             let q = fc.query.trim().to_lowercase();
             egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
                 let list: Vec<langis_store::Conversation> = app.conversations.iter().filter(|c| c.kind != ConversationKind::NoteToSelf || !fc.exclude).filter(|c| q.is_empty() || c.title.to_lowercase().contains(&q)).cloned().collect();
@@ -1073,7 +1136,7 @@ fn folder_dialogs(app: &mut App, ui: &mut Ui) {
                     }
                 }
             });
-            answer = crate::panes::buttons(ui, &["Done", "Cancel"]);
+            answer = crate::panes::buttons(ui, &[tr("Done"), tr("Cancel")]);
         });
         match answer {
             Some(0) => {
@@ -1106,7 +1169,7 @@ fn folder_dialogs(app: &mut App, ui: &mut Ui) {
         d.remove::<langis_store::ChatFolderParams>(original_id);
         d.remove::<bool>(asking_id);
     });
-    match crate::dialog::show(ui.ctx(), egui::Id::unique("folder-unsaved"), "Save changes?", "You made changes to this chat folder.", Some("Discard"), &[("Save", Variant::StrongPrimary)]) {
+    match crate::dialog::show(ui.ctx(), egui::Id::unique("folder-unsaved"), tr("Save changes?"), "You made changes to this chat folder.", Some(tr("Discard")), &[(tr("Save"), Variant::StrongPrimary)]) {
         Some(Answer::Action(_)) => {
             done(ui);
             app.settings.folder = None;
@@ -1141,12 +1204,12 @@ pub fn new_id() -> String {
 pub fn device_items(app: &mut App, ui: &mut Ui, salt: &str) {
     let devices = app.call_devices.clone();
     let lists = [
-        (DeviceKind::Camera, "Video", "videocamera", &devices.devices.cameras, &devices.camera),
-        (DeviceKind::Microphone, "Microphone", "mic", &devices.devices.microphones, &devices.microphone),
-        (DeviceKind::Speaker, "Speakers", "speaker", &devices.devices.speakers, &devices.speaker),
+        (DeviceKind::Camera, tr("Video"), "videocamera", &devices.devices.cameras, &devices.camera),
+        (DeviceKind::Microphone, tr("Microphone"), "mic", &devices.devices.microphones, &devices.microphone),
+        (DeviceKind::Speaker, tr("Speakers"), "speaker", &devices.devices.speakers, &devices.speaker),
     ];
     for (kind, label, symbol, list, chosen) in lists {
-        let names: Vec<&str> = if list.is_empty() { vec!["No devices available"] } else { list.iter().map(|d| d.name.as_str()).collect() };
+        let names: Vec<&str> = if list.is_empty() { vec![tr("No devices available")] } else { list.iter().map(|d| d.name.as_str()).collect() };
         let index = chosen.as_ref().and_then(|id| list.iter().position(|d| &d.id == id)).or(Some(0));
         let item = Item::new(label).symbol(symbol).disabled(list.is_empty());
         if let Some(i) = axo_list::select(ui, egui::Id::unique(salt).with(("device", label)), item, &names, index)
@@ -1161,7 +1224,7 @@ pub fn device_items(app: &mut App, ui: &mut Ui, salt: &str) {
 fn calls(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
         let mut incoming = s.incoming_calls;
-        if axo_list::switch(ui, Item::new("Enable incoming calls"), &mut incoming) {
+        if axo_list::switch(ui, Item::new(tr("Enable incoming calls")), &mut incoming) {
             app.send(Command::SetLocalSetting(langis_core::LocalSetting::IncomingCalls(incoming)));
             // Shown at once; a reload could race the command.
             if let Some(snapshot) = app.settings.snapshot.as_mut() {
@@ -1170,11 +1233,11 @@ fn calls(app: &mut App, ui: &mut Ui, s: &Snapshot) {
         }
     });
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Devices"), None, |ui| device_items(app, ui, "settings"));
+    axo_list::list(ui, Some(tr("Devices")), None, |ui| device_items(app, ui, "settings"));
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Advanced"), None, |ui| {
+    axo_list::list(ui, Some(tr("Advanced")), None, |ui| {
         let mut relay = s.always_relay;
-        let item = Item::new("Always relay calls").description("Relay all calls through the Signal server to avoid revealing your IP address to your contact. Enabling will reduce call quality.");
+        let item = Item::new(tr("Always relay calls")).description(tr("Relay all calls through the Signal server to avoid revealing your IP address to your contact. Enabling will reduce call quality."));
         if axo_list::switch(ui, item, &mut relay) {
             app.send(Command::SetLocalSetting(langis_core::LocalSetting::AlwaysRelayCalls(relay)));
             if let Some(snapshot) = app.settings.snapshot.as_mut() {
@@ -1256,28 +1319,28 @@ fn set_quality(app: &mut App, q: ShareQuality) {
 fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
         let mut on = s.notifications;
-        if axo_list::switch(ui, Item::new("Enable notifications"), &mut on) {
+        if axo_list::switch(ui, Item::new(tr("Enable notifications")), &mut on) {
             write(app, SETTING_NOTIFICATIONS, on.to_string());
             app.settings.stale = true;
             app.notify.0 = on;
         }
         let kinds = ["all", "name", "none"];
         let chosen = kinds.iter().position(|k| *k == s.notification_content).or(Some(0));
-        let item = Item::new("Show").disabled(!s.notifications);
-        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("notification-content"), item, &["Name, content, and actions", "Name only", "No name or content"], chosen) {
+        let item = Item::new(tr("Show")).disabled(!s.notifications);
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("notification-content"), item, &[tr("Name, content, and actions"), tr("Name only"), tr("No name or content")], chosen) {
             let content = kinds[i].to_owned();
             app.notify.1 = content.clone();
             write(app, SETTING_NOTIFICATION_CONTENT, content);
             app.settings.stale = true;
         }
         // What shows while muted, in Desktop's summary.
-        let shown: Vec<&str> = [(AccountSetting::NotifyCallsIfMuted, "Calls"), (AccountSetting::NotifyMentionsIfMuted, "Mentions"), (AccountSetting::NotifyRepliesIfMuted, "Replies")]
+        let shown: Vec<&str> = [(AccountSetting::NotifyCallsIfMuted, tr("Calls")), (AccountSetting::NotifyMentionsIfMuted, tr("Mentions")), (AccountSetting::NotifyRepliesIfMuted, tr("Replies"))]
             .into_iter()
             .filter(|(k, _)| account_on(s, *k))
             .map(|(_, l)| l)
             .collect();
-        let summary = if shown.is_empty() { "None".to_owned() } else { shown.join(", ") };
-        let item = Item::new("While muted").description("Choose notifications to show for muted chats.").disabled(!s.notifications);
+        let summary = if shown.is_empty() { tr("None").to_owned() } else { shown.join(tr(", ")) };
+        let item = Item::new(tr("While muted")).description(tr("Choose notifications to show for muted chats.")).disabled(!s.notifications);
         if axo_list::item(ui, item, End::Arrow(Some(&summary))).clicked() && s.notifications {
             app.settings.page = Page::WhileMuted;
         }
@@ -1286,14 +1349,14 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     let enabled = s.notifications;
     for (label, rows) in [
         (
-            "Sounds",
+            tr("Sounds"),
             vec![
                 (0usize, "Notification sound", "Play a sound with each notification"),
                 (1, "In-chat sounds", "Play a sound for new messages in the chat you're reading"),
-                (4, "Draw attention to this window when a notification arrives", ""),
+                (4, tr("Draw attention to this window when a notification arrives"), ""),
             ],
         ),
-        ("Calls", vec![(3, "Incoming call notifications", "Show a notification when a call comes in"), (2, "Call ringtone", "Play a ringtone for incoming calls")]),
+        (tr("Calls"), vec![(3, "Incoming call notifications", "Show a notification when a call comes in"), (2, "Call ringtone", "Play a ringtone for incoming calls")]),
     ] {
     axo_list::gap(ui);
     axo_list::list(ui, Some(label), None, |ui| {
@@ -1322,8 +1385,8 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     }
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
-        account_switch(app, ui, s, AccountSetting::ReactionNotifications, Item::new("Reaction notifications").description("Notify when someone reacts to your message"));
-        account_switch(app, ui, s, AccountSetting::ShowUnreadReminders, Item::new("Unread reminders").description("Occasionally notify when there are unread messages in muted chats."));
+        account_switch(app, ui, s, AccountSetting::ReactionNotifications, Item::new(tr("Reaction notifications")).description(tr("Notify when someone reacts to your message")));
+        account_switch(app, ui, s, AccountSetting::ShowUnreadReminders, Item::new(tr("Unread reminders")).description(tr("Occasionally notify when there are unread messages in muted chats.")));
     });
     // Desktop's Reset notification settings: this device's back to default.
     axo_list::gap(ui);
@@ -1354,15 +1417,15 @@ fn reset_notifications(app: &mut App) {
 
 fn while_muted(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
-        account_switch(app, ui, s, AccountSetting::NotifyCallsIfMuted, Item::new("Calls").symbol("phone").description("Ring or notify when a call is started in muted chats."));
-        account_switch(app, ui, s, AccountSetting::NotifyMentionsIfMuted, Item::new("Mentions").symbol("at").description("Notify when you are mentioned in muted chats."));
-        account_switch(app, ui, s, AccountSetting::NotifyRepliesIfMuted, Item::new("Replies").symbol("reply").description("Notify when someone replies to your message in muted chats."));
+        account_switch(app, ui, s, AccountSetting::NotifyCallsIfMuted, Item::new(tr("Calls")).symbol(tr("phone")).description(tr("Ring or notify when a call is started in muted chats.")));
+        account_switch(app, ui, s, AccountSetting::NotifyMentionsIfMuted, Item::new(tr("Mentions")).symbol("at").description(tr("Notify when you are mentioned in muted chats.")));
+        account_switch(app, ui, s, AccountSetting::NotifyRepliesIfMuted, Item::new(tr("Replies")).symbol("reply").description(tr("Notify when someone replies to your message in muted chats.")));
     });
 }
 
 fn privacy(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
-        let item = Item::new("Phone Number").description("Choose who can see your phone number and who can contact you on Signal with it.");
+        let item = Item::new(tr("Phone Number")).description(tr("Choose who can see your phone number and who can contact you on Signal with it."));
         if axo_list::item(ui, item, End::Arrow(None)).clicked() {
             app.settings.page = Page::PhoneNumber;
         }
@@ -1377,28 +1440,28 @@ fn privacy(app: &mut App, ui: &mut Ui, s: &Snapshot) {
         (u, g) => if u + g == 1 { "1 user or group".into() } else { format!("{} users or groups", u + g) },
     };
     axo_list::list(ui, None, None, |ui| {
-        if axo_list::item(ui, Item::new("Blocked"), End::Arrow(Some(&count))).clicked() {
+        if axo_list::item(ui, Item::new(tr("Blocked")), End::Arrow(Some(&count))).clicked() {
             app.settings.page = Page::Blocked;
         }
     });
     axo_list::gap(ui);
-    let help = "See and share when message are being read and typed. If disabled, you won\u{2019}t see read receipts or typing indicators from others.";
-    axo_list::list(ui, Some("Messaging"), Some(help), |ui| {
-        account_switch(app, ui, s, AccountSetting::ReadReceipts, Item::new("Read receipts"));
-        account_switch(app, ui, s, AccountSetting::TypingIndicators, Item::new("Typing indicators"));
+    let help = tr("See and share when message are being read and typed. If disabled, you won\u{2019}t see read receipts or typing indicators from others.");
+    axo_list::list(ui, Some(tr("Messaging")), Some(help), |ui| {
+        account_switch(app, ui, s, AccountSetting::ReadReceipts, Item::new(tr("Read receipts")));
+        account_switch(app, ui, s, AccountSetting::TypingIndicators, Item::new(tr("Typing indicators")));
     });
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Disappearing messages"), None, |ui| {
+    axo_list::list(ui, Some(tr("Disappearing messages")), None, |ui| {
         let mut values: Vec<u32> = crate::details::TIMERS.iter().map(|(v, _)| *v).filter(|v| *v != u32::MAX).collect();
         values.sort_by_key(|v| if *v == 0 { 0 } else { u32::MAX - v });
         if !values.contains(&s.universal_timer) {
             values.push(s.universal_timer);
         }
-        let mut labels: Vec<String> = values.iter().map(|v| if *v == 0 { "Off".to_owned() } else { crate::format::timer_long(*v) }).collect();
-        labels.push("Custom time…".to_owned());
+        let mut labels: Vec<String> = values.iter().map(|v| if *v == 0 { tr("Off").to_owned() } else { crate::format::timer_long(*v) }).collect();
+        labels.push(tr("Custom time…").to_owned());
         let options: Vec<&str> = labels.iter().map(String::as_str).collect();
         let chosen = values.iter().position(|v| *v == s.universal_timer);
-        let item = Item::new("Default timer for new chats").description("Set a default disappearing message timer for all new chats started by you.");
+        let item = Item::new(tr("Default timer for new chats")).description(tr("Set a default disappearing message timer for all new chats started by you."));
         if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("universal-timer"), item, &options, chosen) {
             if i == values.len() {
                 // Desktop's Custom time, for the default too.
@@ -1411,25 +1474,25 @@ fn privacy(app: &mut App, ui: &mut Ui, s: &Snapshot) {
         }
     });
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Stories"), None, |ui| {
-        let item = Item::new("Share & View Stories").description("If you opt out of stories you will no longer be able to share or view stories.");
+    axo_list::list(ui, Some(tr("Stories")), None, |ui| {
+        let item = Item::new(tr("Share & View Stories")).description(tr("If you opt out of stories you will no longer be able to share or view stories."));
         if s.stories_disabled {
-            if axo_list::item(ui, item, End::Action("Turn on stories", false)).clicked() {
+            if axo_list::item(ui, item, End::Action(tr("Turn on stories"), false)).clicked() {
                 app.send(Command::SetStoriesDisabled(false));
                 app.settings.stale = true;
             }
-        } else if axo_list::item(ui, item, End::Action("Turn off stories", true)).clicked() {
+        } else if axo_list::item(ui, item, End::Action(tr("Turn off stories"), true)).clicked() {
             app.settings.ask = Some(Ask::StoriesOff);
         }
     });
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Sealed Sender"), None, |ui| {
-        account_switch(app, ui, s, AccountSetting::SealedSenderIndicators, Item::new("Show status icon").description("Show an icon in message details when they were delivered using sealed sender."));
+    axo_list::list(ui, Some(tr("Sealed Sender")), None, |ui| {
+        account_switch(app, ui, s, AccountSetting::SealedSenderIndicators, Item::new(tr("Show status icon")).description(tr("Show an icon in message details when they were delivered using sealed sender.")));
     });
     axo_list::gap(ui);
-    axo_list::list(ui, Some("Advanced"), None, |ui| {
+    axo_list::list(ui, Some(tr("Advanced")), None, |ui| {
         let mut auto = !s.key_transparency_disabled;
-        let item = Item::new("Automatic key verification").description("When enabled, Signal will attempt to automatically verify the encryption of 1:1 chats.");
+        let item = Item::new(tr("Automatic key verification")).description(tr("When enabled, Signal will attempt to automatically verify the encryption of 1:1 chats."));
         if axo_list::switch(ui, item, &mut auto) {
             app.send(Command::SetKeyTransparencyDisabled(!auto));
             app.settings.stale = true;
@@ -1440,23 +1503,23 @@ fn privacy(app: &mut App, ui: &mut Ui, s: &Snapshot) {
 /// Desktop's phone number page (`SettingsRow` and `SettingsRadio`).
 fn phone_number(app: &mut App, ui: &mut Ui, palette: &Palette, s: &Snapshot) {
     let sharing = if s.phone_sharing {
-        "Your phone number will be visible to people and groups you message."
+        tr("Your phone number will be visible to people and groups you message.")
     } else if s.phone_discoverable {
-        "Your phone number will not be visible to anyone unless they have it saved in their phone\u{2019}s contacts."
+        tr("Your phone number will not be visible to anyone unless they have it saved in their phone\u{2019}s contacts.")
     } else {
-        "Your phone number will not be visible to anyone."
+        tr("Your phone number will not be visible to anyone.")
     };
-    if let Some(everyone) = radio_row(ui, palette, "Who can see my number", s.phone_sharing, sharing, !s.phone_discoverable) {
+    if let Some(everyone) = radio_row(ui, palette, tr("Who can see my number"), s.phone_sharing, sharing, !s.phone_discoverable) {
         app.send(Command::SetPhoneNumberSharing(everyone));
         app.settings.stale = true;
     }
     ui.add_space(24.);
     let finding = if s.phone_discoverable {
-        "Anyone who has your phone number will see you're on Signal and can start chats with you."
+        tr("Anyone who has your phone number will see you're on Signal and can start chats with you.")
     } else {
-        "Nobody will be able to see you're on Signal unless you message them or have an existing chat with them."
+        tr("Nobody will be able to see you're on Signal unless you message them or have an existing chat with them.")
     };
-    match radio_row(ui, palette, "Who can find me by number", s.phone_discoverable, finding, s.phone_sharing) {
+    match radio_row(ui, palette, tr("Who can find me by number"), s.phone_discoverable, finding, s.phone_sharing) {
         Some(true) => {
             app.send(Command::SetPhoneNumberDiscoverable(true));
             app.settings.stale = true;
@@ -1473,7 +1536,7 @@ fn radio_row(ui: &mut Ui, palette: &Palette, title: &str, everyone: bool, descri
     let (r, _) = ui.allocate_exact_size(Vec2::new(width, 28.), Sense::hover());
     ui.painter().text(Pos2::new(r.left() + 24., r.top() + 10.), Align2::LEFT_CENTER, title, theme::semibold(14.), palette.text);
     let mut picked = None;
-    for (label, value, readonly) in [("Everyone", true, false), ("Nobody", false, everyone_only)] {
+    for (label, value, readonly) in [(tr("Everyone"), true, false), (tr("Nobody"), false, everyone_only)] {
         let (row, response) = ui.allocate_exact_size(Vec2::new(width, 40.), if readonly { Sense::hover() } else { Sense::click() });
         let center = Pos2::new(row.left() + 24. + 10., row.center().y);
         let on = everyone == value;
@@ -1514,7 +1577,7 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
         let mut cancel = false;
         let closed = crate::panes::modal(ui, "block-chooser", 380., |ui| {
             crate::panes::title(ui, "Block someone");
-            widgets::text_field(ui, &mut query, "Search", false);
+            widgets::text_field(ui, &mut query, tr("Search"), false);
             ui.add_space(6.);
             let q = query.trim().to_lowercase();
             egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
@@ -1525,7 +1588,7 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
                     }
                 }
             });
-            cancel = crate::panes::buttons(ui, &["Cancel"]).is_some();
+            cancel = crate::panes::buttons(ui, &[tr("Cancel")]).is_some();
         });
         match picked {
             // Blocking asks first, as everywhere.
@@ -1534,7 +1597,7 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
             None => {}
         }
     }
-    for (title, list) in [("Blocked Users", people), ("Blocked Groups", groups)] {
+    for (title, list) in [(tr("Blocked Users"), people), (tr("Blocked Groups"), groups)] {
         if list.is_empty() {
             continue;
         }
@@ -1570,8 +1633,8 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
 fn data_usage(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     let mut auto = s.auto_download.clone();
     let mut changed = false;
-    axo_list::list(ui, Some("Media auto-download"), Some("Voice messages and stickers are always automatically downloaded."), |ui| {
-        for (label, on) in [("Photos", &mut auto.photos), ("Videos", &mut auto.videos), ("Audio", &mut auto.audio), ("Documents", &mut auto.documents)] {
+    axo_list::list(ui, Some(tr("Media auto-download")), Some("Voice messages and stickers are always automatically downloaded."), |ui| {
+        for (label, on) in [(tr("Photos"), &mut auto.photos), (tr("Videos"), &mut auto.videos), (tr("Audio"), &mut auto.audio), (tr("Documents"), &mut auto.documents)] {
             changed |= axo_list::switch(ui, Item::new(label), on);
         }
     });
@@ -1593,9 +1656,9 @@ fn ask(app: &mut App, ctx: &egui::Context) {
             id,
             "Linked Devices let you access your Signal account and messages securely on any of your additional devices.",
             "You can link a desktop, tablet or additional phone. Your primary device manages what\u{2019}s linked, you can link up to 5 devices. Account settings and Signal Secure Backups can only be managed on your primary device.",
-            "OK",
+            tr("OK"),
         ),
-        Ask::DeleteData => match dialog::confirm(ctx, id, "Delete all data?", "Delete all data and messages from this version of Signal Desktop? Your Signal account and data on your phone or other devices will not be deleted.", "Delete data", Variant::StrongDestructive) {
+        Ask::DeleteData => match dialog::confirm(ctx, id, tr("Delete all data?"), "Delete all data and messages from this version of Signal Desktop? Your Signal account and data on your phone or other devices will not be deleted.", tr("Delete data"), Variant::StrongDestructive) {
             Some(Choice::Action) => {
                 app.send(Command::Unlink);
                 true
@@ -1603,7 +1666,7 @@ fn ask(app: &mut App, ctx: &egui::Context) {
             Some(Choice::Cancel) => true,
             None => false,
         },
-        Ask::ResetNotifications => match dialog::confirm(ctx, id, "Reset notification settings?", "Notification settings on this device will go back to their defaults.", "Reset", Variant::StrongDestructive) {
+        Ask::ResetNotifications => match dialog::confirm(ctx, id, "Reset notification settings?", "Notification settings on this device will go back to their defaults.", tr("Reset"), Variant::StrongDestructive) {
             Some(Choice::Action) => {
                 reset_notifications(app);
                 true
@@ -1611,7 +1674,7 @@ fn ask(app: &mut App, ctx: &egui::Context) {
             Some(Choice::Cancel) => true,
             None => false,
         },
-        Ask::StoriesOff => match dialog::confirm(ctx, id, "Turn off stories", "You will no longer be able to share or view stories. Story updates you have recently shared will also be deleted.", "Turn off", Variant::StrongDestructive) {
+        Ask::StoriesOff => match dialog::confirm(ctx, id, tr("Turn off stories"), tr("You will no longer be able to share or view stories. Story updates you have recently shared will also be deleted."), tr("Turn off"), Variant::StrongDestructive) {
             Some(Choice::Action) => {
                 app.send(Command::SetStoriesDisabled(true));
                 app.settings.stale = true;
@@ -1620,7 +1683,7 @@ fn ask(app: &mut App, ctx: &egui::Context) {
             Some(Choice::Cancel) => true,
             None => false,
         },
-        Ask::NobodyCanFind => match dialog::confirm(ctx, id, "Are you sure?", "If you change \u{201c}Who can find me by number\u{201d} to \u{201c}Nobody\u{201d} it will make it harder for people to find you on Signal.", "OK", Variant::StrongPrimary) {
+        Ask::NobodyCanFind => match dialog::confirm(ctx, id, tr("Are you sure?"), "If you change \u{201c}Who can find me by number\u{201d} to \u{201c}Nobody\u{201d} it will make it harder for people to find you on Signal.", tr("OK"), Variant::StrongPrimary) {
             Some(Choice::Action) => {
                 app.send(Command::SetPhoneNumberDiscoverable(false));
                 app.settings.stale = true;
@@ -1630,8 +1693,8 @@ fn ask(app: &mut App, ctx: &egui::Context) {
             None => false,
         },
         Ask::Unblock(conversation, name, group) => {
-            let body = if *group { "Group members will be able to add you to this group again." } else { "You will be able to message and call each other." };
-            match dialog::confirm(ctx, id, &format!("Unblock {name}?"), body, "Unblock", Variant::StrongPrimary) {
+            let body = if *group { tr("Group members will be able to add you to this group again.") } else { tr("You will be able to message and call each other.") };
+            match dialog::confirm(ctx, id, &format!("Unblock {name}?"), body, tr("Unblock"), Variant::StrongPrimary) {
                 Some(Choice::Action) => {
                     app.send(Command::SetChat { conversation: conversation.clone(), change: ChatChange::Blocked(false) });
                     true
@@ -1640,7 +1703,7 @@ fn ask(app: &mut App, ctx: &egui::Context) {
                 None => false,
             }
         }
-        Ask::DeleteFolder(folder, name) => match dialog::confirm(ctx, id, "Delete folder?", &format!("Do you want to delete the folder \u{201c}{name}\u{201d}?"), "Delete", Variant::StrongDestructive) {
+        Ask::DeleteFolder(folder, name) => match dialog::confirm(ctx, id, tr("Delete folder?"), &format!("Do you want to delete the folder \u{201c}{name}\u{201d}?"), tr("Delete"), Variant::StrongDestructive) {
             Some(Choice::Action) => {
                 let at = chrono::Utc::now().timestamp_millis() as u64;
                 app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::Delete { id: folder.clone(), at }));

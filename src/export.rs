@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use langis_store::{AppDb, Conversation, Message};
+use crate::i18n::tr;
 
 /// A file name safe on any disk, from a chat's title.
 fn safe_name(title: &str) -> String {
@@ -100,8 +101,8 @@ pub async fn export_all(db: &AppDb, dir: &Path, names: &std::collections::HashMa
         let mut text = format!("{}\n\n", chat.title);
         for m in &messages {
             let author = match &m.author {
-                None => "You".to_owned(),
-                Some(sid) => names.get(sid).cloned().or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into()),
+                None => tr("You").to_owned(),
+                Some(sid) => names.get(sid).cloned().or_else(|| m.author_name.clone()).unwrap_or_else(|| tr("Unknown").into()),
             };
             let mut copied = Vec::new();
             for (i, a) in m.attachments.iter().enumerate() {

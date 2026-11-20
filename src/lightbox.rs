@@ -12,6 +12,7 @@ use langis_store::{ConversationId, Message};
 use crate::app::{App, Loaded};
 use crate::icons::Icon;
 use crate::theme;
+use crate::i18n::tr;
 
 /// One photo or video in the viewer.
 #[derive(Clone, Debug)]
@@ -237,8 +238,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let top = Rect::from_min_size(rect.min, Vec2::new(rect.width(), 56.));
         if !view_once {
             let who = match &item.author {
-                None => "You".to_owned(),
-                Some(a) => app.names.get(a).cloned().or(item.author_name.clone()).unwrap_or_else(|| "Unknown".into()),
+                None => tr("You").to_owned(),
+                Some(a) => app.names.get(a).cloned().or(item.author_name.clone()).unwrap_or_else(|| tr("Unknown").into()),
             };
             ui.painter().text(top.left_center() + Vec2::new(20., -8.), Align2::LEFT_CENTER, who, theme::semibold(14.), Color32::WHITE);
             let when = chrono::DateTime::from_timestamp_millis(item.sent_at)
@@ -247,17 +248,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.painter().text(top.left_center() + Vec2::new(20., 10.), Align2::LEFT_CENTER, when, theme::regular(12.), Color32::from_gray(190));
         }
         let mut x = top.right() - 52.;
-        if button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::X, "Close") {
+        if button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::X, tr("Close")) {
             close = true;
         }
         x -= 44.;
-        if !view_once && button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::Save, "Save") {
+        if !view_once && button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::Save, tr("Save")) {
             save = true;
         }
         // Desktop's Lightbox Forward, for a message langis will forward.
         let forwardable = !view_once && forward_target(app, &item).is_some();
         x -= 44.;
-        if forwardable && button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::Forward, "Forward") {
+        if forwardable && button(ui, Rect::from_min_size(Pos2::new(x, top.top() + 10.), Vec2::splat(36.)), Icon::Forward, tr("Forward")) {
             forward = true;
         }
         ui.set_opacity(previous);
@@ -350,7 +351,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             if index > 0 && button(ui, Rect::from_center_size(Pos2::new(rect.left() + 36., area.center().y), Vec2::splat(44.)), Icon::ChevronLeft, "Previous") {
                 go = Some(index - 1);
             }
-            if index + 1 < count && button(ui, Rect::from_center_size(Pos2::new(rect.right() - 36., area.center().y), Vec2::splat(44.)), Icon::ChevronRight, "Next") {
+            if index + 1 < count && button(ui, Rect::from_center_size(Pos2::new(rect.right() - 36., area.center().y), Vec2::splat(44.)), Icon::ChevronRight, tr("Next")) {
                 go = Some(index + 1);
             }
         }
@@ -454,7 +455,7 @@ fn video_controls(ui: &Ui, player: &mut crate::video::Player, media: Rect, view_
     let bar = Rect::from_min_max(Pos2::new(media.left(), media.bottom() - 40.), media.max);
     ui.painter().rect_filled(bar, CornerRadius::ZERO, Color32::from_black_alpha(110));
     let play = Rect::from_center_size(Pos2::new(bar.left() + 22., bar.center().y), Vec2::splat(28.));
-    if ui.interact(play, ui.scope_id().with("video-play"), Sense::click()).on_hover_text(if player.playing() { "Pause" } else { "Play" }).clicked() {
+    if ui.interact(play, ui.scope_id().with("video-play"), Sense::click()).on_hover_text(if player.playing() { tr("Pause") } else { tr("Play") }).clicked() {
         player.toggle();
     }
     theme::paint_symbol(ui.painter(), if player.playing() { "pause-fill" } else { "play-fill" }, play.center(), 18., Color32::WHITE);
@@ -462,7 +463,7 @@ fn video_controls(ui: &Ui, player: &mut crate::video::Player, media: Rect, view_
     let time = format!("{} / {}", crate::audio::playback_text(at), crate::audio::playback_text(total));
     let tg = ui.painter().layout_no_wrap(time, theme::regular(12.), Color32::WHITE);
     let mute = Rect::from_center_size(Pos2::new(bar.right() - 22., bar.center().y), Vec2::splat(28.));
-    if ui.interact(mute, ui.scope_id().with("video-mute"), Sense::click()).on_hover_text(if player.muted { "Unmute" } else { "Mute" }).clicked() {
+    if ui.interact(mute, ui.scope_id().with("video-mute"), Sense::click()).on_hover_text(if player.muted { tr("Unmute") } else { tr("Mute") }).clicked() {
         let muted = !player.muted;
         player.set_muted(muted);
     }
@@ -493,7 +494,7 @@ fn save_item(app: &mut App, item: &Item) {
         return;
     };
     let name = format!("signal-{}.{}", chrono::Local::now().format("%Y-%m-%d-%H%M%S"), crate::chat::extension_for(&item.content_type));
-    let Some(target) = rfd::FileDialog::new().set_title("Save").set_file_name(&name).save_file() else { return };
+    let Some(target) = rfd::FileDialog::new().set_title(tr("Save")).set_file_name(&name).save_file() else { return };
     match std::fs::copy(&path, &target) {
         Ok(_) => app.toast(format!("Saved to {}", target.display())),
         Err(error) => app.toast(format!("Couldn't save: {error}")),

@@ -1,6 +1,7 @@
 //! Times, sizes and names as Signal Desktop writes them.
 
 use chrono::{DateTime, Datelike as _, Local, TimeZone as _};
+use crate::i18n::tr;
 
 fn local(millis: i64) -> Option<DateTime<Local>> {
     Local.timestamp_millis_opt(millis).single()
@@ -15,7 +16,7 @@ pub fn short_timestamp(millis: i64) -> String {
     let now = Local::now();
     let age = now.signed_duration_since(time);
     if age.num_seconds() < 60 {
-        "now".into()
+        tr("now").into()
     } else if age.num_minutes() < 60 {
         format!("{}m", age.num_minutes())
     } else if time.date_naive() == now.date_naive() {
@@ -34,7 +35,7 @@ pub fn message_time(millis: i64) -> String {
     let Some(time) = local(millis) else { return String::new() };
     let age = Local::now().signed_duration_since(time);
     if age.num_seconds() < 60 {
-        "Now".into()
+        tr("Now").into()
     } else if age.num_minutes() < 60 {
         format!("{}m", age.num_minutes())
     } else {
@@ -49,8 +50,8 @@ pub fn day_label(millis: i64) -> String {
     let today = Local::now().date_naive();
     let day = time.date_naive();
     match (today - day).num_days() {
-        0 => "Today".into(),
-        1 => "Yesterday".into(),
+        0 => tr("Today").into(),
+        1 => tr("Yesterday").into(),
         2..=6 => time.format("%A").to_string(),
         _ if day.year() == today.year() => time.format("%a, %b %-d").to_string(),
         _ => time.format("%b %-d, %Y").to_string(),
@@ -73,7 +74,7 @@ const UNITS: [(u32, &str); 5] = [(1, "second"), (MINUTE, "minute"), (HOUR, "hour
 /// A disappearing message timer: "1 day", "5 minutes", "Off".
 pub fn timer_long(seconds: u32) -> String {
     if seconds == 0 {
-        return "Off".into();
+        return tr("Off").into();
     }
     let (n, unit) = UNITS.iter().rev().map(|(size, unit)| (seconds / size, *unit)).find(|(n, _)| *n > 0).unwrap_or((seconds, "second"));
     format!("{n} {unit}{}", if n == 1 { "" } else { "s" })

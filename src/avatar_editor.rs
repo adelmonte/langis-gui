@@ -11,6 +11,7 @@ use langis_core::profiles::AvatarChange;
 use crate::panes::{buttons, modal, title};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// Desktop's `AvatarTextEditor` limit, in characters.
 const TEXT_MAX: usize = 3;
@@ -40,7 +41,7 @@ impl AvatarEditor {
         let mut out = None;
         let closed = modal(ui, "avatar-editor", 360., |ui| {
             if let Some((text, color)) = self.text.as_mut() {
-                title(ui, "Text");
+                title(ui, tr("Text"));
                 // AvatarTextEditor: the letters large on the color.
                 ui.vertical_centered(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(96.), Sense::hover());
@@ -67,7 +68,7 @@ impl AvatarEditor {
                         }
                     }
                 });
-                match buttons(ui, &["Done", "Cancel"]) {
+                match buttons(ui, &[tr("Done"), tr("Cancel")]) {
                     Some(0) if !text.trim().is_empty() => {
                         self.picked = Some(Arc::new(text_avatar(text.trim(), *color)));
                         self.removed = false;
@@ -78,7 +79,7 @@ impl AvatarEditor {
                 }
                 return;
             }
-            title(ui, "Edit photo");
+            title(ui, tr("Edit photo"));
             // The preview, 96px.
             ui.vertical_centered(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(96.), Sense::hover());
@@ -108,10 +109,10 @@ impl AvatarEditor {
                         None => *toast = Some("That picture couldn't be read.".into()),
                     }
                 }
-                if tool(ui, &palette, "text-square", "Text") {
+                if tool(ui, &palette, "text-square", tr("Text")) {
                     self.text = Some((self.initials.clone(), 0));
                 }
-                if has && tool(ui, &palette, "trash", "Remove") {
+                if has && tool(ui, &palette, "trash", tr("Remove")) {
                     self.picked = None;
                     self.removed = true;
                 }
@@ -134,7 +135,7 @@ impl AvatarEditor {
                     }
                 }
             });
-            match buttons(ui, &["Save", "Cancel"]) {
+            match buttons(ui, &[tr("Save"), tr("Cancel")]) {
                 Some(0) => {
                     out = Some(match (&self.picked, self.removed) {
                         (Some(bytes), _) => AvatarChange::New(bytes.clone()),

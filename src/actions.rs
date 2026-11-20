@@ -10,6 +10,7 @@ use crate::app::{App, Loaded};
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 /// Desktop's reaction bar when the account has none saved
 /// (`DEFAULT_PREFERRED_REACTION_EMOJI`).
@@ -139,9 +140,9 @@ pub fn hover_bar(ui: &Ui, palette: &Palette, id: i64, bubble: Rect, outgoing: bo
     let bx = if outgoing { bubble.left() - 3. * w - 6. } else { bubble.right() + 6. };
     let mut clicked = None;
     let buttons: [(Icon, &str); 3] = if outgoing {
-        [(Icon::More, "More actions"), (Icon::Reply, "Reply"), (Icon::Emoji, "React")]
+        [(Icon::More, tr("More actions")), (Icon::Reply, tr("Reply")), (Icon::Emoji, tr("React"))]
     } else {
-        [(Icon::Emoji, "React"), (Icon::Reply, "Reply"), (Icon::More, "More actions")]
+        [(Icon::Emoji, tr("React")), (Icon::Reply, tr("Reply")), (Icon::More, tr("More actions"))]
     };
     for (i, (icon, tip)) in buttons.into_iter().enumerate() {
         let rect = Rect::from_min_size(Pos2::new(bx + i as f32 * w, bubble.center().y - 14.), Vec2::splat(28.));
@@ -234,54 +235,54 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
             // Desktop's `MessageContextMenu`, in its order.
             let open = crate::menu::show(ctx, menu, |ui| {
                 if let Some(index) = offer.download
-                    && ui.item(Some("download"), "Download")
+                    && ui.item(Some("download"), tr("Download"))
                 {
                     out.push(Do::Save(id, index));
                 }
-                if offer.reply && ui.item(Some("reply"), "Reply") {
+                if offer.reply && ui.item(Some("reply"), tr("Reply")) {
                     out.push(Do::Reply(id));
                 }
                 // Desktop's sticker favorite, from the sticker's pack.
                 if let Some((pack_id, pack_key, sticker_id)) = m.attachments.iter().find(|a| a.sticker).and_then(|a| a.sticker_pack.as_ref()).and_then(sticker_ref).filter(|_| !m.deleted) {
                     let favorite = app.fun.favorite_ids.iter().any(|(p, s)| *p == pack_id && *s == sticker_id);
-                    let (symbol, label) = if favorite { ("star-slash", "Remove from Favorites") } else { ("star", "Add to Favorites") };
+                    let (symbol, label) = if favorite { ("star-slash", tr("Remove from Favorites")) } else { ("star", tr("Add to Favorites")) };
                     if ui.item(Some(symbol), label) {
                         out.push(Do::Command(Command::SetStickerFavorite { pack_id, pack_key, sticker_id, favorite: !favorite }));
                     }
                 }
-                if offer.react && ui.item(Some("heart-plus"), "React") {
+                if offer.react && ui.item(Some("heart-plus"), tr("React")) {
                     out.push(Do::ReactBar(id));
                 }
-                if m.direction == Direction::Outgoing && m.poll.as_ref().is_some_and(|p| !p.ended) && !m.deleted && ui.item(Some("stop-circle"), "End poll") {
+                if m.direction == Direction::Outgoing && m.poll.as_ref().is_some_and(|p| !p.ended) && !m.deleted && ui.item(Some("stop-circle"), tr("End poll")) {
                     out.push(Do::Command(Command::EndPoll { message_id: id }));
                 }
-                if offer.forward && ui.item(Some("forward"), "Forward") {
+                if offer.forward && ui.item(Some("forward"), tr("Forward")) {
                     out.push(Do::Open(Dialog::Forward { messages: vec![id], query: String::new(), chosen: Vec::new(), editing: None }));
                 }
-                if offer.edit && ui.item(Some("pencil"), "Edit") {
+                if offer.edit && ui.item(Some("pencil"), tr("Edit")) {
                     out.push(Do::Edit(id));
                 }
-                if !m.deleted && ui.item(Some("check-circle"), "Select") {
+                if !m.deleted && ui.item(Some("check-circle"), tr("Select")) {
                     out.push(Do::Select(id));
                 }
-                if offer.copy && ui.item(Some("copy"), "Copy text") {
+                if offer.copy && ui.item(Some("copy"), tr("Copy text")) {
                     out.push(Do::Copy(plain_text(app, m)));
                 }
                 match offer.pin {
-                    Some(true) if ui.item(Some("pin-slash"), "Unpin") => out.push(Do::Command(Command::UnpinMessage { message_id: id })),
-                    Some(false) if ui.item(Some("pin"), "Pin") => out.push(Do::Open(Dialog::Pin { message: id, choice: 0 })),
+                    Some(true) if ui.item(Some("pin-slash"), tr("Unpin")) => out.push(Do::Command(Command::UnpinMessage { message_id: id })),
+                    Some(false) if ui.item(Some("pin"), tr("Pin")) => out.push(Do::Open(Dialog::Pin { message: id, choice: 0 })),
                     _ => {}
                 }
-                if ui.item(Some("info-circle"), "Info") {
+                if ui.item(Some("info-circle"), tr("Info")) {
                     out.push(Do::Open(Dialog::Info { message: id, details: None }));
                 }
-                if offer.delete && ui.item(Some("trash"), "Delete") {
+                if offer.delete && ui.item(Some("trash"), tr("Delete")) {
                     out.push(Do::Open(Dialog::Delete { messages: vec![id] }));
                 }
-                if failed_send && ui.item(Some("send"), "Retry Send") {
+                if failed_send && ui.item(Some("send"), tr("Retry Send")) {
                     out.push(Do::Command(Command::RetrySend { message_id: id }));
                 }
-                if offer.retry_delete && ui.item(Some("trash"), "Retry Delete for Everyone") {
+                if offer.retry_delete && ui.item(Some("trash"), tr("Retry Delete for Everyone")) {
                     out.push(Do::Command(Command::RetryDeleteForEveryone { message_id: id }));
                 }
             });
@@ -310,7 +311,7 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
                     .fixed_pos(Pos2::new(anchor.x, anchor.y - 4.))
                     .show(ctx, |ui| {
                         egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(12)).stroke(egui::Stroke::new(1., palette.border)).inner_margin(6).show(ui, |ui| {
-                            customize = widgets::pill_button(ui, "Customize reactions", false).clicked();
+                            customize = widgets::pill_button(ui, tr("Customize reactions"), false).clicked();
                         });
                     });
                 if customize {
@@ -394,12 +395,12 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 (false, 1) => "Who would you like to delete this message for?",
                 (false, _) => "Who would you like to delete these messages for?",
             };
-            let mut actions = vec![(if note_to_self { "Delete" } else { "Delete for me" }, crate::dialog::Variant::SubtleDestructive)];
+            let mut actions = vec![(if note_to_self { tr("Delete") } else { tr("Delete for me") }, crate::dialog::Variant::SubtleDestructive)];
             if for_everyone && !note_to_self {
-                actions.push(("Delete for everyone", crate::dialog::Variant::SubtleDestructive));
+                actions.push((tr("Delete for everyone"), crate::dialog::Variant::SubtleDestructive));
             }
             let ids: Vec<i64> = chosen.iter().map(|m| m.id).collect();
-            match crate::dialog::show(ui.ctx(), egui::Id::unique("delete-messages"), &title, body, Some("Cancel"), &actions) {
+            match crate::dialog::show(ui.ctx(), egui::Id::unique("delete-messages"), &title, body, Some(tr("Cancel")), &actions) {
                 Some(crate::dialog::Answer::Action(0)) => out.push(Do::Command(Command::DeleteForMe { message_ids: ids })),
                 Some(crate::dialog::Answer::Action(_)) => {
                     for message_id in ids {
@@ -415,7 +416,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             let id = *message;
             let modal = egui::Modal::new(egui::Id::unique("pin-message")).frame(frame).show(ui.ctx(), |ui| {
                 ui.set_width(320.);
-                ui.label(RichText::new("Pin message for...").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Pin message for...")).font(theme::semibold(18.)));
                 ui.add_space(12.);
                 for (i, (label, _)) in PIN_DURATIONS.iter().enumerate() {
                     if radio_row(ui, *choice == i, label) {
@@ -424,10 +425,10 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 }
                 ui.add_space(16.);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Pin", true).clicked() {
+                    if widgets::pill_button(ui, tr("Pin"), true).clicked() {
                         out.push(Do::Command(Command::PinMessage { message_id: id, duration: PIN_DURATIONS[*choice].1 }));
                     }
-                    if widgets::pill_button(ui, "Cancel", false).clicked() {
+                    if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                         out.push(Do::Close);
                     }
                 });
@@ -440,7 +441,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             let mut send = None;
             let modal = egui::Modal::new(egui::Id::unique("forward-messages")).frame(frame).show(ui.ctx(), |ui| {
                 ui.set_width(380.);
-                ui.label(RichText::new("Forward To").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Forward To")).font(theme::semibold(18.)));
                 ui.add_space(10.);
                 if let Some(text) = editing {
                     // Desktop's `ForwardMessageEditor`: the message as it
@@ -465,7 +466,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                         ui.add(egui::TextEdit::multiline(text).hint_text("Add a message").frame(egui::Frame::NONE).desired_rows(2).desired_width(f32::INFINITY).font(theme::regular(14.)));
                     });
                 } else {
-                    widgets::text_field(ui, query, "Search", false);
+                    widgets::text_field(ui, query, tr("Search"), false);
                     ui.add_space(8.);
                     let q = query.trim().to_lowercase();
                     egui::ScrollArea::vertical().max_height(320.).auto_shrink([false, true]).show(ui, |ui| {
@@ -519,23 +520,23 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                     let single = messages.len() == 1;
                     match editing {
                         Some(text) => {
-                            if widgets::pill_button(ui, "Send", true).clicked() {
+                            if widgets::pill_button(ui, tr("Send"), true).clicked() {
                                 send = Some(Some(text.clone()));
                             }
                         }
                         None if single => {
-                            if ui.add_enabled_ui(!chosen.is_empty(), |ui| widgets::pill_button(ui, "Continue", true)).inner.clicked() {
+                            if ui.add_enabled_ui(!chosen.is_empty(), |ui| widgets::pill_button(ui, tr("Continue"), true)).inner.clicked() {
                                 let body = chat.iter().find(|m| m.id == messages[0]).map(|m| m.body.clone()).unwrap_or_default();
                                 *editing = Some(body);
                             }
                         }
                         None => {
-                            if ui.add_enabled_ui(!chosen.is_empty(), |ui| widgets::pill_button(ui, "Send", true)).inner.clicked() {
+                            if ui.add_enabled_ui(!chosen.is_empty(), |ui| widgets::pill_button(ui, tr("Send"), true)).inner.clicked() {
                                 send = Some(None);
                             }
                         }
                     }
-                    if widgets::pill_button(ui, "Cancel", false).clicked() {
+                    if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                         out.push(Do::Close);
                     }
                 });
@@ -582,9 +583,9 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 ui.set_width(360.);
                 match step {
                     ShareStep::Pick { query, candidates } => {
-                        ui.label(RichText::new("Select contact").font(theme::semibold(18.)));
+                        ui.label(RichText::new(tr("Select contact")).font(theme::semibold(18.)));
                         ui.add_space(12.);
-                        widgets::text_field(ui, query, "Search", false);
+                        widgets::text_field(ui, query, tr("Search"), false);
                         ui.add_space(8.);
                         let Some(list) = candidates else {
                             ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
@@ -594,7 +595,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                         if shown.is_empty() {
                             ui.add_space(24.);
                             ui.vertical_centered(|ui| {
-                                let text = if query.trim().is_empty() { "No contacts".to_owned() } else { format!("No results for \u{201c}{}\u{201d}", query.trim()) };
+                                let text = if query.trim().is_empty() { tr("No contacts").to_owned() } else { format!("No results for \u{201c}{}\u{201d}", query.trim()) };
                                 ui.label(RichText::new(text).font(theme::regular(14.)).color(palette.text_secondary));
                             });
                             ui.add_space(24.);
@@ -617,13 +618,13 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                         });
                     }
                     ShareStep::Loading => {
-                        ui.label(RichText::new("Share contact").font(theme::semibold(18.)));
+                        ui.label(RichText::new(tr("Share contact")).font(theme::semibold(18.)));
                         ui.add_space(24.);
                         ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
                         ui.add_space(24.);
                     }
                     ShareStep::Share { draft, selection } => {
-                        ui.label(RichText::new("Share contact").font(theme::semibold(18.)));
+                        ui.label(RichText::new(tr("Share contact")).font(theme::semibold(18.)));
                         ui.add_space(16.);
                         let name = draft.name.as_ref().and_then(|n| n.full()).or_else(|| draft.organization.clone()).unwrap_or_default();
                         ui.vertical_centered(|ui| {
@@ -649,11 +650,11 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                         let shared = share::apply_selection(draft, *selection);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let can = share::can_share(&shared);
-                            if ui.add_enabled_ui(can, |ui| widgets::pill_button(ui, "Send contact", true)).inner.clicked() {
+                            if ui.add_enabled_ui(can, |ui| widgets::pill_button(ui, tr("Send contact"), true)).inner.clicked() {
                                 out.push(Do::Command(Command::ShareContact { conversation: c.id.clone(), share: Box::new(shared.clone()) }));
                                 out.push(Do::Close);
                             }
-                            if widgets::pill_button(ui, "Cancel", false).clicked() {
+                            if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                                 out.push(Do::Close);
                             }
                         });
@@ -728,7 +729,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 egui::ScrollArea::vertical().max_height(360.).auto_shrink([false, true]).show(ui, |ui| {
                     for r in rows {
                         let (name, color, photo) = match &r.author {
-                            None => ("You".to_owned(), me.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b)), app.me.1.clone()),
+                            None => (tr("You").to_owned(), me.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b)), app.me.1.clone()),
                             Some(a) => (app.name(a), a.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b)), app.conversation(&ConversationId::direct(a)).and_then(|p| p.avatar_path.clone())),
                         };
                         let (rect, row) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.), Sense::click());
@@ -758,12 +759,12 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         Dialog::Pinned { messages } => {
             let modal = egui::Modal::new(egui::Id::unique("pinned-messages")).frame(frame).show(ui.ctx(), |ui| {
                 ui.set_width(420.);
-                ui.label(RichText::new("Pinned messages").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Pinned messages")).font(theme::semibold(18.)));
                 ui.add_space(12.);
                 egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
                     for m in messages.iter() {
                         let who = match &m.author {
-                            None => "You".to_owned(),
+                            None => tr("You").to_owned(),
                             Some(a) => app.name(a),
                         };
                         let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { langis_store::hide_spoilers(&m.body, &m.styles) };
@@ -790,7 +791,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 });
                 ui.add_space(12.);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Done", true).clicked() {
+                    if widgets::pill_button(ui, tr("Done"), true).clicked() {
                         out.push(Do::Close);
                     }
                 });
@@ -801,7 +802,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         }
         Dialog::Explain { title, body } => {
             let (title, body) = (*title, *body);
-            if let Some(answer) = crate::dialog::show(ui.ctx(), egui::Id::unique("notice-explain"), title, body, None, &[("OK", crate::dialog::Variant::StrongPrimary)]) {
+            if let Some(answer) = crate::dialog::show(ui.ctx(), egui::Id::unique("notice-explain"), title, body, None, &[(tr("OK"), crate::dialog::Variant::StrongPrimary)]) {
                 let _ = answer;
                 out.push(Do::Close);
             }
@@ -809,7 +810,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         Dialog::Reactions { slots, selected, picker } => {
             let modal = egui::Modal::new(egui::Id::unique("customize-reactions-dialog")).frame(frame).show(ui.ctx(), |ui| {
                 ui.set_width(360.);
-                ui.label(RichText::new("Customize reactions").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Customize reactions")).font(theme::semibold(18.)));
                 ui.add_space(4.);
                 ui.label(RichText::new("Choose a reaction, then pick its replacement.").font(theme::regular(13.)).color(palette.text_secondary));
                 ui.add_space(12.);
@@ -837,15 +838,15 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 }
                 ui.add_space(12.);
                 ui.horizontal(|ui| {
-                    if widgets::pill_button(ui, "Reset", false).clicked() {
+                    if widgets::pill_button(ui, tr("Reset"), false).clicked() {
                         *slots = DEFAULT_REACTIONS.iter().map(|e| e.to_string()).collect();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::pill_button(ui, "Save", true).clicked() {
+                        if widgets::pill_button(ui, tr("Save"), true).clicked() {
                             out.push(Do::Command(Command::SetPreferredReactions(slots.clone())));
                             out.push(Do::Close);
                         }
-                        if widgets::pill_button(ui, "Cancel", false).clicked() {
+                        if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                             out.push(Do::Close);
                         }
                     });
@@ -860,7 +861,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             let Some(m) = chat.iter().find(|m| m.id == id) else { return vec![Do::Close] };
             let modal = egui::Modal::new(egui::Id::unique("edit-history")).frame(frame).show(ui.ctx(), |ui| {
                 ui.set_width(400.);
-                ui.label(RichText::new("Edit history").font(theme::semibold(18.)));
+                ui.label(RichText::new(tr("Edit history")).font(theme::semibold(18.)));
                 ui.add_space(12.);
                 egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
                     // The current version, then the older ones, each with
@@ -915,7 +916,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 });
                 ui.add_space(12.);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Done", true).clicked() {
+                    if widgets::pill_button(ui, tr("Done"), true).clicked() {
                         out.push(Do::Close);
                     }
                 });
@@ -929,7 +930,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             let Some(langis_store::MessageContent::Contact(contact)) = m.content.as_ref() else { return vec![Do::Close] };
             let contact = contact.clone();
             let mut go = None;
-            if panel(ui, &palette, "Contact", |ui| go = contact_detail(app, ui, &palette, &contact)) {
+            if panel(ui, &palette, tr("Contact"), |ui| go = contact_detail(app, ui, &palette, &contact)) {
                 out.push(Do::Close);
             }
             if let Some(command) = go {
@@ -1040,7 +1041,7 @@ fn panel(ui: &Ui, palette: &Palette, title: &str, body: impl FnOnce(&mut Ui)) ->
 fn contact_detail(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::SharedContact) -> Option<Do> {
     use langis_store::{AddressKind, ContactMethodKind};
     let mut out = None;
-    let name = c.display_nickname().or_else(|| c.display_name()).or_else(|| c.organization.clone()).unwrap_or_else(|| "Unknown contact".into());
+    let name = c.display_nickname().or_else(|| c.display_name()).or_else(|| c.organization.clone()).unwrap_or_else(|| tr("Unknown contact").into());
     ui.vertical_centered(|ui| {
         let spec = widgets::AvatarSpec { name: &name, color: 0, photo: c.avatar.as_ref().and_then(|a| a.local_path.as_deref()), group: false, note_to_self: false };
         widgets::avatar(ui, &spec, 80.);
@@ -1051,15 +1052,15 @@ fn contact_detail(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::S
         }
         if let Some(aci) = &c.aci {
             ui.add_space(12.);
-            if widgets::pill_button(ui, "Send message", true).clicked() {
+            if widgets::pill_button(ui, tr("Send message"), true).clicked() {
                 out = Some(Do::OpenChat(langis_store::ConversationId::direct(aci)));
             }
         }
     });
     let kind = |k: ContactMethodKind, label: &Option<String>| match k {
-        ContactMethodKind::Home => "Home".to_owned(),
-        ContactMethodKind::Mobile => "Mobile".to_owned(),
-        ContactMethodKind::Work => "Work".to_owned(),
+        ContactMethodKind::Home => tr("Home").to_owned(),
+        ContactMethodKind::Mobile => tr("Mobile").to_owned(),
+        ContactMethodKind::Work => tr("Work").to_owned(),
         ContactMethodKind::Custom => label.clone().unwrap_or_else(|| "Other".into()),
     };
     let row = |ui: &mut Ui, label: String, value: String| {
@@ -1076,9 +1077,9 @@ fn contact_detail(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::S
     }
     for a in &c.addresses {
         let label = match a.kind {
-            AddressKind::Home => "Home".to_owned(),
-            AddressKind::Work => "Work".to_owned(),
-            AddressKind::Custom => a.label.clone().unwrap_or_else(|| "Address".into()),
+            AddressKind::Home => tr("Home").to_owned(),
+            AddressKind::Work => tr("Work").to_owned(),
+            AddressKind::Custom => a.label.clone().unwrap_or_else(|| tr("Address").into()),
         };
         let lines: Vec<String> = [&a.street, &a.pobox, &a.neighborhood]
             .into_iter()
@@ -1091,7 +1092,7 @@ fn contact_detail(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::S
         row(ui, label, lines.join("\n"));
     }
     if let Some(note) = c.note.as_ref().filter(|n| !n.is_empty()) {
-        row(ui, "Note".into(), note.clone());
+        row(ui, tr("Note").into(), note.clone());
     }
     out
 }
@@ -1132,11 +1133,11 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
         let time = chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%A, %B %-d, %Y at %-I:%M %p").to_string()).unwrap_or_default();
         (label.to_owned(), time)
     };
-    let mut rows = vec![when("Sent", m.sent_at)];
+    let mut rows = vec![when(tr("Sent"), m.sent_at)];
     if m.direction == Direction::Incoming {
-        rows.push(when("Received", m.received_at));
+        rows.push(when(tr("Received"), m.received_at));
         if let Some(author) = &m.author {
-            rows.insert(0, ("From".into(), app.name(author)));
+            rows.insert(0, (tr("From").into(), app.name(author)));
         }
     }
     if m.expires_in > 0 {
@@ -1145,7 +1146,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
             Some(secs) => crate::format::duration(secs),
             None => crate::format::timer_long(m.expires_in),
         };
-        rows.push(("Disappears in".into(), text));
+        rows.push((tr("Disappears in").into(), text));
     }
     for (label, value) in rows {
         ui.horizontal(|ui| {
@@ -1163,12 +1164,12 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
     };
     if m.direction == Direction::Outgoing && !details.states.is_empty() {
         let groups: [(&str, &dyn Fn(SendStatus) -> bool); 6] = [
-            ("Not sent", &|s| s == SendStatus::Failed),
-            ("Viewed by", &|s| s == SendStatus::Viewed),
-            ("Read by", &|s| s == SendStatus::Read),
-            ("Delivered to", &|s| s == SendStatus::Delivered),
-            ("Sent to", &|s| s == SendStatus::Sent),
-            ("Pending", &|s| matches!(s, SendStatus::Pending)),
+            (tr("Not sent"), &|s| s == SendStatus::Failed),
+            (tr("Viewed by"), &|s| s == SendStatus::Viewed),
+            (tr("Read by"), &|s| s == SendStatus::Read),
+            (tr("Delivered to"), &|s| s == SendStatus::Delivered),
+            (tr("Sent to"), &|s| s == SendStatus::Sent),
+            (tr("Pending"), &|s| matches!(s, SendStatus::Pending)),
         ];
         for (title, pick) in groups {
             let people: Vec<&SendState> = details.states.iter().filter(|s| pick(s.status)).collect();
@@ -1210,7 +1211,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
     }
     if !details.edits.is_empty() {
         ui.add_space(14.);
-        ui.label(RichText::new("Edit history").font(theme::semibold(14.)));
+        ui.label(RichText::new(tr("Edit history")).font(theme::semibold(14.)));
         for edit in &details.edits {
             ui.add_space(4.);
             egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
@@ -1248,7 +1249,7 @@ pub fn save_attachment(app: &mut App, m: &Message, index: usize) {
     let ext = crate::chat::extension_for(&a.content_type);
     let fallback = format!("signal-{}.{ext}", chrono::Local::now().format("%Y-%m-%d-%H%M%S"));
     let name = safe_file_name(a.file_name.as_deref().unwrap_or(""), &fallback);
-    let Some(target) = rfd::FileDialog::new().set_title("Save").set_file_name(&name).save_file() else { return };
+    let Some(target) = rfd::FileDialog::new().set_title(tr("Save")).set_file_name(&name).save_file() else { return };
     match std::fs::copy(&path, &target) {
         Ok(_) => app.toast(format!("Saved to {}", target.display())),
         Err(error) => app.toast(format!("Couldn't save: {error}")),

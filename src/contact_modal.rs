@@ -11,6 +11,7 @@ use crate::app::App;
 use crate::dialog::{self, Answer, Variant};
 use crate::theme::{self, Palette};
 use crate::widgets;
+use crate::i18n::tr;
 
 pub struct Contact {
     /// The group it was opened from, for the admin's actions.
@@ -92,12 +93,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     if let Some(which) = confirm {
         // `ContactModal`'s confirmations, over it.
         let (title, body, action) = match which {
-            Confirm::Admin if is_admin => (format!("Remove {name} as group admin?"), String::new(), "Remove as admin"),
-            Confirm::Admin => (String::new(), format!("{name} will be able to edit this group and its members."), "Make admin"),
-            Confirm::Remove => (String::new(), format!("Remove \"{name}\" from the group?"), "Remove from group"),
+            Confirm::Admin if is_admin => (format!("Remove {name} as group admin?"), String::new(), tr("Remove as admin")),
+            Confirm::Admin => (String::new(), format!("{name} will be able to edit this group and its members."), tr("Make admin")),
+            Confirm::Remove => (String::new(), format!("Remove \"{name}\" from the group?"), tr("Remove from group")),
         };
         let variant = if which == Confirm::Remove || is_admin { Variant::StrongDestructive } else { Variant::StrongPrimary };
-        if let Some(answer) = dialog::show(ctx, egui::Id::unique("contact-confirm"), &title, &body, Some("Cancel"), &[(action, variant)]) {
+        if let Some(answer) = dialog::show(ctx, egui::Id::unique("contact-confirm"), &title, &body, Some(tr("Cancel")), &[(action, variant)]) {
             if let (Answer::Action(_), Some(g)) = (answer, group_id.clone()) {
                 match which {
                     Confirm::Admin => app.send(Command::SetGroupAdmin { conversation: g, member: aci.clone(), admin: !is_admin }),
@@ -177,7 +178,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
             // `AxoStackedButton.Row`: Message, Video, Voice.
             ui.add_space(16.);
-            let buttons = [("message", "Message"), ("videocamera", "Video"), ("phone", "Voice")];
+            let buttons = [("message", tr("Message")), ("videocamera", tr("Video")), (tr("phone"), tr("Voice"))];
             let cell_w = 72.;
             let total = buttons.len() as f32 * cell_w + (buttons.len() - 1) as f32 * 8.;
             let (row, _) = ui.allocate_exact_size(Vec2::new(width, 36. + 6. + 14.), Sense::hover());
@@ -207,29 +208,29 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.painter().hline(line.shrink2(Vec2::new(24., 0.)).x_range(), line.center().y, egui::Stroke::new(1., palette.border));
             ui.add_space(12.);
             let blocked = person.as_ref().is_some_and(|p| p.blocked);
-            let mut items: Vec<(&str, String, Do)> = vec![("pencil", "Nickname".into(), Do::Nickname)];
+            let mut items: Vec<(&str, String, Do)> = vec![("pencil", tr("Nickname").into(), Do::Nickname)];
             if !blocked {
-                items.push(("block", "Block".into(), Do::Block));
+                items.push(("block", tr("Block").into(), Do::Block));
             }
-            items.push(("shield-check", "View safety number".into(), Do::Safety));
+            items.push(("shield-check", tr("View safety number").into(), Do::Safety));
             if we_admin && is_member {
-                items.push(("key", if is_admin { "Remove as admin" } else { "Make admin" }.into(), Do::Confirm(Confirm::Admin)));
-                items.push(("minus-circle", "Remove from group".into(), Do::Confirm(Confirm::Remove)));
+                items.push(("key", if is_admin { tr("Remove as admin") } else { tr("Make admin") }.into(), Do::Confirm(Confirm::Admin)));
+                items.push(("minus-circle", tr("Remove from group").into(), Do::Confirm(Confirm::Remove)));
             }
             // `ContactModal--add-to-group`, when some group can take them.
             let can_add = app.conversations.iter().any(|g| g.kind == langis_store::ConversationKind::Group && g.can_add_members && !g.left && !g.members.contains(&aci));
             if can_add {
-                items.push(("group", "Add to a group".into(), Do::AddToGroup));
+                items.push(("group", tr("Add to a group").into(), Do::AddToGroup));
             }
             // In a call with them: mute them, or (a call link's admin) remove.
             if let Some(call) = app.call.as_ref()
                 && let Some(p) = call.participants.iter().find(|p| p.aci == aci)
             {
                 if p.audio {
-                    items.push(("mic-slash", "Mute audio".into(), Do::MuteInCall(p.demux_id)));
+                    items.push(("mic-slash", tr("Mute audio").into(), Do::MuteInCall(p.demux_id)));
                 }
                 if call.conversation.as_call_link().is_some() {
-                    items.push(("minus-circle", "Remove from call".into(), Do::RemoveFromCall(p.demux_id)));
+                    items.push(("minus-circle", tr("Remove from call").into(), Do::RemoveFromCall(p.demux_id)));
                 }
             }
             for (symbol, label, action) in items {
@@ -304,7 +305,7 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         let mut done = false;
         egui::Modal::new(egui::Id::unique("about-contact")).frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24)).show(ctx, |ui| {
             ui.set_width(340.);
-            ui.label(egui::RichText::new("About").font(theme::semibold(18.)));
+            ui.label(egui::RichText::new(tr("About")).font(theme::semibold(18.)));
             ui.add_space(12.);
             let row = |ui: &mut egui::Ui, symbol: &str, text: &str| {
                 ui.horizontal(|ui| {
@@ -317,7 +318,7 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
             row(ui, "person", name);
             if let Some(d) = &details {
                 if d.verified {
-                    row(ui, "shield-check", "Verified");
+                    row(ui, "shield-check", tr("Verified"));
                 }
                 if let Some(p) = &d.profile {
                     if !p.about.is_empty() {
@@ -332,11 +333,11 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
                 }
             }
             if let Some(phone) = app.conversation(&ConversationId::direct(aci)).and_then(|c| c.phone.clone()) {
-                row(ui, "phone", &phone);
+                row(ui, tr("phone"), &phone);
             }
             ui.add_space(8.);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                done = widgets::pill_button(ui, "Done", true).clicked();
+                done = widgets::pill_button(ui, tr("Done"), true).clicked();
             });
         });
         if done && let Some(c) = app.panes.contact.as_mut() {
@@ -350,7 +351,7 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         ui.set_width(360.);
         ui.label(egui::RichText::new(format!("Add {name} to a group")).font(theme::semibold(18.)));
         ui.add_space(8.);
-        widgets::text_field(ui, &mut query, "Search", false);
+        widgets::text_field(ui, &mut query, tr("Search"), false);
         ui.add_space(6.);
         let q = query.trim().to_lowercase();
         egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
@@ -363,7 +364,7 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         });
         ui.add_space(8.);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            cancel = widgets::pill_button(ui, "Cancel", false).clicked();
+            cancel = widgets::pill_button(ui, tr("Cancel"), false).clicked();
         });
     });
     if let Some(group) = picked {

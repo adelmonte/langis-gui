@@ -28,6 +28,8 @@ mod export;
 mod format;
 mod fun;
 mod glyphs;
+mod i18n;
+mod i18n_locales;
 mod icons;
 mod lightbox;
 mod menu;

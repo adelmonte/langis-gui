@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui::{Context, TextureHandle, TextureOptions};
+use crate::i18n::tr;
 
 /// The child dies with us, so nothing keeps playing after langis-gui quits.
 fn die_with_parent(command: &mut Command) -> &mut Command {
@@ -194,7 +195,7 @@ impl Player {
             if !muted && p.audio {
                 let sound = die_with_parent(
                     Command::new("ffmpeg")
-                        .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-ss", &format!("{at:.3}"), "-i", &path, "-vn", "-ac", "2", "-ar", "48000", "-f", "f32le", "-"])
+                        .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-ss", &format!("{at:.3}"), "-i", &path, "-vn", "-ac", tr("2"), "-ar", "48000", "-f", "f32le", "-"])
                         .stdin(Stdio::null())
                         .stdout(Stdio::piped())
                         .stderr(Stdio::null()),
@@ -205,7 +206,7 @@ impl Player {
                 {
                     let out = die_with_parent(
                         Command::new("pw-play")
-                            .args(["--raw", "--format", "f32", "--rate", "48000", "--channels", "2"])
+                            .args(["--raw", "--format", "f32", "--rate", "48000", "--channels", tr("2")])
                             .args(["-P", "{ application.name = langis media.role = Movie }", "-"])
                             .stdin(Stdio::from(pcm))
                             .stdout(Stdio::null())
@@ -421,7 +422,7 @@ pub fn poster(ctx: &Context, path: &str) -> Option<String> {
             }
             let tmp = out.with_extension("part.jpg");
             let made = Command::new("ffmpeg")
-                .args(["-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file", "-i", &path, "-frames:v", "1", "-vf", "scale='min(800,iw)':-2", "-q:v", "4", &tmp.to_string_lossy()])
+                .args(["-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file", "-i", &path, "-frames:v", tr("1"), "-vf", "scale='min(800,iw)':-2", "-q:v", "4", &tmp.to_string_lossy()])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
