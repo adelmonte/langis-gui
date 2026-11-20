@@ -2022,7 +2022,31 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     let join_label = if full { tr("Call full") } else if asks { tr("Ask to join") } else if group && !users.is_empty() { tr("Join") } else { tr("Start") };
     // The Ring toggle: a group's (not a link's) call no one's in yet, the
     // group small enough to ring (Desktop's `isGroupTooLargeToRing`, 16).
-    let ringable = conversation.is_group() && users.is_empty() && chat.as_ref().is_some_and(|c| c.members.len() <= 16);
+    // Desktop shows it for a group of more than one, disabled when the
+    // group's too big to ring.
+    let ring_shown = conversation.is_group() && users.is_empty() && chat.as_ref().is_some_and(|c| c.members.iter().filter(|m| **m != app.aci).count() > 1);
+    let too_big = chat.as_ref().is_some_and(|c| c.members.len() > 16);
+    let ringable = conversation.is_group() && users.is_empty() && !too_big;
+    let online = !matches!(app.connection, langis_core::ConnectionState::Offline);
+    // Desktop peeks the call again while the lobby's open (once a minute).
+    if group {
+        let key = egui::Id::unique(("lobby-peek", conversation.to_string()));
+        let now = ui.input(|i| i.time);
+        let last = ui.ctx().data(|d| d.get_temp::<f64>(key));
+        match last {
+            Some(at) if now - at < 60. => ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(60. - (now - at))),
+            Some(_) => {
+                app.send(Command::PeekGroupCall { conversation: conversation.clone() });
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(key, now);
+                });
+            }
+            None => ui.ctx().data_mut(|d| {
+                d.insert_temp(key, now);
+            }),
+        }
+    }
+    let mut show_people = false;
     // Desktop's `CallingLobby`, the whole window on gray-95: the close X and
     // settings above, our camera (or photo) 16:9 in the middle, the chat's
     // name and who's there, then camera, microphone and the green button.
@@ -2113,7 +2137,7 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         // Controls: camera, microphone, then the join button.
         let label = ui.painter().layout_no_wrap(join_label.to_owned(), theme::semibold(14.), white);
         let pill_w = label.size().x + 48.;
-        let total = 56. + 16. + 56. + if ringable { 16. + 56. } else { 0. } + 24. + pill_w;
+        let total = 56. + 16. + 56. + if ring_shown { 16. + 56. } else { 0. } + 24. + pill_w;
         let mut x = screen.center().x - total / 2.;
         for (symbol_on, symbol_off, tip, on) in [("videocamera-fill", "videocamera-slash-fill", "Camera", &mut video), ("mic-fill", "mic-slash-fill", tr("Microphone"), &mut audio)] {
             let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::splat(56.));
@@ -2127,32 +2151,78 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
             }
             x += 56. + 16.;
         }
-        // Desktop's Ring toggle (bell): ring, or only notify.
-        if ringable {
+        // Desktop's Ring toggle (bell): ring, or only notify; disabled for
+        // a group too big to ring.
+        if ring_shown {
             let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::splat(56.));
             let r = ui.interact(rect, ui.scope_id().with("lobby-ring"), Sense::click());
-            let fill = if ring { theme::rgb(0x5e5e5e) } else { white };
-            let ink = if ring { white } else { theme::rgb(0x121212) };
-            ui.painter().circle_filled(rect.center(), 28., if r.hovered() { fill.gamma_multiply(0.85) } else { fill });
-            theme::paint_symbol(ui.painter(), if ring { "bell-ring-fill" } else { "bell-slash-fill" }, rect.center(), 24., ink);
-            if r.on_hover_text(if ring { "Ring on" } else { "Ring off" }).clicked() {
+            let on = ring && !too_big;
+            let fill = if too_big { theme::rgb(0x3b3b3b) } else if on { theme::rgb(0x5e5e5e) } else { white };
+            let ink = if too_big { egui::Color32::from_white_alpha(90) } else if on { white } else { theme::rgb(0x121212) };
+            ui.painter().circle_filled(rect.center(), 28., if r.hovered() && !too_big { fill.gamma_multiply(0.85) } else { fill });
+            theme::paint_symbol(ui.painter(), if on { "bell-ring-fill" } else { "bell-slash-fill" }, rect.center(), 24., ink);
+            if too_big {
+                let _ = r.on_hover_text(tr("Group is too large to ring the participants."));
+            } else if r.on_hover_text(if ring { tr("Ringing on") } else { tr("Ringing off") }).clicked() {
                 ring = !ring;
+                app.toast(if ring { tr("Ringing on") } else { tr("Ringing off") });
             }
             x += 56. + 16.;
         }
         x += 8.;
         let pill = Rect::from_min_size(Pos2::new(x, y + 8.), Vec2::new(pill_w, 40.));
         let r = ui.interact(pill, ui.scope_id().with("lobby-join"), Sense::click());
-        let green = if full { theme::rgb(0x5e5e5e) } else { palette.green };
-        ui.painter().rect_filled(pill, CornerRadius::same(20), if r.hovered() && !full { green.gamma_multiply(0.85) } else { green });
+        let can_join = !full && online;
+        let green = if can_join { palette.green } else { theme::rgb(0x5e5e5e) };
+        ui.painter().rect_filled(pill, CornerRadius::same(20), if r.hovered() && can_join { green.gamma_multiply(0.85) } else { green });
         ui.painter().galley(pill.center() - label.size() / 2., label, white);
         if full {
             let _ = r.on_hover_text("This call has reached the limit of participants.");
+        } else if !online {
+            let _ = r.on_hover_text(tr("You're offline"));
         } else if r.clicked() {
             answer = Some(0);
         }
+        // Desktop's `CallParticipantCount` beside the controls: how many
+        // are in it (a click lists them), or "Group call".
+        if group {
+            let text = if users.is_empty() { tr("Group call").to_owned() } else { crate::i18n::tf("icu:CallControls__InfoDisplay--participants", &if users.len() == 1 { "1 person".to_owned() } else { format!("{} people", users.len()) }, &[("count", crate::i18n::Arg::from(&users.len()))]) };
+            let g = ui.painter().layout_no_wrap(text, theme::regular(13.), egui::Color32::from_white_alpha(200));
+            let at = Rect::from_min_size(Pos2::new(screen.center().x - total / 2. - 24. - g.size().x, y + 28. - g.size().y / 2.), g.size());
+            let hit = ui.interact(at.expand(4.), ui.scope_id().with("lobby-people"), if users.is_empty() { Sense::hover() } else { Sense::click() });
+            ui.painter().galley(at.min, g, white);
+            if !users.is_empty() && hit.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                show_people = true;
+            }
+        }
     });
     let closed = closed;
+    // Desktop's `CallingParticipantsList` from the count.
+    let people_id = egui::Id::unique("lobby-people-list");
+    if show_people {
+        ui.ctx().data_mut(|d| d.insert_temp(people_id, true));
+    }
+    if ui.ctx().data(|d| d.get_temp::<bool>(people_id).unwrap_or(false)) {
+        let mut close_people = false;
+        let gone = modal(ui, "lobby-people", 320., |ui| {
+            title(ui, &crate::i18n::tf("icu:calling__in-this-call", &if users.len() == 1 { "In this call \u{b7} 1 person".to_owned() } else { format!("In this call \u{b7} {} people", users.len()) }, &[("people", crate::i18n::Arg::from(&users.len()))]));
+            for u in &users {
+                ui.horizontal(|ui| {
+                    let photo = app.conversation(&ConversationId::direct(u)).cloned();
+                    match &photo {
+                        Some(c) => widgets::avatar(ui, &widgets::AvatarSpec::of(c), 32.),
+                        None => widgets::avatar(ui, &widgets::AvatarSpec::person(&app.name(u), 0), 32.),
+                    };
+                    ui.label(RichText::new(if *u == app.aci { tr("You").to_owned() } else { app.name(u) }).font(theme::regular(14.)));
+                });
+                ui.add_space(4.);
+            }
+            close_people = buttons(ui, &[tr("OK")]).is_some();
+        });
+        if gone || close_people {
+            ui.ctx().data_mut(|d| d.remove::<bool>(people_id));
+        }
+    }
     if let Some(l) = app.panes.lobby.as_mut() {
         l.video = video;
         l.audio = audio;
