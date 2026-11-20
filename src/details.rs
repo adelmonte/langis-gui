@@ -38,6 +38,10 @@ pub struct Details {
     pub edit_info: Option<(String, String)>,
     pub nickname: Option<ContactNickname>,
     pub add_members: Option<(String, Vec<String>)>,
+    /// Automatic key verification: asked and waiting, and its explainer
+    /// (verified or not) open.
+    pub kt_running: bool,
+    pub kt_popup: Option<bool>,
     /// The AvatarEditor for the group's photo.
     pub group_avatar: Option<crate::avatar_editor::AvatarEditor>,
     pub label: Option<String>,
@@ -70,6 +74,8 @@ impl Details {
             edit_info: None,
             nickname: None,
             add_members: None,
+            kt_running: false,
+            kt_popup: None,
             group_avatar: None,
             label: None,
             media: None,
@@ -783,54 +789,95 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             Some(Err(_)) => body(ui, palette, tr("A safety number will be created with this person after you exchange messages with them.")),
             Some(Ok(number)) => {
                 ui.add_space(8.);
-                // The code they scan (Desktop's `SafetyNumberViewer`), kept
-                // while the same fingerprint shows.
+                // Desktop's SafetyNumberViewer: an accent card with the code
+                // they scan, the digits in white, and Mark as verified.
                 let key = egui::Id::unique(("safety-qr", &number.qr));
                 let texture = ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(key)).or_else(|| {
                     let made = crate::startup::qr_texture_of(ui.ctx(), "safety-qr", &number.qr)?;
                     ui.ctx().data_mut(|d| d.insert_temp(key, made.clone()));
                     Some(made)
                 });
-                if let Some(texture) = texture {
-                    egui::Frame::new().fill(egui::Color32::WHITE).corner_radius(CornerRadius::same(12)).inner_margin(12).show(ui, |ui| {
-                        ui.add(egui::Image::new(&texture).fit_to_exact_size(egui::Vec2::splat(180.)));
-                    });
-                    ui.add_space(12.);
-                }
-                // Twelve groups of five, in three rows of four.
                 let groups: Vec<String> = number.digits.as_bytes().chunks(5).map(|g| String::from_utf8_lossy(g).into_owned()).collect();
-                egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(12)).inner_margin(16).show(ui, |ui| {
-                    for line in groups.chunks(4) {
-                        ui.label(RichText::new(line.join("  ")).font(egui::FontId::monospace(18.)));
-                    }
+                egui::Frame::new().fill(palette.accent).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(24, 20)).show(ui, |ui| {
+                    ui.set_width(300.);
+                    ui.vertical_centered(|ui| {
+                        if let Some(texture) = texture {
+                            egui::Frame::new().fill(egui::Color32::WHITE).corner_radius(CornerRadius::same(10)).inner_margin(8).show(ui, |ui| {
+                                ui.add(egui::Image::new(&texture).fit_to_exact_size(egui::Vec2::splat(120.)));
+                            });
+                            ui.add_space(14.);
+                        }
+                        for line in groups.chunks(4) {
+                            ui.label(RichText::new(line.join("  ")).font(egui::FontId::monospace(17.)).color(egui::Color32::WHITE));
+                        }
+                        ui.add_space(14.);
+                        let label = if number.verified { tr("Clear verification") } else { tr("Mark as verified") };
+                        if ui.add(egui::Button::new(RichText::new(label).font(theme::medium(14.)).color(egui::Color32::WHITE)).fill(egui::Color32::from_white_alpha(45)).corner_radius(CornerRadius::same(16))).clicked() {
+                            app.send(Command::SetVerified { conversation: c.id.clone(), verified: !number.verified });
+                        }
+                    });
                 });
                 ui.add_space(12.);
-                body(ui, palette, &format!("To verify end-to-end encryption with {}, compare the numbers above with their device. They can also scan your code with their device.", c.title));
-                ui.add_space(16.);
-                if number.verified {
-                    ui.label(RichText::new(tr("Verified")).font(theme::medium(14.)).color(palette.green));
+                let hint = crate::i18n::tf("icu:SafetyNumberViewer__hint-v2", &format!("To verify end-to-end encryption with {}, compare the numbers above with their device. They can also scan your code on their device.", c.title), &[("name", crate::i18n::Arg::from(&c.title))]);
+                body(ui, palette, &hint);
+                if ui.link(tr("Learn more")).clicked() {
+                    crate::chat::open_externally("https://support.signal.org/hc/articles/213134107");
                 }
-                ui.add_space(8.);
-                let label = if number.verified { tr("Clear verification") } else { tr("Mark as verified") };
-                if widgets::pill_button(ui, label, !number.verified).clicked() {
-                    app.send(Command::SetVerified { conversation: c.id.clone(), verified: !number.verified });
-                }
+                // Desktop's Automatic key verification: idle, verifying,
+                // verified or unavailable; the last two explain on a click.
                 if number.auto_verify == langis_core::AutoVerify::Available {
+                    ui.add_space(20.);
+                    ui.label(RichText::new(tr("Automatic key verification")).font(theme::semibold(14.)));
                     ui.add_space(8.);
-                    match kt {
-                        None => {
-                            if widgets::pill_button(ui, tr("Verify automatically"), false).clicked() {
+                    let running = app.panes.details.as_ref().is_some_and(|d| d.kt_running) && kt.is_none();
+                    let (label, symbol) = match (kt, running) {
+                        (Some(true), _) => (tr("Encryption verified"), Some("check-circle")),
+                        (Some(false), _) => (tr("Auto-verification unavailable"), Some("info")),
+                        (None, true) => (tr("Verifying encryption..."), None),
+                        (None, false) => (tr("Verify automatically"), None),
+                    };
+                    let r = ui.horizontal(|ui| {
+                        let total = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(14.), palette.text).size().x + 56.;
+                        ui.add_space(((ui.available_width() - total) / 2.).max(0.));
+                        if running {
+                            crate::widgets::spinner(ui, 16.);
+                        } else if let Some(sym) = symbol {
+                            let (at, _) = ui.allocate_exact_size(egui::vec2(18., 18.), egui::Sense::hover());
+                            theme::paint_symbol(ui.painter(), sym, at.center(), 16., if kt == Some(true) { palette.green } else { palette.text_secondary });
+                        }
+                        widgets::pill_button(ui, label, false)
+                    }).inner;
+                    if r.clicked() {
+                        match kt {
+                            None if !running => {
                                 app.send(Command::CheckKeyTransparency { conversation: c.id.clone() });
                                 if let Some(d) = app.panes.details.as_mut() {
-                                    d.key_transparency = Some(false);
-                                    d.key_transparency = None;
+                                    d.kt_running = true;
                                 }
                             }
+                            Some(ok) => {
+                                if let Some(d) = app.panes.details.as_mut() {
+                                    d.kt_popup = Some(ok);
+                                }
+                            }
+                            None => {}
                         }
-                        Some(true) => {
-                            ui.label(RichText::new("Encryption was automatically verified for this chat.").color(palette.green));
-                        }
-                        Some(false) => body(ui, palette, "Automatic verification isn't available for this chat."),
+                    }
+                    body(ui, palette, tr("Auto-verification is not available for all chats."));
+                }
+                if let Some(ok) = app.panes.details.as_ref().and_then(|d| d.kt_popup) {
+                    let (title, text) = if ok {
+                        (tr("Encryption was auto-verified for this chat").to_owned(), tr("For people you\u{2019}re connected to by phone number, Signal can automatically confirm whether the connection is secure using a process called key transparency. For added security, verify end-to-end encryption manually by comparing the numbers on the previous screen or scanning the code on their device.").to_owned())
+                    } else {
+                        (
+                            tr("Auto-verification is not available for this chat").to_owned(),
+                            crate::i18n::tf("icu:SafetyNumberViewer__KeyTransparency__popup--fail__body-2", &format!("Signal can not automatically verify the encryption for this chat. This could be because {} changed their phone number or their phone number privacy settings. Verify end-to-end encryption manually by comparing the numbers on the previous screen or scanning the code on their device.", c.title), &[("name", crate::i18n::Arg::from(&c.title))]),
+                        )
+                    };
+                    if crate::dialog::alert(ui.ctx(), egui::Id::unique("kt-popup"), &title, &text, tr("Okay"))
+                        && let Some(d) = app.panes.details.as_mut()
+                    {
+                        d.kt_popup = None;
                     }
                 }
             }
