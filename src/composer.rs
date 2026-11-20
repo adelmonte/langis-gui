@@ -1154,6 +1154,10 @@ fn stage_path(app: &mut App, chat: &mut ChatView, path: &std::path::Path) {
 /// the list (Desktop's drop zone and paste handler).
 fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
     let dropped = ui.input(|i| i.raw.dropped_files.clone());
+    // Wayland's drops, from the app's own listener.
+    for path in app.drops.as_ref().map(|d| d.take()).unwrap_or_default() {
+        stage_path(app, chat, &path);
+    }
     for file in dropped {
         let path = file.path();
         if path.exists() {

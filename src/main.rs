@@ -48,6 +48,7 @@ mod theme;
 mod view;
 mod video;
 mod voice;
+mod wayland_dnd;
 mod widgets;
 
 use std::path::PathBuf;

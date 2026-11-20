@@ -32,6 +32,8 @@ libc = "0.2"
 # Spell check in the composer, with the system's Hunspell dictionaries.
 spellbook = "0.4"
 # Images pasted into the composer (eframe builds it already, for text).
+wayland-client = { version = "0.31", features = ["system"] }
+raw-window-handle = "0.6"
 arboard = { version = "3.7", default-features = false, features = ["image-data", "wayland-data-control"] }
 linkify = "0.10"
 

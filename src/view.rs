@@ -56,6 +56,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     share_picker(app, ui);
     crate::panes::delete_chat_dialog(app, ui.ctx());
     crate::panes::chat_confirm_dialog(app, ui.ctx());
+    drop_overlay(app, ui);
     crate::panes::custom_time_dialogs(app, ui.ctx());
     crate::chat_colors::editor(app, ui.ctx());
     app.close_dialog(ui.ctx());
@@ -185,4 +186,21 @@ fn toasts(app: &mut App, ui: &mut Ui) {
                 });
         });
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+}
+
+/// Desktop's drop zone: while files are dragged over the window and a chat
+/// is open, the window says they'll be attached.
+fn drop_overlay(app: &App, ui: &Ui) {
+    let wayland = app.drops.as_ref().is_some_and(|d| d.hovering());
+    let x11 = ui.input(|i| !i.raw.hovered_files.is_empty());
+    if !(wayland || x11) || app.chat.is_none() {
+        return;
+    }
+    let palette = Palette::of(ui.ctx());
+    let screen = ui.ctx().content_rect();
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("drop-overlay")));
+    painter.rect_filled(screen, 0, palette.background.gamma_multiply(0.85));
+    let zone = screen.shrink(24.);
+    painter.rect_stroke(zone, CornerRadius::same(16), egui::Stroke::new(2., palette.accent), egui::StrokeKind::Inside);
+    painter.text(zone.center(), egui::Align2::CENTER_CENTER, "Drop files here to attach them", theme::semibold(18.), palette.text);
 }

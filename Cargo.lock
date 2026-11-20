@@ -3773,6 +3773,7 @@ dependencies = [
  "linkify",
  "notify-rust",
  "qrcode",
+ "raw-window-handle",
  "rfd",
  "serde_json",
  "signal-hook",
@@ -3780,6 +3781,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
+ "wayland-client",
 ]
 
 [[package]]

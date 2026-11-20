@@ -141,6 +141,9 @@ pub struct App {
     pub notify: (bool, String),
     /// Sounds, call notifications and the taskbar flash.
     pub sound: crate::sounds::Prefs,
+    /// Files dropped on the window under Wayland (winit gives egui only
+    /// X11's); `None` on X11.
+    pub drops: Option<crate::wayland_dnd::Drops>,
     /// Attachments downloading: (message id, index) to bytes received and
     /// the total, from langis's DownloadProgress.
     pub downloads: std::collections::HashMap<(i64, usize), (u64, u64)>,
@@ -272,6 +275,7 @@ impl App {
             last_tick: None,
             badges: Default::default(),
             downloads: Default::default(),
+            drops: crate::wayland_dnd::start(cc),
             input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None, spell: true },
             unread_only: false,
             fun: Default::default(),
