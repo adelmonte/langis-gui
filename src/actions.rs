@@ -796,12 +796,23 @@ pub fn save_attachment(app: &mut App, m: &Message, index: usize) {
         return;
     };
     let ext = crate::chat::extension_for(&a.content_type);
-    let name = a.file_name.clone().unwrap_or_else(|| format!("signal-{}.{ext}", chrono::Local::now().format("%Y-%m-%d-%H%M%S")));
+    let fallback = format!("signal-{}.{ext}", chrono::Local::now().format("%Y-%m-%d-%H%M%S"));
+    let name = safe_file_name(a.file_name.as_deref().unwrap_or(""), &fallback);
     let Some(target) = rfd::FileDialog::new().set_title("Save").set_file_name(&name).save_file() else { return };
     match std::fs::copy(&path, &target) {
         Ok(_) => app.toast(format!("Saved to {}", target.display())),
         Err(error) => app.toast(format!("Couldn't save: {error}")),
     }
+}
+
+/// A sender's file name made safe to create in a folder: its last path
+/// component only, no control characters, no leading dots, never `.`/`..`
+/// or empty (then `fallback`).
+pub fn safe_file_name(name: &str, fallback: &str) -> String {
+    let last = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let cleaned: String = last.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = cleaned.trim().trim_start_matches('.').trim();
+    if trimmed.is_empty() { fallback.to_owned() } else { trimmed.chars().take(200).collect() }
 }
 
 fn save_all(app: &mut App, m: &Message, files: &[&langis_store::AttachmentMeta]) {
@@ -819,20 +830,46 @@ fn save_all(app: &mut App, m: &Message, files: &[&langis_store::AttachmentMeta])
     let mut saved = 0;
     for (n, (a, path)) in here.iter().enumerate() {
         let ext = crate::chat::extension_for(&a.content_type);
-        let name = a.file_name.clone().unwrap_or_else(|| format!("signal-{stamp}-{}.{ext}", n + 1));
-        // Never overwrite: number a name that's taken.
-        let mut target = folder.join(&name);
-        let mut k = 1;
-        while target.exists() {
-            let stem = std::path::Path::new(&name).file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_owned();
-            let ext = std::path::Path::new(&name).extension().and_then(|s| s.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
-            target = folder.join(format!("{stem} ({k}){ext}"));
-            k += 1;
-        }
-        if std::fs::copy(path, &target).is_ok() {
-            saved += 1;
+        let name = safe_file_name(a.file_name.as_deref().unwrap_or(""), &format!("signal-{stamp}-{}.{ext}", n + 1));
+        // Never overwrite: number a name that's taken. `create_new` refuses
+        // an existing file or a symlink, so nothing is written through one.
+        let stem = std::path::Path::new(&name).file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_owned();
+        let dot_ext = std::path::Path::new(&name).extension().and_then(|s| s.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+        for k in 0..1000 {
+            let file = if k == 0 { name.clone() } else { format!("{stem} ({k}){dot_ext}") };
+            let target = folder.join(&file);
+            if target.parent() != Some(folder.as_path()) {
+                break;
+            }
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+                Ok(mut out) => {
+                    if std::fs::File::open(path).and_then(|mut src| std::io::copy(&mut src, &mut out)).is_ok() {
+                        saved += 1;
+                    } else {
+                        drop(out);
+                        let _ = std::fs::remove_file(&target);
+                    }
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => break,
+            }
         }
     }
     let note = if missing > 0 { format!("; {missing} still downloading") } else { String::new() };
     app.toast(format!("Saved {saved} of {} to {}{note}", files.len(), folder.display()));
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sender_file_names_stay_in_the_folder() {
+        use super::safe_file_name as f;
+        assert_eq!(f("/home/u/.config/autostart/x.desktop", "fb"), "x.desktop");
+        assert_eq!(f("../../.bashrc", "fb"), "bashrc");
+        assert_eq!(f("..", "fb"), "fb");
+        assert_eq!(f("", "fb"), "fb");
+        assert_eq!(f("a\\b\\c.txt", "fb"), "c.txt");
+        assert_eq!(f("trail map.png", "fb"), "trail map.png");
+    }
 }
