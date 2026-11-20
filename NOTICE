@@ -22,6 +22,9 @@ Copyright Signal Messenger, LLC, AGPL-3.0-only):
 - src/menu.rs follows its AxoDropdownMenu and AxoBaseMenu.
 - assets/sounds/*.ogg are Signal Desktop's sounds/*.ogg, unchanged, played
   where Desktop plays them (src/sounds.rs).
+- assets/i18n/*.json are the messages the app shows, taken from Signal
+  Desktop's _locales translations and build/locale-display-names.json by
+  scripts/i18n.py.
 
 assets/fonts/Inter-*.ttf: Inter 3.19 by Rasmus Andersson, SIL Open Font
 License 1.1 (https://github.com/rsms/inter), converted from the WOFF2 files
