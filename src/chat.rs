@@ -133,10 +133,10 @@ pub enum ChatLoaded {
 enum Action {
     Retry(i64),
     Fetch { message_id: i64, index: usize },
-    React { message_id: i64, emoji: String, remove: bool },
     Reply(i64),
     Open(String),
     OpenFile { message_id: i64, index: usize, path: String },
+    ViewReactions { message_id: i64, emoji: Option<String> },
     /// A person's `ContactModal`.
     Contact(String),
     /// Opens a 1:1 chat (a shared contact's Message).
@@ -426,13 +426,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 app.downloads.remove(&(message_id, index));
                 app.send(Command::CancelDownload { message_id, index });
             }
-            Action::React { message_id, emoji, remove } => app.send(Command::React { message_id, emoji, remove }),
             Action::Reply(message_id) => {
                 if let Some(chat) = app.chat.as_mut() {
                     chat.quote = Some(message_id);
                 }
             }
             Action::Open(path) => open_link(app, &path),
+            Action::ViewReactions { message_id, emoji } => {
+                if let Some(chat) = app.chat.as_mut() {
+                    chat.dialog = Some(crate::actions::Dialog::ReactionViewer { message: message_id, tab: emoji });
+                }
+            }
             Action::OpenFile { message_id, index, path } => {
                 let m = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == message_id)).cloned();
                 let name = m.as_ref().and_then(|m| m.attachments.get(index)).and_then(|a| a.file_name.clone()).unwrap_or_default();
@@ -2473,8 +2477,10 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
         let border = if palette.dark { theme::rgb(0x121212) } else { Color32::WHITE };
         ui.painter().rect_stroke(rect, CornerRadius::same(11), Stroke::new(1., border), StrokeKind::Outside);
         ui.painter().galley(rect.center() - g.size() / 2., g, palette.text);
-        if ui.interact(rect, ui.scope_id().with(("reaction", m.id, i)), Sense::click()).clicked() && mine {
-            actions.push(Action::React { message_id: m.id, emoji, remove: true });
+        // Desktop opens the ReactionViewer on that emoji ("+N": all).
+        if ui.interact(rect, ui.scope_id().with(("reaction", m.id, i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            let _ = mine;
+            actions.push(Action::ViewReactions { message_id: m.id, emoji: (!emoji.is_empty()).then_some(emoji) });
         }
         x += w + 4.;
     }

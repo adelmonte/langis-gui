@@ -213,6 +213,11 @@ fn screenshots_message_actions() {
     save(&mut harness, "reaction-bar");
     harness.state_mut().chat.as_mut().unwrap().popup = None;
 
+    let reacted = message_id(&harness, |m| !m.reactions.is_empty());
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::ReactionViewer { message: reacted, tab: None });
+    wait(&mut harness, "reaction viewer", |_| true);
+    save(&mut harness, "reaction-viewer");
+
     harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Delete { messages: vec![ours] });
     wait(&mut harness, "delete dialog", |_| true);
     save(&mut harness, "delete-dialog");

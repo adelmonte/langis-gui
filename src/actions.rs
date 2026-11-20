@@ -38,6 +38,9 @@ pub enum Dialog {
     Pinned { messages: Vec<Message> },
     /// A notice's Learn more: what it means.
     Explain { title: &'static str, body: &'static str },
+    /// Desktop's `ReactionViewer`: who reacted, all or by emoji; your
+    /// own row removes yours.
+    ReactionViewer { message: i64, tab: Option<String> },
     /// Desktop's `CustomizingPreferredReactionsModal`: the reaction bar's
     /// six, one picked to change from the emoji picker.
     Reactions { slots: Vec<String>, selected: Option<usize>, picker: crate::emoji_picker::Picker },
@@ -458,6 +461,85 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         Dialog::Poll(poll) => {
             let modal = egui::Modal::new(egui::Id::unique("new-poll")).frame(frame).show(ui.ctx(), |ui| {
                 crate::polls::dialog(ui, &palette, poll, &c.id, &mut out);
+            });
+            if modal.should_close() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::ReactionViewer { message, tab } => {
+            let Some(m) = chat.iter().find(|m| m.id == *message).cloned() else { return vec![Do::Close] };
+            if m.reactions.is_empty() {
+                return vec![Do::Close];
+            }
+            // Tabs: All, then each emoji by count (Desktop's order).
+            let mut kinds: Vec<(String, usize)> = Vec::new();
+            for r in &m.reactions {
+                match kinds.iter_mut().find(|(e, _)| *e == r.emoji) {
+                    Some(k) => k.1 += 1,
+                    None => kinds.push((r.emoji.clone(), 1)),
+                }
+            }
+            kinds.sort_by(|a, b| b.1.cmp(&a.1));
+            if tab.as_ref().is_some_and(|t| !kinds.iter().any(|(e, _)| e == t)) {
+                *tab = None;
+            }
+            let me = app.aci.clone();
+            let modal = egui::Modal::new(egui::Id::unique("reaction-viewer")).frame(frame).show(ui.ctx(), |ui| {
+                ui.set_width(320.);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4., 4.);
+                    let pill = |ui: &mut Ui, label: egui::WidgetText, on: bool| {
+                        let galley = label.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
+                        let (rect, r) = ui.allocate_exact_size(egui::vec2(galley.size().x + 20., 32.), Sense::click());
+                        if on {
+                            ui.painter().rect_filled(rect, CornerRadius::same(16), palette.fill_pressed);
+                        } else if r.hovered() {
+                            ui.painter().rect_filled(rect, CornerRadius::same(16), palette.fill);
+                        }
+                        ui.painter().galley(rect.center() - galley.size() / 2., galley, palette.text);
+                        r.clicked()
+                    };
+                    if pill(ui, RichText::new(format!("All {}", m.reactions.len())).font(theme::semibold(13.)).into(), tab.is_none()) {
+                        *tab = None;
+                    }
+                    for (emoji, count) in &kinds {
+                        let mut job = egui::text::LayoutJob::default();
+                        crate::chat::append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::emoji(18.), color: palette.text, valign: egui::Align::Center, ..Default::default() });
+                        job.append(&format!(" {count}"), 0., egui::TextFormat { font_id: theme::semibold(13.), color: palette.text, valign: egui::Align::Center, ..Default::default() });
+                        if pill(ui, job.into(), tab.as_deref() == Some(emoji.as_str())) {
+                            *tab = Some(emoji.clone());
+                        }
+                    }
+                });
+                ui.add_space(12.);
+                // You first, then newest first.
+                let mut rows: Vec<&langis_store::Reaction> = m.reactions.iter().filter(|r| tab.as_ref().is_none_or(|t| *t == r.emoji)).collect();
+                rows.sort_by(|a, b| a.author.is_some().cmp(&b.author.is_some()).then(b.sent_at.cmp(&a.sent_at)));
+                egui::ScrollArea::vertical().max_height(360.).auto_shrink([false, true]).show(ui, |ui| {
+                    for r in rows {
+                        let (name, color, photo) = match &r.author {
+                            None => ("You".to_owned(), me.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b)), app.me.1.clone()),
+                            Some(a) => (app.name(a), a.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b)), app.conversation(&ConversationId::direct(a)).and_then(|p| p.avatar_path.clone())),
+                        };
+                        let (rect, row) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.), Sense::click());
+                        let mine = r.author.is_none();
+                        if mine && row.hovered() {
+                            ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                        }
+                        let avatar = egui::Rect::from_min_size(egui::pos2(rect.left() + 4., rect.center().y - 16.), egui::vec2(32., 32.));
+                        let initials_of = if r.author.is_none() { app.me.0.clone() } else { name.clone() };
+                        widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo: photo.as_deref(), ..widgets::AvatarSpec::person(&initials_of, color) });
+                        ui.painter().text(egui::pos2(avatar.right() + 12., rect.center().y), egui::Align2::LEFT_CENTER, &name, theme::regular(14.), palette.text);
+                        let mut job = egui::text::LayoutJob::default();
+                        crate::chat::append_with_emoji(&mut job, &r.emoji, egui::TextFormat { font_id: theme::emoji(20.), color: palette.text, ..Default::default() });
+                        let g = ui.fonts_mut(|f| f.layout_job(job));
+                        ui.painter().galley(egui::pos2(rect.right() - 8. - g.size().x, rect.center().y - g.size().y / 2.), g, palette.text);
+                        if mine && row.on_hover_text("Click to remove").clicked() {
+                            out.push(Do::Command(Command::React { message_id: m.id, emoji: r.emoji.clone(), remove: true }));
+                            out.push(Do::Close);
+                        }
+                    }
+                });
             });
             if modal.should_close() {
                 out.push(Do::Close);
