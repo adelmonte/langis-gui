@@ -1668,12 +1668,19 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
     let mut answer = None;
     let closed = modal(ui, "story-send", 380., |ui| {
         title(ui, tr("Send story"));
+        // Desktop's header: Send to, and New (custom or group story).
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr("Send to")).font(theme::semibold(13.)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.link(tr("New group story")).clicked() {
-                    c.new_group = Some((Vec::new(), String::new()));
-                }
+                let new = widgets::axo_button(ui, tr("New"), widgets::Axo::SubtleSecondary);
+                crate::menu::dropdown(ui, &new, egui::Id::unique("send-story-new"), |m| {
+                    if m.item(Some("stories"), tr("New custom story")) {
+                        app.panes.stories.editing = Some(StoryList { id: new_uuid(), name: String::new(), members: Vec::new(), block_list: false, allows_replies: true });
+                    }
+                    if m.item(Some("group"), tr("New group story")) {
+                        c.new_group = Some((Vec::new(), String::new()));
+                    }
+                });
             });
         });
         ui.add_space(6.);
@@ -1691,35 +1698,94 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
         let groups: Vec<ConversationId> = app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left && offered(g)).map(|g| g.id.clone()).collect();
         options.extend(groups.iter().cloned().map(StoryTarget::Group));
         let mut remove: Option<ConversationId> = None;
-        egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
+        let palette = Palette::of(ui.ctx());
+        egui::ScrollArea::vertical().max_height(360.).show(ui, |ui| {
             for t in options {
-                ui.horizontal(|ui| {
-                    let mut on = c.targets.contains(&t);
-                    if crate::widgets::checkbox(ui, &mut on, target_label(app, &t)).changed() {
-                        if on {
-                            c.targets.push(t.clone());
+                // Desktop's rows: avatar, name, what it reaches, the check,
+                // and its menu.
+                let (rect, hit) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.), Sense::click());
+                let avatar = Rect::from_min_size(Pos2::new(rect.left() + 4., rect.center().y - 18.), Vec2::splat(36.));
+                let (subtitle, closed) = match &t {
+                    StoryTarget::MyStory => {
+                        let my = app.panes.stories.lists.iter().find(|l| l.is_my_story()).cloned().unwrap_or_else(StoryList::my_story);
+                        let spec = widgets::AvatarSpec { photo: app.me.1.as_deref(), ..widgets::AvatarSpec::person(&app.me.0, 0) };
+                        widgets::paint_avatar(ui, avatar, &spec);
+                        let sub = if my.block_list && my.members.is_empty() {
+                            tr("All Signal connections").to_owned()
+                        } else if my.block_list {
+                            crate::i18n::tf("icu:SendStoryModal__excluded", &format!("{} excluded", my.members.len()), &[("count", crate::i18n::Arg::from(my.members.len()))])
                         } else {
-                            c.targets.retain(|x| *x != t);
+                            format!("{} \u{b7} {}", tr("Only share with"), my.members.len())
+                        };
+                        (sub, false)
+                    }
+                    StoryTarget::List(_) => {
+                        ui.painter().circle_filled(avatar.center(), 18., palette.fill_secondary);
+                        theme::paint_symbol(ui.painter(), "stories", avatar.center(), 18., palette.text);
+                        (tr("Custom story").to_owned(), false)
+                    }
+                    StoryTarget::Group(g) => {
+                        let conv = app.conversation(g).cloned();
+                        if let Some(conv) = &conv {
+                            widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(conv));
+                        }
+                        let members = conv.as_ref().map(|c| c.members.len() + 1).unwrap_or(0);
+                        let closed = conv.as_ref().is_some_and(|c| c.group_state.announcements_only && !c.admins.contains(&app.aci));
+                        (format!("{} \u{b7} {}", tr("Group story"), crate::i18n::tf("icu:ConversationDetailsHeader--members", &format!("{members} members"), &[("number", crate::i18n::Arg::from(members))])), closed)
+                    }
+                };
+                let ink = if closed { palette.text_secondary } else { palette.text };
+                ui.painter().text(Pos2::new(avatar.right() + 10., rect.center().y - 9.), egui::Align2::LEFT_CENTER, target_label(app, &t), theme::medium(14.), ink);
+                ui.painter().text(Pos2::new(avatar.right() + 10., rect.center().y + 10.), egui::Align2::LEFT_CENTER, &subtitle, theme::regular(12.), palette.text_secondary);
+                let on = c.targets.contains(&t);
+                crate::panes::round_check(ui, &palette, Pos2::new(rect.right() - 16., rect.center().y), on);
+                let hit = if closed { hit.on_hover_text(tr("Only admins can send stories to this group.")) } else { hit };
+                if hit.clicked() && !closed {
+                    if on {
+                        c.targets.retain(|x| *x != t);
+                    } else {
+                        c.targets.push(t.clone());
+                    }
+                }
+                // Its "…" menu.
+                let more = Rect::from_center_size(Pos2::new(rect.right() - 48., rect.center().y), Vec2::splat(26.));
+                let more_hit = ui.interact(more, ui.scope_id().with(("send-story-more", format!("{t:?}"))), Sense::click());
+                theme::paint_symbol(ui.painter(), "more", more.center(), 16., palette.text_secondary);
+                let menu = egui::Id::unique(("send-story-menu", format!("{t:?}")));
+                if more_hit.clicked() {
+                    crate::menu::open_at(ui.ctx(), menu, more.left_bottom());
+                }
+                crate::menu::show(ui.ctx(), menu, |m| match &t {
+                    StoryTarget::MyStory => {
+                        if m.item(Some("settings"), tr("My Story privacy")) {
+                            app.panes.stories.privacy = true;
                         }
                     }
-                    if let StoryTarget::Group(g) = &t {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let more = widgets::icon_button(ui, Icon::More, 16., tr("More"));
-                            crate::menu::dropdown(ui, &more, egui::Id::unique(("story-group-menu", g.0.as_str())), |m| {
-                                if m.item(Some("minus-circle"), tr("Remove group story")) {
-                                    remove = Some(g.clone());
-                                }
-                            });
-                        });
+                    StoryTarget::List(id) => {
+                        if let Some(l) = app.panes.stories.lists.iter().find(|l| &l.id == id).cloned() {
+                            if m.item(Some("pencil"), tr("Edit viewers")) {
+                                app.panes.stories.editing = Some(l.clone());
+                            }
+                            if m.item(Some("trash"), tr("Delete story")) {
+                                let body = crate::i18n::tf("icu:StoriesSettings__delete-list--confirm", &format!("Are you sure you want to delete \u{201c}{}\u{201d}? Updates shared to this story will also be deleted.", l.name), &[("name", crate::i18n::Arg::from(&l.name))]);
+                                crate::panes::ask(app, "", body, tr("Delete"), true, vec![Command::DeleteStoryList { id: l.id.clone() }]);
+                            }
+                        }
+                    }
+                    StoryTarget::Group(g) => {
+                        if m.item(Some("minus-circle"), tr("Remove group story")) {
+                            remove = Some(g.clone());
+                        }
                     }
                 });
             }
         });
+        // Desktop asks before a group story goes from the list.
         if let Some(g) = remove {
-            app.send(Command::SetStorySendMode { groups: vec![g.clone()], mode: langis_store::StorySendMode::Never });
             c.targets.retain(|t| *t != StoryTarget::Group(g.clone()));
             app.panes.stories.send_modes.retain(|(id, _)| *id != g);
-            app.panes.stories.send_modes.push((g, langis_store::StorySendMode::Never));
+            app.panes.stories.send_modes.push((g.clone(), langis_store::StorySendMode::Never));
+            crate::panes::ask(app, "", tr("Remove story? This will remove the story from your list, but you will still be able to view stories from this group."), tr("Remove"), true, vec![Command::SetStorySendMode { groups: vec![g], mode: langis_store::StorySendMode::Never }]);
         }
         answer = buttons(ui, &[tr("Send story"), tr("Cancel")]);
     });
