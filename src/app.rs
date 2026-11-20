@@ -757,6 +757,15 @@ impl App {
             let profile = langis_core::own_profile(&db, &aci).await;
             Some(Loaded::Me { name: profile.name(), photo: profile.photo.map(|p| p.to_string_lossy().into_owned()) })
         });
+        // Desktop's username megaphone, until there's a username or it's
+        // been answered.
+        let aci = self.aci.clone();
+        self.load(move |db| async move {
+            let profile = langis_core::own_profile(&db, &aci).await;
+            let answered = db.setting(crate::panes::SETTING_USERNAME_MEGAPHONE).await.ok().flatten().is_some();
+            let show = profile.username.is_none() && !answered;
+            Some(Loaded::Apply(Box::new(move |app: &mut App| app.panes.username_megaphone = show)))
+        });
     }
 
     /// The reaction bar's emoji: the account's, with Desktop's defaults

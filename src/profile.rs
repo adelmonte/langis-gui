@@ -86,6 +86,13 @@ impl ProfileEditor {
     }
 }
 
+/// Opens Desktop's username editor on the open profile.
+pub fn start_username(app: &mut App) {
+    if let Some(e) = app.panes.profile.as_mut() {
+        e.editing_username = Some(UsernameEdit { nickname: String::new(), digits: String::new(), typed_at: Instant::now(), asked: None, reservation: None, problem: None, saving: false });
+    }
+}
+
 /// Opens the editor, reading our profile first.
 pub fn open(app: &mut App) {
     app.panes.profile = Some(ProfileEditor {
@@ -518,13 +525,42 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
                     ui.ctx().copy_text(url);
                     app.toast("Username link copied.");
                 }
+                // Desktop's Save: the card as a picture.
+                if let Some(url) = link.url()
+                    && widgets::pill_button(ui, "Save", false).clicked()
+                    && let Some(png) = qr_card_png(name, &url, fg, bg)
+                    && let Some(to) = rfd::FileDialog::new().set_file_name(format!("{}-qr.png", name.replace(['/', '\\'], "_"))).save_file()
+                {
+                    match std::fs::write(&to, png) {
+                        Ok(()) => app.toast("QR code saved."),
+                        Err(_) => app.toast("The QR code couldn't be saved."),
+                    }
+                }
                 if widgets::pill_button(ui, "Reset", false).clicked() {
-                    reset = true;
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("username-link-reset"), true));
                 }
             });
         });
         close = buttons(ui, &["Done"]).is_some();
     });
+    // Desktop asks before resetting: the old QR code and link stop working.
+    if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("username-link-reset"))).unwrap_or(false) {
+        match crate::dialog::confirm(
+            ui.ctx(),
+            egui::Id::unique("username-link-reset-dialog"),
+            "",
+            "If you reset your QR code, your existing QR code and link will no longer work.",
+            "Reset",
+            crate::dialog::Variant::StrongDestructive,
+        ) {
+            Some(crate::dialog::Choice::Action) => {
+                ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("username-link-reset")));
+                reset = true;
+            }
+            Some(crate::dialog::Choice::Cancel) => ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("username-link-reset"))),
+            None => {}
+        }
+    }
     if let Some(color) = color_pick {
         app.send(Command::SetUsernameLinkColor(color));
         if let Some(Some((_, link))) = app.panes.username_link.as_mut() {
@@ -539,6 +575,75 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
     if close || closed {
         app.panes.username_link = None;
     }
+}
+
+/// The username link card as a PNG (Desktop's Save): the QR code on white
+/// in the card's color, the username under it.
+fn qr_card_png(name: &str, url: &str, fg: Color32, bg: Color32) -> Option<Vec<u8>> {
+    use ab_glyph::{Font, FontRef, ScaleFont};
+    let code = qrcode::QrCode::new(url.as_bytes()).ok()?;
+    let (w, h) = (520u32, 600u32);
+    let rgba = |c: Color32| image::Rgba([c.r(), c.g(), c.b(), 255]);
+    let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([0, 0, 0, 0]));
+    // The card, corners rounded 36.
+    let r = 36f32;
+    for y in 0..h {
+        for x in 0..w {
+            let (cx, cy) = ((x as f32).clamp(r, w as f32 - r), (y as f32).clamp(r, h as f32 - r));
+            if (x as f32 - cx).hypot(y as f32 - cy) <= r {
+                img.put_pixel(x, y, rgba(bg));
+            }
+        }
+    }
+    // The white box and the code, 8 pixels a module.
+    let modules = code.width() as u32;
+    let scale = (360 / (modules + 4)).max(1);
+    let side = (modules + 4) * scale;
+    let (left, top) = ((w - side) / 2, 60);
+    for y in 0..side {
+        for x in 0..side {
+            img.put_pixel(left + x, top + y, image::Rgba([255, 255, 255, 255]));
+        }
+    }
+    let colors = code.to_colors();
+    for my in 0..modules {
+        for mx in 0..modules {
+            if colors[(my * modules + mx) as usize] == qrcode::Color::Dark {
+                for y in 0..scale {
+                    for x in 0..scale {
+                        img.put_pixel(left + (mx + 2) * scale + x, top + (my + 2) * scale + y, rgba(fg));
+                    }
+                }
+            }
+        }
+    }
+    // The username.
+    let ink = if bg == Color32::WHITE { Color32::BLACK } else { Color32::WHITE };
+    if let Ok(font) = FontRef::try_from_slice(include_bytes!("../assets/fonts/Inter-SemiBold.ttf")) {
+        let scaled = font.as_scaled(30.);
+        let width: f32 = name.chars().map(|c| scaled.h_advance(scaled.glyph_id(c))).sum();
+        let mut x = (w as f32 - width) / 2.;
+        let baseline = (top + side) as f32 + 70.;
+        for c in name.chars() {
+            let id = scaled.glyph_id(c);
+            if let Some(outlined) = font.outline_glyph(id.with_scale_and_position(scaled.scale(), ab_glyph::point(x, baseline))) {
+                let b = outlined.px_bounds();
+                outlined.draw(|gx, gy, cover| {
+                    let (px, py) = (b.min.x as i64 + gx as i64, b.min.y as i64 + gy as i64);
+                    if (0..w as i64).contains(&px) && (0..h as i64).contains(&py) {
+                        let p = img.get_pixel_mut(px as u32, py as u32);
+                        for k in 0..3 {
+                            p.0[k] = (p.0[k] as f32 * (1. - cover) + [ink.r(), ink.g(), ink.b()][k] as f32 * cover) as u8;
+                        }
+                    }
+                });
+            }
+            x += scaled.h_advance(id);
+        }
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut png, image::ImageFormat::Png).ok()?;
+    Some(png.into_inner())
 }
 
 /// The middle square of a picture, at most 512 pixels, as a JPEG.

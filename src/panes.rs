@@ -96,6 +96,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's "Set up your username" megaphone.
+    pub username_megaphone: bool,
     pub server_alerts: langis_core::server_alerts::ServerAlerts,
     pub critical_modal: bool,
     pub captcha: Option<String>,
@@ -438,9 +440,38 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
 
 /// Desktop's left pane notices: megaphones and server alerts, above the
 /// chat list.
+/// The username megaphone answered (Not now or Set up), kept so it doesn't
+/// come back.
+pub const SETTING_USERNAME_MEGAPHONE: &str = "ui.username_megaphone";
+
 pub fn list_notices(app: &mut App, ui: &mut Ui, palette: &Palette) {
     use langis_core::server_alerts::ServerAlert;
     let mut pressed = None;
+    if app.panes.username_megaphone && !app.demo {
+        let mut answer = None;
+        card(ui, palette, |ui| {
+            ui.label(RichText::new("Set up your username").font(theme::semibold(14.)));
+            ui.label(RichText::new("Your username lets people message you without needing your phone number.").font(theme::regular(13.)).color(palette.text_secondary));
+            ui.horizontal(|ui| {
+                if ui.link(RichText::new("Not now").font(theme::medium(13.))).clicked() {
+                    answer = Some(false);
+                }
+                if ui.link(RichText::new("Set up").font(theme::medium(13.))).clicked() {
+                    answer = Some(true);
+                }
+            });
+        });
+        if let Some(set_up) = answer {
+            app.panes.username_megaphone = false;
+            crate::settings::write(app, SETTING_USERNAME_MEGAPHONE, "done".into());
+            if set_up {
+                app.tab = Tab::Settings;
+                app.settings.page = crate::settings::Page::Profile;
+                crate::profile::open(app);
+                crate::profile::start_username(app);
+            }
+        }
+    }
     if let Some(m) = app.panes.megaphones.first().cloned() {
         card(ui, palette, |ui| {
             ui.label(RichText::new(&m.title).font(theme::semibold(14.)));
