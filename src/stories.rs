@@ -69,6 +69,8 @@ pub struct StoriesView {
     pub info_of: Option<i64>,
     /// "Hide story?" waiting for this story's answer.
     pub confirm_hide: Option<i64>,
+    /// The Story privacy page open, if not its first.
+    pub privacy_page: Option<PrivacyPage>,
     /// The story whose whole caption is open (Read more).
     pub caption_open: Option<i64>,
     /// The stories list's search.
@@ -1855,6 +1857,17 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
 
 /// Desktop's "Story privacy": My Story's audience, custom stories, view
 /// receipts, and turning stories off.
+/// A page of Desktop's StoriesSettingsModal.
+#[derive(Clone, PartialEq)]
+pub enum PrivacyPage {
+    My,
+    List(String),
+    Group(ConversationId),
+}
+
+/// Desktop's StoriesSettingsModal: its description and every story (My
+/// Story, custom stories, group stories), each opening its page; view
+/// receipts; turning stories off.
 fn privacy(app: &mut App, ui: &mut Ui) {
     if !app.panes.stories.privacy {
         return;
@@ -1862,81 +1875,195 @@ fn privacy(app: &mut App, ui: &mut Ui) {
     let palette = Palette::of(ui.ctx());
     let lists = app.panes.stories.lists.clone();
     let my = lists.iter().find(|l| l.is_my_story()).cloned().unwrap_or_else(StoryList::my_story);
+    let page = app.panes.stories.privacy_page.clone();
     let mut done = false;
+    let mut go: Option<Option<PrivacyPage>> = None;
     let closed = modal(ui, "story-privacy", 440., |ui| {
-        title(ui, tr("Story privacy"));
-        ui.label(RichText::new(tr("My Story")).font(theme::semibold(14.)));
-        let mode = if my.block_list && my.members.is_empty() {
-            0
-        } else if my.block_list {
-            1
-        } else {
-            2
-        };
-        let mut pick = mode;
-        ui.radio_value(&mut pick, 0, tr("All Signal connections"));
-        ui.radio_value(&mut pick, 1, format!("All except… ({})", if my.block_list { my.members.len() } else { 0 }));
-        ui.radio_value(&mut pick, 2, format!("Only share with… ({})", if my.block_list { 0 } else { my.members.len() }));
-        if pick != mode {
-            let mut list = my.clone();
-            list.block_list = pick != 2;
-            if pick == 0 || mode == 0 {
-                list.members.clear();
-            }
-            if pick == 0 {
-                app.send(Command::SaveStoryList(list));
-            } else {
-                app.panes.stories.editing = Some(list);
-            }
-        } else if mode != 0 && ui.link("Choose people").clicked() {
-            app.panes.stories.editing = Some(my.clone());
-        }
-        let mut replies = my.allows_replies;
-        if crate::widgets::checkbox(ui, &mut replies, "Allow replies and reactions").changed() {
-            app.send(Command::SaveStoryList(StoryList { allows_replies: replies, ..my.clone() }));
-        }
-        ui.add_space(12.);
-        ui.label(RichText::new("Custom stories").font(theme::semibold(14.)));
-        for l in lists.iter().filter(|l| !l.is_my_story()) {
-            ui.horizontal(|ui| {
-                ui.label(format!("{} ({})", l.name, l.members.len()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(tr("Delete")).clicked() {
-                        let body = crate::i18n::tf("icu:StoriesSettings__delete-list--confirm", &format!("Are you sure you want to delete \u{201c}{}\u{201d}? Updates shared to this story will also be deleted.", l.name), &[("name", crate::i18n::Arg::from(&l.name))]);
-                        crate::panes::ask(app, "", body, tr("Delete"), true, vec![Command::DeleteStoryList { id: l.id.clone() }]);
+        match &page {
+            None => {
+                title(ui, tr("Story privacy"));
+                body(ui, &palette, tr("Stories automatically disappear after 24 hours. Choose who can view your story or create new stories with specific viewers or groups."));
+                ui.add_space(12.);
+                ui.label(RichText::new(tr("My Stories")).font(theme::semibold(14.)));
+                ui.add_space(4.);
+                if menu_row(ui, Some(Icon::PlusCircle), tr("New Story"), false).clicked() {
+                    app.panes.stories.editing = Some(StoryList { id: new_uuid(), name: String::new(), members: Vec::new(), block_list: false, allows_replies: true });
+                }
+                let row = |ui: &mut Ui, title_text: &str, sub: &str, avatar: &dyn Fn(&Ui, Rect)| -> bool {
+                    let (rect, hit) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.), Sense::click());
+                    if hit.hovered() {
+                        ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                     }
-                    if ui.small_button(tr("Edit")).clicked() {
-                        app.panes.stories.editing = Some(l.clone());
+                    let a = Rect::from_min_size(Pos2::new(rect.left() + 6., rect.center().y - 18.), Vec2::splat(36.));
+                    avatar(ui, a);
+                    ui.painter().text(Pos2::new(a.right() + 10., rect.center().y - 9.), egui::Align2::LEFT_CENTER, title_text, theme::medium(14.), palette.text);
+                    ui.painter().text(Pos2::new(a.right() + 10., rect.center().y + 10.), egui::Align2::LEFT_CENTER, sub, theme::regular(12.), palette.text_secondary);
+                    hit.clicked()
+                };
+                egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
+                    let me = (app.me.0.clone(), app.me.1.clone());
+                    let my_sub = if my.block_list && my.members.is_empty() { tr("All Signal connections").to_owned() } else { crate::i18n::tf("icu:StoriesSettings__viewers", &format!("{} viewers", my.members.len()), &[("count", crate::i18n::Arg::from(my.members.len()))]) };
+                    if row(ui, tr("My Story"), &my_sub, &|ui, a| widgets::paint_avatar(ui, a, &widgets::AvatarSpec { photo: me.1.as_deref(), ..widgets::AvatarSpec::person(&me.0, 0) })) {
+                        go = Some(Some(PrivacyPage::My));
+                    }
+                    for l in lists.iter().filter(|l| !l.is_my_story()) {
+                        let sub = crate::i18n::tf("icu:StoriesSettings__viewers", &format!("{} viewers", l.members.len()), &[("count", crate::i18n::Arg::from(l.members.len()))]);
+                        if row(ui, &l.name, &sub, &|ui, a| {
+                            ui.painter().circle_filled(a.center(), 18., palette.fill_secondary);
+                            theme::paint_symbol(ui.painter(), "stories", a.center(), 18., palette.text);
+                        }) {
+                            go = Some(Some(PrivacyPage::List(l.id.clone())));
+                        }
+                    }
+                    let modes = app.panes.stories.send_modes.clone();
+                    for (g, _) in modes.iter().filter(|(_, m)| *m == langis_store::StorySendMode::Always) {
+                        if let Some(conv) = app.conversation(g).cloned()
+                            && row(ui, &conv.title, tr("Group story"), &|ui, a| widgets::paint_avatar(ui, a, &widgets::AvatarSpec::of(&conv)))
+                        {
+                            go = Some(Some(PrivacyPage::Group(g.clone())));
+                        }
                     }
                 });
-            });
-        }
-        if menu_row(ui, Some(Icon::PlusCircle), tr("New custom story"), false).clicked() {
-            app.panes.stories.editing = Some(StoryList { id: new_uuid(), name: String::new(), members: Vec::new(), block_list: false, allows_replies: true });
-        }
-        ui.add_space(12.);
-        let mut receipts = app.panes.stories.receipts;
-        ui.horizontal(|ui| {
-            ui.label("View receipts");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::switch(ui, &mut receipts).changed() {
-                    app.panes.stories.receipts = receipts;
-                    app.send(Command::SetStoryViewReceipts(receipts));
+                ui.add_space(12.);
+                let mut receipts = app.panes.stories.receipts;
+                ui.horizontal(|ui| {
+                    ui.label(tr("View Receipts"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if widgets::switch(ui, &mut receipts).changed() {
+                            app.panes.stories.receipts = receipts;
+                            app.send(Command::SetStoryViewReceipts(receipts));
+                        }
+                    });
+                });
+                body(ui, &palette, tr("See and share when stories are viewed. If disabled, you won't see when others view your story."));
+                ui.add_space(8.);
+                if menu_row(ui, None, tr("Turn off stories"), true).clicked() {
+                    app.send(Command::SetStoriesDisabled(true));
+                    app.panes.stories.disabled = true;
+                    done = true;
                 }
-            });
-        });
-        body(ui, &palette, tr("See and share when stories are viewed. If disabled, you won't see when others view your story."));
-        ui.add_space(8.);
-        if menu_row(ui, None, tr("Turn off stories"), true).clicked() {
-            app.send(Command::SetStoriesDisabled(true));
-            app.panes.stories.disabled = true;
-            done = true;
+                done |= buttons(ui, &[tr("Done")]).is_some();
+            }
+            Some(PrivacyPage::My) => {
+                ui.horizontal(|ui| {
+                    if widgets::icon_button(ui, Icon::ChevronLeft, 18., tr("Back")).clicked() {
+                        go = Some(None);
+                    }
+                    ui.label(RichText::new(tr("My Story")).font(theme::semibold(14.)));
+                });
+                ui.add_space(8.);
+                let mode = if my.block_list && my.members.is_empty() {
+                    0
+                } else if my.block_list {
+                    1
+                } else {
+                    2
+                };
+                let mut pick = mode;
+                ui.radio_value(&mut pick, 0, tr("All Signal connections"));
+                ui.radio_value(&mut pick, 1, format!("{} ({})", tr("All except..."), if my.block_list { my.members.len() } else { 0 }));
+                ui.radio_value(&mut pick, 2, format!("{} ({})", tr("Only share with..."), if my.block_list { 0 } else { my.members.len() }));
+                if pick != mode {
+                    let mut list = my.clone();
+                    list.block_list = pick != 2;
+                    if pick == 0 || mode == 0 {
+                        list.members.clear();
+                    }
+                    if pick == 0 {
+                        app.send(Command::SaveStoryList(list));
+                    } else {
+                        app.panes.stories.editing = Some(list);
+                    }
+                }
+                body(ui, &palette, tr("Choose who can view your story. Changes won't affect stories you've already sent."));
+                ui.add_space(12.);
+                replies_switch(app, ui, &palette, &my);
+            }
+            Some(PrivacyPage::List(id)) => {
+                let Some(l) = lists.iter().find(|l| &l.id == id).cloned() else {
+                    go = Some(None);
+                    return;
+                };
+                ui.horizontal(|ui| {
+                    if widgets::icon_button(ui, Icon::ChevronLeft, 18., tr("Back")).clicked() {
+                        go = Some(None);
+                    }
+                    ui.label(RichText::new(&l.name).font(theme::semibold(14.)));
+                });
+                ui.add_space(8.);
+                ui.label(RichText::new(tr("Who can view this story")).font(theme::semibold(13.)).color(palette.text_secondary));
+                if menu_row(ui, Some(Icon::PlusCircle), tr("Add viewer"), false).clicked() {
+                    app.panes.stories.editing = Some(l.clone());
+                }
+                egui::ScrollArea::vertical().max_height(240.).show(ui, |ui| {
+                    for m in &l.members {
+                        let name = app.name(m);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&name).font(theme::regular(14.)));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if widgets::axo_button(ui, tr("Remove"), widgets::Axo::SubtleSecondary).clicked() {
+                                    let mut without = l.clone();
+                                    without.members.retain(|x| x != m);
+                                    let title_text = crate::i18n::tf("icu:StoriesSettings__remove--title", &format!("Remove {name}"), &[("title", crate::i18n::Arg::from(&name))]);
+                                    crate::panes::ask(app, title_text, tr("This person will no longer see your story."), tr("Remove"), true, vec![Command::SaveStoryList(without)]);
+                                }
+                            });
+                        });
+                    }
+                });
+                ui.add_space(12.);
+                replies_switch(app, ui, &palette, &l);
+                ui.add_space(8.);
+                if menu_row(ui, None, tr("Delete custom story"), true).clicked() {
+                    let body_text = crate::i18n::tf("icu:StoriesSettings__delete-list--confirm", &format!("Are you sure you want to delete \u{201c}{}\u{201d}? Updates shared to this story will also be deleted.", l.name), &[("name", crate::i18n::Arg::from(&l.name))]);
+                    crate::panes::ask(app, "", body_text, tr("Delete"), true, vec![Command::DeleteStoryList { id: l.id.clone() }]);
+                    go = Some(None);
+                }
+            }
+            Some(PrivacyPage::Group(g)) => {
+                let name = app.conversation(g).map(|c| c.title.clone()).unwrap_or_default();
+                ui.horizontal(|ui| {
+                    if widgets::icon_button(ui, Icon::ChevronLeft, 18., tr("Back")).clicked() {
+                        go = Some(None);
+                    }
+                    ui.label(RichText::new(&name).font(theme::semibold(14.)));
+                });
+                ui.add_space(8.);
+                body(ui, &palette, tr("Group story"));
+                ui.add_space(8.);
+                if menu_row(ui, None, tr("Remove group story"), true).clicked() {
+                    let body_text = crate::i18n::tf("icu:StoriesSettings__remove_group--confirm", &format!("Are you sure you want to remove \u{201c}{name}\u{201d}?"), &[("groupTitle", crate::i18n::Arg::from(&name))]);
+                    crate::panes::ask(app, "", body_text, tr("Remove"), true, vec![Command::SetStorySendMode { groups: vec![g.clone()], mode: langis_store::StorySendMode::Never }]);
+                    app.panes.stories.send_modes.retain(|(id, _)| id != g);
+                    go = Some(None);
+                }
+            }
         }
-        done |= buttons(ui, &[tr("Done")]).is_some();
     });
-    if done || closed {
-        app.panes.stories.privacy = false;
+    if let Some(p) = go {
+        app.panes.stories.privacy_page = p;
     }
+    if done || (closed && page.is_none()) {
+        app.panes.stories.privacy = false;
+        app.panes.stories.privacy_page = None;
+    } else if closed {
+        app.panes.stories.privacy_page = None;
+    }
+}
+
+/// Desktop's Replies & reactions switch for a story list.
+fn replies_switch(app: &mut App, ui: &mut Ui, palette: &Palette, l: &StoryList) {
+    ui.label(RichText::new(tr("Replies & reactions")).font(theme::semibold(13.)).color(palette.text_secondary));
+    let mut replies = l.allows_replies;
+    ui.horizontal(|ui| {
+        ui.label(tr("Allow replies & reactions"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if widgets::switch(ui, &mut replies).changed() {
+                app.send(Command::SaveStoryList(StoryList { allows_replies: replies, ..l.clone() }));
+            }
+        });
+    });
+    body(ui, palette, tr("Let people who can view your story react and reply."));
 }
 
 /// Picking who a story list includes (or, for My Story's "All except",
@@ -1952,9 +2079,15 @@ fn list_editor(app: &mut App, ui: &mut Ui) {
             widgets::text_field(ui, &mut list.name, tr("Story name (required)"), false);
             ui.add_space(6.);
         }
+        // Desktop's Choose Viewers search.
+        let search_id = egui::Id::unique("story-viewers-search");
+        let mut q: String = ui.ctx().data(|d| d.get_temp(search_id)).unwrap_or_default();
+        widgets::text_field(ui, &mut q, tr("Search"), false);
+        ui.ctx().data_mut(|d| d.insert_temp(search_id, q.clone()));
+        let q = q.trim().to_lowercase();
         body(ui, &palette, &format!("{} chosen", list.members.len()));
         egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
-            for (sid, name) in &people {
+            for (sid, name) in people.iter().filter(|(_, n)| q.is_empty() || n.to_lowercase().contains(&q)) {
                 let mut on = list.members.contains(sid);
                 if crate::widgets::checkbox(ui, &mut on, name).changed() {
                     if on {
