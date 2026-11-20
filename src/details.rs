@@ -1325,13 +1325,25 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         let mut answer = None;
         let closed = modal(ui, "nickname", 380., |ui| {
             title(ui, tr("Nickname"));
+            // Desktop's EditNicknameAndNoteModal: their photo, the note
+            // as several lines with its counter.
+            ui.vertical_centered(|ui| {
+                widgets::avatar(ui, &widgets::AvatarSpec::of(c), 80.);
+            });
+            ui.add_space(10.);
             body(ui, palette, tr("Nicknames & notes are stored with Signal and end-to-end encrypted. They are only visible to you."));
             ui.add_space(8.);
             widgets::text_field(ui, &mut nick.given, tr("First name"), false);
             ui.add_space(6.);
             widgets::text_field(ui, &mut nick.family, tr("Last name"), false);
             ui.add_space(6.);
-            widgets::text_field(ui, &mut nick.note, tr("Note"), false);
+            ui.add(egui::TextEdit::multiline(&mut nick.note).hint_text(tr("Note")).char_limit(240).desired_rows(3).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)));
+            let left = 240usize.saturating_sub(nick.note.chars().count());
+            if left <= 40 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    ui.label(RichText::new(left.to_string()).font(theme::regular(12.)).color(palette.text_secondary));
+                });
+            }
             answer = buttons(ui, &[tr("Save"), tr("Cancel"), tr("Delete")]);
         });
         let leave = crate::panes::discard_guard(ui.ctx(), "nickname", &nick, answer == Some(1) || (closed && answer.is_none()), matches!(answer, Some(0 | 2)));
