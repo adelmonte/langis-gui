@@ -546,6 +546,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 NoticeButton::Join => crate::panes::open_lobby(app, id.clone(), true),
                 NoticeButton::Return => app.call_view.pip = false,
                 NoticeButton::AcceptedOptions => app.panes.accepted_options = Some(id.clone()),
+                NoticeButton::Nickname(who) => crate::details::open_nickname(app, ConversationId::direct(&who)),
                 NoticeButton::Safety(who) => crate::details::open_safety(app, ConversationId::direct(&who)),
                 NoticeButton::Go { author, sent_at } => {
                     let conversation = id.clone();
@@ -2926,6 +2927,8 @@ pub enum NoticeButton {
     Return,
     /// Desktop's accepted-request options: Block or Report spam.
     AcceptedOptions,
+    /// The nickname editor (a profile name change while a nickname's set).
+    Nickname(String),
     Safety(String),
     Go { author: Option<String>, sent_at: i64 },
     /// Desktop's explainer dialog: a title, its text, and (for a chat
@@ -2962,6 +2965,11 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
         // back (Block or Report...).
         Notice::MessageRequest { event: langis_store::MessageRequestEvent::Accept, group: false, .. } if ctx.app.conversation(ctx.chat_id).is_some_and(|c| !c.blocked) => {
             Some((tr("Block or Report..."), NoticeButton::AcceptedOptions))
+        }
+        // Desktop's ProfileChangeNotification: Update, when we call them
+        // something else (a nickname).
+        Notice::ProfileNameChanged { who, new_name, .. } if !ctx.group && ctx.app.conversation(ctx.chat_id).is_some_and(|c| c.title != *new_name) => {
+            Some((tr("Update"), NoticeButton::Nickname(who.clone())))
         }
         // Desktop's ConversationMergeNotification: its explainer.
         Notice::Merged { who, .. } => {
