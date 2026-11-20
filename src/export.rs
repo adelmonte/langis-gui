@@ -14,6 +14,30 @@ fn safe_name(title: &str) -> String {
     if trimmed.is_empty() { "chat".into() } else { trimmed.chars().take(80).collect() }
 }
 
+/// Copies `from` into `dir` as `name`, or `name (2)`, `name (3)`...: never
+/// over an existing file or through a symlink.
+fn create_new(dir: &Path, name: &str, from: &str) -> Option<PathBuf> {
+    let p = Path::new(name);
+    let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    for k in 1..1000 {
+        let target = dir.join(if k == 1 { name.to_owned() } else { format!("{stem} ({k}){ext}") });
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+            Ok(mut out) => {
+                let copied = std::fs::File::open(from).and_then(|mut src| std::io::copy(&mut src, &mut out));
+                if copied.is_err() {
+                    let _ = std::fs::remove_file(&target);
+                    return None;
+                }
+                return Some(target);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 /// Every message of a chat, oldest first.
 async fn all_messages(db: &AppDb, chat: &Conversation) -> Vec<Message> {
     let mut pages: Vec<Vec<Message>> = Vec::new();
@@ -45,7 +69,8 @@ fn line(m: &Message, author: &str, files: &[String]) -> String {
     } else if let Some(notice) = &m.notice {
         out = format!("[{when}] {}", crate::notices::notice_text(notice, |sid| sid.to_owned()));
     } else {
-        out.push_str(&m.body);
+        // Later lines indented, so a body can't pass for another message.
+        out.push_str(&m.body.replace('\n', "\n    "));
     }
     for f in files {
         out.push_str(&format!("\n    [file: {f}]"));
@@ -87,8 +112,10 @@ pub async fn export_all(db: &AppDb, dir: &Path, names: &std::collections::HashMa
                 std::fs::create_dir_all(&files_dir)?;
                 let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("bin");
                 let name = a.file_name.clone().map(|n| safe_name(&n)).unwrap_or_else(|| format!("{}-{i}.{ext}", m.sent_at));
-                let target = files_dir.join(format!("{}-{name}", m.sent_at));
-                if std::fs::copy(path, &target).is_ok() {
+                // Numbered when taken: another file of the same time and
+                // name (a sender picks both) never overwrites it.
+                let Some(target) = create_new(&files_dir, &format!("{}-{name}", m.sent_at), path) else { continue };
+                {
                     copied.push(format!("{base} files/{}", target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
                 }
             }
