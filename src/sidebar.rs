@@ -245,17 +245,33 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     open_at = crate::search::message_results(app, ui, &palette);
                 }
                 if rows.is_empty() && query.is_empty() {
-                    ui.add_space(24.);
-                    ui.vertical_centered(|ui| {
-                        let text = if app.panes.archived {
-                            "No archived chats."
-                        } else if app.unread_only {
-                            "No unread chats"
-                        } else {
-                            ""
-                        };
-                        ui.label(RichText::new(text).color(palette.text_secondary));
-                    });
+                    let folder = app.panes.folder.as_ref().and_then(|id| app.panes.folders.iter().find(|f| f.id == *id && f.folder_type == langis_store::ChatFolderType::Custom)).cloned();
+                    if app.panes.archived || app.unread_only {
+                        ui.add_space(24.);
+                        ui.vertical_centered(|ui| {
+                            let text = if app.panes.archived { "No archived chats." } else { "No unread chats" };
+                            ui.label(RichText::new(text).color(palette.text_secondary));
+                        });
+                    } else {
+                        // Desktop's LeftPaneInboxHelper empty views, centered
+                        // in the pane with 12px between their parts.
+                        let h = ui.available_height();
+                        ui.add_space((h / 2. - 40.).max(24.));
+                        ui.vertical_centered(|ui| {
+                            ui.spacing_mut().item_spacing.y = 12.;
+                            if let Some(folder) = folder {
+                                ui.label(RichText::new("No chats to display").font(theme::regular(16.)).color(palette.text));
+                                if widgets::axo_button(ui, "Folder Settings", widgets::Axo::SubtleSecondary).clicked() {
+                                    app.tab = crate::app::Tab::Settings;
+                                    app.settings.page = crate::settings::Page::ChatFolders;
+                                    app.settings.folder = Some(crate::settings::folder_edit(&folder));
+                                }
+                            } else {
+                                ui.label(RichText::new("No chats").font(theme::semibold(18.)).color(palette.text_secondary));
+                                ui.label(RichText::new("Recent chats will appear here.").font(theme::regular(14.)).color(palette.text_secondary));
+                            }
+                        });
+                    }
                 }
                 if rows.is_empty() && app.message_search.hits.is_empty() && !query.is_empty() {
                     ui.add_space(24.);
