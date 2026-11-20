@@ -55,9 +55,20 @@ struct Label {
     size: f32,
 }
 
+/// A sticker placed on the picture (Desktop's `MediaEditor` sticker).
+#[derive(Clone)]
+struct Placed {
+    path: std::path::PathBuf,
+    /// Its center in the turned picture, 0 to 1.
+    at: Pos2,
+    /// Its width as a share of the picture's width.
+    size: f32,
+}
+
 /// What undo goes back to.
 #[derive(Clone)]
 struct Edits {
+    stickers: Vec<Placed>,
     turns: u8,
     flip: bool,
     /// The crop, 0 to 1 in the turned picture.
@@ -87,6 +98,10 @@ pub struct Editor {
     typing: Option<usize>,
     /// What the pointer holds: a crop handle, or a label being moved.
     grab: Option<Grab>,
+    /// Desktop's sticker picker over the bar, open.
+    sticker_picker: bool,
+    /// The sticker last touched, with its remove button.
+    sticker_selected: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -94,6 +109,7 @@ enum Grab {
     Corner(u8),
     Crop(Vec2),
     Label(usize, Vec2),
+    Sticker(usize, Vec2),
 }
 
 /// Desktop's `getHSL` for its color slider: black, the hues, then white.
@@ -138,7 +154,7 @@ impl Editor {
     pub fn open(index: usize, bytes: &[u8]) -> Option<Self> {
         let original = image::load_from_memory(bytes).ok()?.to_rgba8();
         let turned = original.clone();
-        let edits = Edits { turns: 0, flip: false, crop: Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.)), lines: Vec::new(), labels: Vec::new() };
+        let edits = Edits { stickers: Vec::new(), turns: 0, flip: false, crop: Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.)), lines: Vec::new(), labels: Vec::new() };
         Some(Self {
             index,
             original,
@@ -155,6 +171,8 @@ impl Editor {
             text_style: TextStyle::Regular,
             typing: None,
             grab: None,
+            sticker_picker: false,
+            sticker_selected: None,
         })
     }
 
@@ -178,6 +196,9 @@ impl Editor {
         for label in &mut self.edits.labels {
             label.at = r(label.at);
         }
+        for st in &mut self.edits.stickers {
+            st.at = r(st.at);
+        }
         let c = self.edits.crop;
         self.edits.crop = Rect::from_two_pos(r(c.min), r(c.max));
         // A flip turned a quarter is a flip the other way round.
@@ -193,6 +214,9 @@ impl Editor {
         }
         for label in &mut self.edits.labels {
             label.at = f(label.at);
+        }
+        for st in &mut self.edits.stickers {
+            st.at = f(st.at);
         }
         let c = self.edits.crop;
         self.edits.crop = Rect::from_two_pos(f(c.min), f(c.max));
@@ -221,7 +245,9 @@ impl Editor {
 
     /// Draws the editor in a full-window modal; returns the edited picture
     /// as a PNG when Done is pressed, `Some(None)` when cancelled.
-    pub fn show(&mut self, ctx: &egui::Context) -> Option<Option<Vec<u8>>> {
+    /// Shows the editor; `stickers` are the installed packs' (for its
+    /// sticker button). Some(Some(png)) on Done, Some(None) on Cancel.
+    pub fn show(&mut self, ctx: &egui::Context, stickers: &[std::sync::Arc<langis_core::StickerPackView>]) -> Option<Option<Vec<u8>>> {
         let palette = Palette::of(ctx);
         let screen = ctx.content_rect();
         let mut result = None;
@@ -246,8 +272,13 @@ impl Editor {
             if let Some(r) = self.toolbar(ui, toolbar, &palette) {
                 result = Some(r);
             }
+            if self.sticker_picker {
+                self.pick_sticker(ui, toolbar, stickers);
+            }
         });
-        if result.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.typing.is_none() {
+        if self.sticker_picker && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.sticker_picker = false;
+        } else if result.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.typing.is_none() {
             result = Some(None);
         }
         result
@@ -297,8 +328,73 @@ impl Editor {
                 painter.rect_stroke(box_rect.expand(3.), CornerRadius::same(4), Stroke::new(1.5, Color32::WHITE), egui::StrokeKind::Outside);
             }
         }
+        // Stickers, over the drawing and text.
+        let sticker_rects: Vec<Rect> = self
+            .edits
+            .stickers
+            .iter()
+            .map(|st| {
+                let w = st.size * picture_w;
+                Rect::from_center_size(to_screen(st.at), Vec2::splat(w))
+            })
+            .collect();
+        for (st, r) in self.edits.stickers.iter().zip(&sticker_rects) {
+            let file = st.path.to_string_lossy();
+            egui::Image::new(crate::thumbs::uri(ui.ctx(), &file, r.size())).maintain_aspect_ratio(true).fit_to_exact_size(r.size()).paint_at(&ui.new_child(egui::UiBuilder::new().max_rect(view)), *r);
+        }
         let response = ui.interact(view, ui.scope_id().with("media-editor-canvas"), Sense::click_and_drag());
         let pointer = response.interact_pointer_pos();
+        // The selected sticker: its frame, and an X to take it off; the
+        // scroll wheel over it sizes it.
+        if self.mode != Mode::Crop
+            && let Some(i) = self.sticker_selected.filter(|i| *i < sticker_rects.len())
+        {
+            let r = sticker_rects[i];
+            ui.painter().rect_stroke(r.expand(2.), CornerRadius::same(4), Stroke::new(1.5, Color32::WHITE), egui::StrokeKind::Outside);
+            let x = Rect::from_center_size(r.right_top(), Vec2::splat(22.));
+            let hit = ui.interact(x, ui.scope_id().with(("sticker-x", i)), Sense::click());
+            ui.painter().circle_filled(x.center(), 11., Color32::from_gray(if hit.hovered() { 80 } else { 50 }));
+            theme::paint_symbol(ui.painter(), "x", x.center(), 14., Color32::WHITE);
+            if hit.on_hover_text("Remove").clicked() {
+                self.remember();
+                self.edits.stickers.remove(i);
+                self.sticker_selected = None;
+                return;
+            }
+            let scroll = ui.input(|inp| inp.smooth_scroll_delta.y);
+            if scroll != 0. && ui.rect_contains_pointer(r) {
+                let st = &mut self.edits.stickers[i];
+                st.size = (st.size * (1. + scroll / 400.)).clamp(0.05, 0.9);
+            }
+        }
+        if self.mode != Mode::Crop {
+            if response.drag_started()
+                && let Some(p) = pointer
+                && let Some(i) = sticker_rects.iter().rposition(|r| r.contains(p))
+            {
+                self.remember();
+                self.grab = Some(Grab::Sticker(i, sticker_rects[i].center() - p));
+                self.sticker_selected = Some(i);
+            }
+            if let (Some(Grab::Sticker(i, offset)), Some(p)) = (self.grab, pointer) {
+                if response.dragged() {
+                    self.edits.stickers[i].at = to_picture(p + offset);
+                }
+                if response.drag_stopped() {
+                    self.grab = None;
+                }
+                return;
+            }
+            if response.clicked()
+                && let Some(p) = pointer
+            {
+                if let Some(i) = sticker_rects.iter().rposition(|r| r.contains(p)) {
+                    self.sticker_selected = Some(i);
+                    return;
+                }
+                self.sticker_selected = None;
+            }
+        }
         match self.mode {
             Mode::Draw => {
                 if response.drag_started()
@@ -435,6 +531,9 @@ impl Editor {
                         self.typing = None;
                     }
                 }
+                if pill(ui, "Sticker", self.sticker_picker) {
+                    self.sticker_picker = !self.sticker_picker;
+                }
                 ui.add_space(12.);
                 match self.mode {
                     Mode::Draw => {
@@ -553,6 +652,60 @@ impl Editor {
         ui.painter().circle_stroke(knob, 9., Stroke::new(2., Color32::WHITE));
     }
 
+    /// Desktop's `FunStickerPicker` over the bar: the installed packs'
+    /// stickers; one picked goes in the middle of the picture.
+    fn pick_sticker(&mut self, ui: &mut Ui, bar: Rect, packs: &[std::sync::Arc<langis_core::StickerPackView>]) {
+        let size = Vec2::new(352., 360.);
+        let at = Pos2::new(bar.center().x - size.x / 2., bar.top() - size.y - 8.);
+        let mut picked = None;
+        let area = egui::Area::new(egui::Id::unique("media-editor-stickers")).order(egui::Order::Tooltip).fixed_pos(at).show(ui.ctx(), |ui| {
+            egui::Frame::new().fill(Color32::from_gray(38)).corner_radius(CornerRadius::same(8)).inner_margin(12).show(ui, |ui| {
+                ui.set_width(size.x - 24.);
+                ui.set_height(size.y - 24.);
+                if packs.is_empty() {
+                    ui.add_space(40.);
+                    ui.vertical_centered(|ui| ui.label(RichText::new("No stickers installed yet").color(Color32::from_gray(200))));
+                    return;
+                }
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    let cell = (ui.available_width() / 4.).floor();
+                    for pack in packs {
+                        ui.label(RichText::new(&pack.title).font(theme::semibold(13.)).color(Color32::from_gray(200)));
+                        for row in pack.stickers.chunks(4) {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.;
+                                for st in row {
+                                    let (r, hit) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+                                    if hit.hovered() {
+                                        ui.painter().rect_filled(r, CornerRadius::same(8), Color32::from_gray(60));
+                                    }
+                                    let file = st.path.to_string_lossy();
+                                    egui::Image::new(crate::thumbs::uri(ui.ctx(), &file, r.size())).maintain_aspect_ratio(true).fit_to_exact_size(r.size() - Vec2::splat(12.)).paint_at(ui, r.shrink(6.));
+                                    if hit.clicked() {
+                                        picked = Some(st.path.clone());
+                                    }
+                                }
+                            });
+                        }
+                        ui.add_space(6.);
+                    }
+                });
+            });
+        });
+        if let Some(path) = picked {
+            self.remember();
+            let center = self.edits.crop.center();
+            self.edits.stickers.push(Placed { path, at: center, size: 0.25 * self.edits.crop.width() });
+            self.sticker_selected = Some(self.edits.stickers.len() - 1);
+            self.sticker_picker = false;
+            if self.mode == Mode::Crop {
+                self.mode = Mode::Draw;
+            }
+        } else if ui.input(|i| i.pointer.any_pressed()) && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p) && !bar.contains(p)) {
+            self.sticker_picker = false;
+        }
+    }
+
     /// The turned picture cropped, its lines and text drawn in, as a PNG.
     fn bake(&self) -> Vec<u8> {
         let (tw, th) = (self.turned.width() as f32, self.turned.height() as f32);
@@ -578,6 +731,14 @@ impl Editor {
         for label in self.edits.labels.iter().filter(|l| !l.text.trim().is_empty()) {
             let (cx, cy) = px(label.at);
             draw_label(&mut out, label, cx, cy, label.size * tw);
+        }
+        for st in &self.edits.stickers {
+            let Ok(img) = image::open(&st.path) else { continue };
+            let side = (st.size * tw).round().max(1.) as u32;
+            let img = img.resize(side, side, image::imageops::FilterType::Triangle).to_rgba8();
+            let (cx, cy) = px(st.at);
+            let (x, y) = ((cx - img.width() as f32 / 2.).round() as i64, (cy - img.height() as f32 / 2.).round() as i64);
+            image::imageops::overlay(&mut out, &img, x, y);
         }
         let mut png = std::io::Cursor::new(Vec::new());
         let _ = out.write_to(&mut png, image::ImageFormat::Png);

@@ -101,6 +101,8 @@ pub struct Composer {
     pub sending: bool,
     /// "Discard story?" waiting for an answer.
     pub confirm_discard: bool,
+    /// The media editor, on a photo story.
+    pub editor: Option<crate::media_editor::Editor>,
 }
 
 impl Default for Composer {
@@ -119,6 +121,7 @@ impl Default for Composer {
             link_field: None,
             sending: false,
             confirm_discard: false,
+            editor: None,
         }
     }
 }
@@ -387,7 +390,8 @@ fn new_media_story(app: &mut App) {
         _ => "image/jpeg",
     };
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    app.panes.stories.composer = Some(Composer { media: Some((std::sync::Arc::new(bytes), content_type.into(), name)), ..Composer::default() });
+    let editor = if content_type.starts_with("image/") && content_type != "image/gif" { crate::media_editor::Editor::open(0, &bytes) } else { None };
+    app.panes.stories.composer = Some(Composer { media: Some((std::sync::Arc::new(bytes), content_type.into(), name)), editor, ..Composer::default() });
 }
 
 /// Someone's (or a group's) row: opens their stories; its menu hides or
@@ -1302,7 +1306,7 @@ fn composer(app: &mut App, ui: &mut Ui) {
             ui.painter().circle_filled(x.center(), 20., Color32::from_white_alpha(30));
         }
         theme::paint_symbol(ui.painter(), "x", x.center(), 22., Color32::WHITE);
-        let busy = c.sending || c.new_group.is_some() || c.link_field.is_some() || c.confirm_discard;
+        let busy = c.sending || c.new_group.is_some() || c.link_field.is_some() || c.confirm_discard || c.editor.is_some();
         if x_hit.on_hover_text("Close").clicked() || (!busy && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
             close = true;
         }
@@ -1446,9 +1450,16 @@ fn composer(app: &mut App, ui: &mut Ui) {
                 if link.clicked() {
                     c.link_field = Some(c.link.clone().unwrap_or_default());
                 }
-            } else if widgets::pill_button(ui, "Use text instead", false).clicked() {
-                c.media = None;
-                c.text.clear();
+            } else {
+                // A photo opens in Desktop's MediaEditor (draw, text,
+                // stickers, crop).
+                if c.media.as_ref().is_some_and(|(_, t, _)| t.starts_with("image/") && t != "image/gif") && widgets::pill_button(ui, "Edit", false).clicked() {
+                    c.editor = c.media.as_ref().and_then(|(bytes, _, _)| crate::media_editor::Editor::open(0, bytes));
+                }
+                if widgets::pill_button(ui, "Use text instead", false).clicked() {
+                    c.media = None;
+                    c.text.clear();
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let ready = !empty;
@@ -1491,6 +1502,21 @@ fn composer(app: &mut App, ui: &mut Ui) {
             }
         }
     });
+    if let Some(editor) = c.editor.as_mut() {
+        if !app.fun.asked {
+            app.fun.asked = true;
+            app.send(Command::LoadStickers);
+        }
+        if let Some(result) = editor.show(ui.ctx(), &app.fun.packs) {
+            c.editor = None;
+            if let (Some(png), Some(media)) = (result, c.media.as_mut()) {
+                let stem = std::path::Path::new(&media.2).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "story".into());
+                *media = (std::sync::Arc::new(png), "image/png".into(), format!("{stem}.png"));
+            }
+        }
+        app.panes.stories.composer = Some(c);
+        return;
+    }
     if close {
         if empty {
             return;

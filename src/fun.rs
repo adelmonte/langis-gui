@@ -36,7 +36,7 @@ pub struct Fun {
     pub favorites: Vec<FavoriteStickerView>,
     /// Every favorite by (pack id, sticker id), image here or not.
     pub favorite_ids: Vec<(Vec<u8>, u32)>,
-    asked: bool,
+    pub asked: bool,
     /// The pack shown; `None` for favorites.
     pack: Option<Vec<u8>>,
     /// Favorites were picked by hand (not left as the default).

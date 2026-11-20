@@ -397,7 +397,7 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             edit_escape(ui, chat);
             reply_bar(app, ui, palette, chat);
             take_dropped_and_pasted(app, ui, chat);
-            media_editor(ui, chat);
+            media_editor(app, ui, chat);
             gif_replace_confirm(ui, chat);
             if !chat.staged.is_empty() {
                 staged_list(ui, palette, chat, c);
@@ -1216,9 +1216,14 @@ fn stage_path(app: &mut App, chat: &mut ChatView, path: &std::path::Path) {
 
 /// The media editor while it's open; Done puts the edited picture in the
 /// staged one's place, as a PNG.
-fn media_editor(ui: &Ui, chat: &mut ChatView) {
+fn media_editor(app: &mut App, ui: &Ui, chat: &mut ChatView) {
     let Some(editor) = chat.media_editor.as_mut() else { return };
-    let Some(result) = editor.show(ui.ctx()) else { return };
+    // Its sticker button lists the installed packs.
+    if !app.fun.asked {
+        app.fun.asked = true;
+        app.send(langis_core::Command::LoadStickers);
+    }
+    let Some(result) = editor.show(ui.ctx(), &app.fun.packs) else { return };
     let index = editor.index;
     chat.media_editor = None;
     if let (Some(png), Some(staged)) = (result, chat.staged.get_mut(index)) {
