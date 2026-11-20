@@ -480,6 +480,30 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
 }
 
 /// Desktop's `CallLinkDetails`.
+/// Desktop's CallLinkAddNameModal: the name, Save.
+fn link_name_dialog(app: &mut App, ui: &mut Ui, room: &str, current: &str) {
+    if !app.panes.link_name_open {
+        return;
+    }
+    let mut answer = None;
+    let closed = crate::panes::modal(ui, "call-link-name", 360., |ui| {
+        crate::panes::title(ui, if current.is_empty() { tr("Add call name") } else { tr("Edit call name") });
+        widgets::text_field(ui, &mut app.panes.link_name, tr("Call name"), false);
+        answer = crate::panes::buttons(ui, &[tr("Save"), tr("Cancel")]);
+    });
+    match answer {
+        Some(0) => {
+            app.panes.link_name_open = false;
+            if app.panes.link_name.trim() != current {
+                app.send(Command::UpdateCallLink { room_id: room.to_owned(), name: Some(app.panes.link_name.trim().to_owned()), restrictions: None });
+            }
+        }
+        Some(_) => app.panes.link_name_open = false,
+        None if closed => app.panes.link_name_open = false,
+        None => {}
+    }
+}
+
 fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
     let Some(link) = app.panes.links.iter().find(|l| l.room_id == room).cloned() else {
         ui.centered_and_justified(|ui| {
@@ -489,6 +513,7 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
     };
     let admin = link.admin_key.is_some();
     let url = langis_core::call_link_url(&link.root_key).unwrap_or_default();
+    link_name_dialog(app, ui, room, &link.name);
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: 40, right: 40, top: 32, bottom: 32 }).show(ui, |ui| {
             ui.set_max_width(560.);
@@ -512,28 +537,32 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
             ui.add_space(20.);
             egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(12)).inner_margin(8).show(ui, |ui| {
                 ui.set_width(ui.available_width());
+                // While its call goes on, Desktop's settings and Delete wait.
+                let active = app.panes.active_calls.get(&ConversationId::call_link(room)).is_some_and(|u| !u.is_empty());
                 if admin {
-                    ui.horizontal(|ui| {
-                        ui.add_space(10.);
-                        ui.label(tr("Call name"));
-                        let field = ui.add(egui::TextEdit::singleline(&mut app.panes.link_name).hint_text("Signal call").desired_width(260.));
-                        if field.lost_focus() && app.panes.link_name.trim() != link.name {
-                            app.send(Command::UpdateCallLink { room_id: room.to_owned(), name: Some(app.panes.link_name.trim().to_owned()), restrictions: None });
-                        }
-                    });
-                    ui.add_space(6.);
+                    // Desktop's Add call name / Edit call name row.
+                    let label = if link.name.is_empty() { tr("Add call name") } else { tr("Edit call name") };
+                    if menu_row(ui, Some(Icon::Edit), label, false).clicked() {
+                        app.panes.link_name = link.name.clone();
+                        app.panes.link_name_open = true;
+                    }
                     let mut approve = link.restrictions == CallLinkRestrictions::AdminApproval;
-                    ui.horizontal(|ui| {
+                    let row = ui.horizontal(|ui| {
                         ui.add_space(10.);
                         ui.label(tr("Require admin approval"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(10.);
-                            if widgets::switch(ui, &mut approve).changed() {
-                                let restrictions = if approve { CallLinkRestrictions::AdminApproval } else { CallLinkRestrictions::None };
-                                app.send(Command::UpdateCallLink { room_id: room.to_owned(), name: None, restrictions: Some(restrictions) });
-                            }
+                            ui.add_enabled_ui(!active, |ui| {
+                                if widgets::switch(ui, &mut approve).changed() {
+                                    let restrictions = if approve { CallLinkRestrictions::AdminApproval } else { CallLinkRestrictions::None };
+                                    app.send(Command::UpdateCallLink { room_id: room.to_owned(), name: None, restrictions: Some(restrictions) });
+                                }
+                            });
                         });
                     });
+                    if active {
+                        row.response.on_hover_text(tr("This setting can\u{2019}t be changed while the call is active"));
+                    }
                     ui.add_space(6.);
                 }
                 if menu_row(ui, Some(Icon::Copy), tr("Copy link"), false).clicked() {
@@ -545,7 +574,10 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                     app.panes.share_text = Some((url.clone(), Vec::new(), String::new()));
                 }
                 let label = if admin { tr("Delete link") } else { "Remove link" };
-                if menu_row(ui, Some(Icon::Trash), label, true).clicked() {
+                let r = ui.add_enabled_ui(!active, |ui| menu_row(ui, Some(Icon::Trash), label, true)).inner;
+                if active {
+                    r.on_hover_text(tr("This link can\u{2019}t be deleted while the call is active"));
+                } else if r.clicked() {
                     app.panes.confirm_delete_link = Some(room.to_owned());
                 }
             });

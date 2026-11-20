@@ -97,6 +97,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's CallLinkAddNameModal, open.
+    pub link_name_open: bool,
     /// Desktop's UsernameOnboardingModal ("New ways to connect").
     pub username_onboarding: bool,
     /// A new group is being made (Create's spinner); a failure shows
