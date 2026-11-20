@@ -547,17 +547,19 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             }
         }
         Dialog::PollVotes { message } => {
-            let Some(poll) = chat.iter().find(|m| m.id == *message).and_then(|m| m.poll.clone()) else { return vec![Do::Close] };
-            let modal = egui::Modal::new(egui::Id::unique("poll-votes")).frame(frame).show(ui.ctx(), |ui| {
-                crate::polls::votes_dialog(app, ui, &palette, &poll);
-                ui.add_space(12.);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Done", true).clicked() {
-                        out.push(Do::Close);
-                    }
-                });
+            let Some(m) = chat.iter().find(|m| m.id == *message) else { return vec![Do::Close] };
+            let Some(poll) = m.poll.clone() else { return vec![Do::Close] };
+            let ours = m.direction == langis_store::Direction::Outgoing;
+            let id = m.id;
+            let mut end = false;
+            let closed = crate::panes::modal(ui, "poll-votes", 400., |ui| {
+                end = crate::polls::votes_dialog(app, ui, &palette, &poll, ours);
             });
-            if modal.should_close() {
+            if end {
+                out.push(Do::Command(Command::EndPoll { message_id: id }));
+                out.push(Do::Close);
+            }
+            if closed {
                 out.push(Do::Close);
             }
         }

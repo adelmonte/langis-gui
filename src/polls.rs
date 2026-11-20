@@ -261,37 +261,56 @@ pub fn paint(
     out
 }
 
-/// Desktop's "Poll votes": who chose each option.
-pub fn votes_dialog(app: &crate::app::App, ui: &mut Ui, palette: &Palette, poll: &langis_store::Poll) {
-    ui.set_width(380.);
-    ui.label(RichText::new("Poll votes").font(theme::semibold(18.)));
+/// Desktop's `PollVotesModal`: "Poll details", the question, then each
+/// option with its count and who voted for it; ours, still open, ends
+/// from its End poll. True when End poll was pressed.
+pub fn votes_dialog(app: &crate::app::App, ui: &mut Ui, palette: &Palette, poll: &langis_store::Poll, ours: bool) -> bool {
+    ui.set_width(400.);
+    crate::panes::title(ui, "Poll details");
+    ui.label(RichText::new("Question").font(theme::semibold(13.)).color(palette.text_secondary));
     ui.add_space(4.);
-    ui.label(RichText::new(&poll.question).color(palette.text_secondary));
+    ui.label(RichText::new(&poll.question).font(theme::regular(14.)));
+    let mut end = false;
     egui::ScrollArea::vertical().max_height(420.).auto_shrink([false, true]).show(ui, |ui| {
         for (i, option) in poll.options.iter().enumerate() {
-            let who: Vec<String> = poll
-                .votes
-                .iter()
-                .filter(|v| v.options.contains(&(i as u32)))
-                .map(|v| match &v.author {
-                    None => "You".to_owned(),
-                    Some(a) => app.name(a),
-                })
-                .collect();
-            ui.add_space(12.);
+            let who: Vec<Option<String>> = poll.votes.iter().filter(|v| v.options.contains(&(i as u32))).map(|v| v.author.clone()).collect();
+            ui.add_space(16.);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(option).font(theme::semibold(14.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(if who.len() == 1 { "1 vote".to_owned() } else { format!("{} votes", who.len()) }).font(theme::regular(12.)).color(palette.text_secondary));
+                    let count = if who.len() == 1 { "1 vote".to_owned() } else { format!("{} votes", who.len()) };
+                    ui.label(RichText::new(count).font(theme::regular(13.)).color(palette.text_secondary));
                 });
             });
-            for name in who {
+            ui.add_space(4.);
+            for author in who {
                 ui.horizontal(|ui| {
-                    let color = name.bytes().fold(0u8, |a, b| a.wrapping_add(b));
-                    widgets::avatar(ui, &widgets::AvatarSpec::person(&name, color), 24.);
-                    ui.label(RichText::new(name).font(theme::regular(14.)));
+                    ui.set_min_height(36.);
+                    match &author {
+                        None => {
+                            widgets::avatar(ui, &widgets::AvatarSpec { photo: app.me.1.as_deref(), ..widgets::AvatarSpec::person(&app.me.0, 0) }, 28.);
+                            ui.label(RichText::new("You").font(theme::regular(14.)));
+                        }
+                        Some(a) => {
+                            let name = app.name(a);
+                            match app.conversation(&langis_store::ConversationId::direct(a)) {
+                                Some(c) => widgets::avatar(ui, &widgets::AvatarSpec::of(c), 28.),
+                                None => widgets::avatar(ui, &widgets::AvatarSpec::person(&name, a.bytes().fold(0u8, |x, b| x.wrapping_add(b))), 28.),
+                            };
+                            ui.label(RichText::new(name).font(theme::regular(14.)));
+                        }
+                    }
                 });
             }
         }
     });
+    if ours && !poll.ended {
+        ui.add_space(16.);
+        ui.vertical_centered_justified(|ui| {
+            if widgets::axo_button(ui, "End poll", widgets::Axo::SubtleSecondary).clicked() {
+                end = true;
+            }
+        });
+    }
+    end
 }
