@@ -207,7 +207,7 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
 const GIF_CATEGORIES: [(&str, &str); 7] = [
     ("Celebrate", "celebrate"),
     ("Love", "love"),
-    ("Thumbs up", "thumbs up"),
+    ("Thumbs Up", "thumbs up"),
     ("Surprised", "surprised"),
     ("Excited", "excited"),
     ("Sad", "sad"),
@@ -389,91 +389,38 @@ fn sticker_image(ui: &Ui, path: &std::path::Path, rect: Rect) {
     egui::Image::new(crate::thumbs::uri(ui.ctx(), &file, rect.size())).maintain_aspect_ratio(true).fit_to_exact_size(rect.size()).paint_at(ui, rect);
 }
 
+/// Desktop's `FunPanelStickers`: Search stickers, the sub-nav (Recently
+/// Used, Favorites, each pack, then add), and one scroll through them all,
+/// four across, each section titled.
 fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send> {
     let mut send = None;
-    // With no favorites yet, open on the first pack.
-    if fun.pack.is_none() && fun.favorites.is_empty() && !fun.chose_pack {
-        fun.pack = fun.packs.first().map(|p| p.id.clone());
-    }
-    // Desktop's "Search stickers": by the emoji they stand for.
     widgets::text_field(ui, &mut fun.sticker_query, tr("Search stickers"), false);
     ui.add_space(6.);
     let query = fun.sticker_query.trim().to_owned();
-    // The packs along the top: favorites, each installed pack, then "+".
-    if query.is_empty() {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.;
-        // Desktop's Recents first, when there are any.
-        if !fun.recent_stickers.is_empty() {
-            let (rect, r) = ui.allocate_exact_size(Vec2::splat(34.), Sense::click());
-            if fun.sticker_recents || r.hovered() {
-                ui.painter().rect_filled(rect, CornerRadius::same(8), if fun.sticker_recents { palette.fill_pressed } else { palette.fill });
-            }
-            theme::paint_symbol(ui.painter(), "recent", rect.center(), 18., palette.text);
-            if r.on_hover_text(tr("Recently Used")).clicked() {
-                fun.sticker_recents = true;
-                fun.chose_pack = true;
-            }
-        }
-        let (rect, r) = ui.allocate_exact_size(Vec2::splat(34.), Sense::click());
-        let favorites_on = fun.pack.is_none() && !fun.sticker_recents;
-        if favorites_on || r.hovered() {
-            ui.painter().rect_filled(rect, CornerRadius::same(8), if favorites_on { palette.fill_pressed } else { palette.fill });
-        }
-        theme::paint_symbol(ui.painter(), if favorites_on { "star-fill" } else { "star" }, rect.center(), 18., palette.text);
-        if r.on_hover_text("Favorites").clicked() {
-            fun.pack = None;
-            fun.sticker_recents = false;
-            fun.chose_pack = true;
-        }
-        egui::ScrollArea::horizontal().max_width(ui.available_width() - 40.).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for pack in &fun.packs {
-                    let (rect, r) = ui.allocate_exact_size(Vec2::splat(34.), Sense::click());
-                    let on = !fun.sticker_recents && fun.pack.as_ref() == Some(&pack.id);
-                    if on || r.hovered() {
-                        ui.painter().rect_filled(rect, CornerRadius::same(8), if on { palette.fill_pressed } else { palette.fill });
-                    }
-                    if let Some(cover) = pack.stickers.first() {
-                        sticker_image(ui, &cover.path, rect.shrink(4.));
-                    }
-                    if r.on_hover_text(&pack.title).clicked() {
-                        fun.pack = Some(pack.id.clone());
-                        fun.sticker_recents = false;
-                    }
-                }
-            });
-        });
-        if widgets::icon_button(ui, Icon::Plus, 18., tr("Add stickers")).clicked() {
-            fun.manager_open = true;
-            app.send(Command::LoadStickerManager);
-        }
-    });
-    ui.add_space(6.);
-    }
-    let shown: Vec<(Arc<StickerPackView>, StickerView)> = match &fun.pack {
-        _ if !query.is_empty() => {
-            let options = langis_emoji::SearchOptions { limit: 60, ..Default::default() };
-            let mut wanted: Vec<&str> = langis_emoji::search(&query, &options).into_iter().map(|m| m.emoji.glyph).collect();
-            wanted.push(query.as_str());
-            let strip = |e: &str| e.chars().filter(|c| !matches!(c, '\u{fe0f}' | '\u{fe0e}')).collect::<String>();
-            let wanted: Vec<String> = wanted.into_iter().map(strip).collect();
-            fun.packs
-                .iter()
-                .flat_map(|p| p.stickers.iter().filter(|s| s.emoji.as_deref().is_some_and(|e| wanted.contains(&strip(e)))).map(|s| (p.clone(), s.clone())))
-                .collect()
-        }
-        // Recents: those still in an installed pack.
-        _ if fun.sticker_recents => fun
+    type Item = (Arc<StickerPackView>, StickerView);
+    // The sections: (title, sub-nav cover, stickers).
+    let mut sections: Vec<(String, Option<std::path::PathBuf>, &'static str, Vec<Item>)> = Vec::new();
+    if !query.is_empty() {
+        let options = langis_emoji::SearchOptions { limit: 60, ..Default::default() };
+        let mut wanted: Vec<&str> = langis_emoji::search(&query, &options).into_iter().map(|m| m.emoji.glyph).collect();
+        wanted.push(query.as_str());
+        let strip = |e: &str| e.chars().filter(|c| !matches!(c, '\u{fe0f}' | '\u{fe0e}')).collect::<String>();
+        let wanted: Vec<String> = wanted.into_iter().map(strip).collect();
+        let found: Vec<Item> = fun.packs.iter().flat_map(|p| p.stickers.iter().filter(|s| s.emoji.as_deref().is_some_and(|e| wanted.contains(&strip(e)))).map(|s| (p.clone(), s.clone()))).collect();
+        sections.push((tr("Search Results").to_owned(), None, "search", found));
+    } else {
+        let recents: Vec<Item> = fun
             .recent_stickers
             .iter()
             .filter_map(|(pack, sticker)| {
                 let p = fun.packs.iter().find(|p| &p.id == pack)?;
                 Some((p.clone(), p.stickers.iter().find(|s| s.id == *sticker)?.clone()))
             })
-            .collect(),
-        Some(id) => fun.packs.iter().find(|p| &p.id == id).map(|p| p.stickers.iter().map(|s| (p.clone(), s.clone())).collect()).unwrap_or_default(),
-        None => fun
+            .collect();
+        if !recents.is_empty() {
+            sections.push((tr("Recently Used").to_owned(), None, "recent", recents));
+        }
+        let favorites: Vec<Item> = fun
             .favorites
             .iter()
             .map(|f| {
@@ -482,78 +429,135 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                 });
                 (pack, f.sticker.clone())
             })
-            .collect(),
-    };
-    let title = match &fun.pack {
-        _ if !query.is_empty() => tr("Search Results").to_owned(),
-        _ if fun.sticker_recents => tr("Recently Used").to_owned(),
-        Some(id) => fun.packs.iter().find(|p| &p.id == id).map(|p| p.title.clone()).unwrap_or_default(),
-        None => tr("Favorites").to_owned(),
-    };
-    ui.label(RichText::new(title).font(theme::semibold(13.)).color(palette.text_secondary));
-    if shown.is_empty() {
+            .collect();
+        if !favorites.is_empty() {
+            sections.push((tr("Favorites").to_owned(), None, "star", favorites));
+        }
+        for p in &fun.packs {
+            let title = if p.title.is_empty() { tr("Sticker Pack").to_owned() } else { p.title.clone() };
+            sections.push((title, p.stickers.first().map(|s| s.path.clone()), "", p.stickers.iter().map(|s| (p.clone(), s.clone())).collect()));
+        }
+    }
+    let cell = (ui.available_width() / 4.).floor();
+    const HEADER: f32 = 32.;
+    let mut tops = Vec::new();
+    let mut y = 0.;
+    for (_, _, _, items) in &sections {
+        tops.push(y);
+        y += HEADER + items.len().div_ceil(4) as f32 * cell;
+    }
+    let total = y;
+    let offset_id = ui.scope_id().with("sticker-scroll");
+    let offset: f32 = ui.ctx().data(|d| d.get_temp(offset_id)).unwrap_or(0.);
+    let current = tops.iter().rposition(|t| *t <= offset + 1.).unwrap_or(0);
+    let mut jump = None;
+    // The sub-nav: a section's symbol or its pack's cover, then add.
+    if query.is_empty() {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.;
+            egui::ScrollArea::horizontal().id_salt("sticker-subnav").max_width(ui.available_width() - 40.).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (i, (title, cover, symbol, _)) in sections.iter().enumerate() {
+                        let (rect, r) = ui.allocate_exact_size(Vec2::splat(34.), Sense::click());
+                        let on = i == current;
+                        if on || r.hovered() {
+                            ui.painter().rect_filled(rect, CornerRadius::same(8), if on { palette.fill_pressed } else { palette.fill });
+                        }
+                        match cover {
+                            Some(path) => sticker_image(ui, path, rect.shrink(4.)),
+                            None => theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., palette.text),
+                        }
+                        if r.on_hover_text(title.as_str()).clicked() {
+                            jump = Some(i);
+                        }
+                    }
+                });
+            });
+            if widgets::icon_button(ui, Icon::Plus, 18., tr("Add stickers")).clicked() {
+                fun.manager_open = true;
+                app.send(Command::LoadStickerManager);
+            }
+        });
+        ui.add_space(6.);
+    }
+    if sections.iter().all(|(_, _, _, items)| items.is_empty()) {
         ui.add_space(40.);
         ui.vertical_centered(|ui| {
-            let text = if !query.is_empty() {
-                tr("No stickers found")
-            } else if fun.pack.is_none() {
-                "Stickers you favorite show up here."
-            } else {
-                "No stickers in this pack yet."
-            };
+            let text = if !query.is_empty() { tr("No stickers found") } else { tr("No sticker packs, add stickers to send to your friends.") };
             ui.label(RichText::new(text).color(palette.text_secondary));
+            if query.is_empty() {
+                ui.add_space(8.);
+                if widgets::pill_button(ui, tr("Add stickers"), true).clicked() {
+                    fun.manager_open = true;
+                    app.send(Command::LoadStickerManager);
+                }
+            }
         });
         return None;
     }
-    let cell = (ui.available_width() / 4.).floor();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for row in shown.chunks(4) {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.;
-                for (pack, sticker) in row {
-                    let (rect, r) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
-                    if r.hovered() {
-                        ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
-                    }
-                    sticker_image(ui, &sticker.path, rect.shrink(6.));
-                    let favorite = fun.favorite_ids.iter().any(|(p, s)| *p == pack.id && *s == sticker.id)
-                        || fun.favorites.iter().any(|f| f.pack_id == pack.id && f.sticker.id == sticker.id);
-                    if favorite {
-                        ui.painter().text(rect.right_top() + Vec2::new(-8., 6.), Align2::RIGHT_TOP, "★", theme::regular(13.), palette.badge);
-                    }
-                    let r = r.on_hover_text(sticker.emoji.clone().unwrap_or_default());
-                    // Its menu: favorite it or not, its pack, out of Recents.
-                    let menu = egui::Id::unique(("sticker-menu", &pack.id, sticker.id));
-                    if r.secondary_clicked()
-                        && let Some(at) = r.interact_pointer_pos()
-                    {
-                        crate::menu::open_at(ui.ctx(), menu, at);
-                    }
-                    crate::menu::show(ui.ctx(), menu, |m| {
-                        if m.item(Some(if favorite { "star-slash" } else { "star" }), if favorite { "Remove from favorites" } else { "Add to favorites" }) {
-                            app.send(Command::SetStickerFavorite { pack_id: pack.id.clone(), pack_key: pack.key.clone(), sticker_id: sticker.id, favorite: !favorite });
-                        }
-                        if !pack.title.is_empty() && m.item(Some("stickerpack"), "View sticker pack") {
-                            fun.sticker_query.clear();
-                            fun.pack = Some(pack.id.clone());
-                            fun.sticker_recents = false;
-                            fun.chose_pack = true;
-                        }
-                        if fun.sticker_recents && m.item(Some("x-circle"), "Remove from recents") {
-                            fun.forget_recent = Some((pack.id.clone(), sticker.id));
-                        }
-                    });
-                    if held(ui, &r) {
-                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("fun-held"), true));
-                        lightbox(ui, |ui, big| sticker_image(ui, &sticker.path, big));
-                    }
-                    if r.clicked() && !ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("fun-held"))).unwrap_or(false) {
-                        send = Some(Send::Sticker(pack.clone(), sticker.clone()));
-                    }
+    let mut area = egui::ScrollArea::vertical().id_salt("sticker-grid").auto_shrink([false, false]);
+    if let Some(i) = jump {
+        area = area.vertical_scroll_offset(tops[i]);
+    }
+    let output = area.show_viewport(ui, |ui, viewport| {
+        ui.set_height(total);
+        let origin = ui.min_rect().min;
+        for (si, (title, _, _, items)) in sections.iter().enumerate() {
+            let top = tops[si];
+            let bottom = top + HEADER + items.len().div_ceil(4) as f32 * cell;
+            if bottom < viewport.top() || top > viewport.bottom() {
+                continue;
+            }
+            ui.painter().text(origin + Vec2::new(4., top + HEADER / 2.), Align2::LEFT_CENTER, title, theme::semibold(13.), palette.text_secondary);
+            for (i, (pack, sticker)) in items.iter().enumerate() {
+                let rect = Rect::from_min_size(origin + Vec2::new((i % 4) as f32 * cell, top + HEADER + (i / 4) as f32 * cell), Vec2::splat(cell));
+                if rect.bottom() < origin.y + viewport.top() || rect.top() > origin.y + viewport.bottom() {
+                    continue;
                 }
-            });
+                let r = ui.interact(rect, ui.scope_id().with(("sticker", si, i)), Sense::click());
+                if r.hovered() {
+                    ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                }
+                sticker_image(ui, &sticker.path, rect.shrink(6.));
+                let favorite = fun.favorite_ids.iter().any(|(p, s)| *p == pack.id && *s == sticker.id)
+                    || fun.favorites.iter().any(|f| f.pack_id == pack.id && f.sticker.id == sticker.id);
+                let show_recents_menu = title == tr("Recently Used");
+                let was_recents = fun.sticker_recents;
+                fun.sticker_recents = show_recents_menu;
+                let r = r.on_hover_text(sticker.emoji.clone().unwrap_or_default());
+                // Its menu: favorite it or not, its pack, out of Recents.
+                let menu = egui::Id::unique(("sticker-menu", &pack.id, sticker.id));
+                if r.secondary_clicked()
+                    && let Some(at) = r.interact_pointer_pos()
+                {
+                    crate::menu::open_at(ui.ctx(), menu, at);
+                }
+                crate::menu::show(ui.ctx(), menu, |m| {
+                    if m.item(Some(if favorite { "star-slash" } else { "star" }), if favorite { "Remove from favorites" } else { "Add to favorites" }) {
+                        app.send(Command::SetStickerFavorite { pack_id: pack.id.clone(), pack_key: pack.key.clone(), sticker_id: sticker.id, favorite: !favorite });
+                    }
+                    if !pack.title.is_empty() && m.item(Some("stickerpack"), "View sticker pack") {
+                        fun.sticker_query.clear();
+                        fun.pack = Some(pack.id.clone());
+                        fun.sticker_recents = false;
+                        fun.chose_pack = true;
+                    }
+                    if fun.sticker_recents && m.item(Some("x-circle"), "Remove from recents") {
+                        fun.forget_recent = Some((pack.id.clone(), sticker.id));
+                    }
+                });
+                if held(ui, &r) {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("fun-held"), true));
+                    lightbox(ui, |ui, big| sticker_image(ui, &sticker.path, big));
+                }
+                if r.clicked() && !ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("fun-held"))).unwrap_or(false) {
+                    send = Some(Send::Sticker(pack.clone(), sticker.clone()));
+                }
+                fun.sticker_recents = was_recents;
+            }
         }
     });
+    ui.ctx().data_mut(|d| d.insert_temp(offset_id, output.state.clamped_offset().y));
     send
 }
 
@@ -580,7 +584,7 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
         ui.spacing_mut().item_spacing.x = 0.;
         let mut items: Vec<(&str, Option<&str>, &str, bool)> = Vec::new();
         if !fun.recent_gifs.is_empty() {
-            items.push(("Recents", Some("recent"), "", fun.gif_recents));
+            items.push(("Recently Used", Some("recent"), "", fun.gif_recents));
         }
         items.push(("Trending", Some("trending"), "", !fun.gif_recents && wanted.is_empty()));
         for (label, term) in GIF_CATEGORIES {
@@ -611,7 +615,7 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
             }
             if r.on_hover_text(tr(label)).clicked() {
                 match label {
-                    "Recents" => fun.gif_recents = true,
+                    "Recently Used" => fun.gif_recents = true,
                     "Trending" => {
                         fun.gif_recents = false;
                         fun.gif_query.clear();
@@ -637,7 +641,9 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
     if let Some(error) = fun.gif_error.clone() {
         ui.add_space(30.);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new(error).color(palette.text_secondary));
+            // Desktop's words, unless the key's what's missing (langis's own).
+            let text = if error.contains("API key") { error } else { tr("Couldn\u{2019}t load GIFs. Check your connection and try again").to_owned() };
+            ui.label(RichText::new(text).color(palette.text_secondary));
             ui.add_space(8.);
             if widgets::pill_button(ui, tr("Retry"), false).clicked() {
                 fun.gif_error = None;
