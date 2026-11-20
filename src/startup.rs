@@ -108,10 +108,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 start = Some(KeySource::Passphrase(std::mem::take(passphrase)));
             }
         }),
-        Phase::Starting => card(ui, 360., |ui| {
-            ui.add_space(120.);
-            ui.spinner();
-        }),
+        Phase::Starting => loading(ui, &palette),
+        Phase::Syncing => syncing(ui, &palette),
         Phase::Failed(why) => card(ui, 520., |ui| {
             ui.label(RichText::new("langis-gui couldn't start").font(theme::semibold(20.)));
             ui.add_space(12.);
@@ -133,61 +131,116 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     }
 }
 
-/// Desktop's "Scan QR code" step: the code on the left, steps on the right.
-fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHandle>, error: Option<&str>, retry: &mut bool) {
+/// Desktop's install screen background: gray-02, or gray-95 in dark.
+fn install_page(ui: &Ui) -> Color32 {
+    if Palette::of(ui.ctx()).dark { theme::rgb(0x121212) } else { theme::rgb(0xf6f6f6) }
+}
+
+/// Desktop's `AppViewType.Blank` while starting: three pulsing dots, then
+/// "Loading...".
+fn loading(ui: &mut Ui, palette: &Palette) {
     egui::CentralPanel::no_frame().show(ui, |ui| {
-        ui.painter().rect_filled(ui.max_rect(), 0, palette.background);
-        let size = Vec2::new(760., 360.);
+        let page = install_page(ui);
+        ui.painter().rect_filled(ui.max_rect(), 0, page);
+        let center = ui.max_rect().center();
+        let t = ui.input(|i| i.time) as f32;
+        for i in 0..3 {
+            let phase = ((t * 3. - i as f32 * 0.5).sin() + 1.) / 2.;
+            ui.painter().circle_filled(egui::Pos2::new(center.x - 24. + i as f32 * 24., center.y), 7., palette.text_secondary.gamma_multiply(0.3 + 0.7 * phase));
+        }
+        ui.painter().text(egui::Pos2::new(center.x, center.y + 32.), egui::Align2::CENTER_TOP, "Loading...", theme::regular(14.), palette.text_secondary);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    });
+}
+
+/// Desktop's `InstallScreenLinkInProgressStep`: a 50px spinner, then
+/// "Syncing contacts and groups" and its note.
+fn syncing(ui: &mut Ui, palette: &Palette) {
+    egui::CentralPanel::no_frame().show(ui, |ui| {
+        let page = install_page(ui);
+        ui.painter().rect_filled(ui.max_rect(), 0, page);
+        ui.with_layout(Layout::top_down(Align::Center), |ui| {
+            ui.add_space((ui.available_height() / 2. - 80.).max(24.));
+            ui.add(egui::Spinner::new().size(50.).color(palette.text_secondary));
+            ui.add_space(24.);
+            ui.label(RichText::new("Syncing contacts and groups").font(theme::semibold(20.)));
+            ui.add_space(8.);
+            ui.label(RichText::new("Note: Your chat history will not be synced to this device").font(theme::regular(14.)).color(palette.text_secondary));
+        });
+    });
+}
+
+const SUPPORT_PAGE: &str = "https://support.signal.org/hc/articles/360007320551-Linked-Devices";
+
+/// Desktop's `InstallScreenQrCodeNotScannedStep`: one white card (radius 8,
+/// padding 22, 44 in dark) holding the 256px code and, beside it, the
+/// title, the numbered steps and "Need help?", all in black.
+fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHandle>, error: Option<&str>, retry: &mut bool) {
+    let _ = palette;
+    egui::CentralPanel::no_frame().show(ui, |ui| {
+        let page = install_page(ui);
+        ui.painter().rect_filled(ui.max_rect(), 0, page);
+        let dark = Palette::of(ui.ctx()).dark;
+        let pad = if dark { 44. } else { 22. };
+        let black = Color32::BLACK;
+        let blue = theme::rgb(0x2c6bed);
+        let text_w = 360f32.min(ui.max_rect().width() - 2. * pad - 256. - 46. - 48.).max(200.);
+        let size = Vec2::new(2. * pad + 8. + 256. + 38. + text_w, 2. * pad + 272.);
         let rect = egui::Rect::from_center_size(ui.max_rect().center(), size);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-            ui.horizontal(|ui| {
-                // The code, on a white card in either theme.
-                let (card, _) = ui.allocate_exact_size(Vec2::splat(296.), egui::Sense::hover());
-                ui.painter().rect_filled(card, CornerRadius::same(24), Color32::WHITE);
-                match (qr, has_url) {
-                    (Some(qr), _) => {
-                        egui::Image::new(qr).paint_at(ui, card.shrink(28.));
-                    }
-                    _ => {
-                        ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| {
-                            ui.centered_and_justified(|ui| {
-                                if error.is_some() {
-                                    ui.label(RichText::new("Couldn't get a code").color(Color32::BLACK));
-                                } else {
-                                    ui.add(egui::Spinner::new().color(Color32::GRAY));
-                                }
-                            });
-                        });
-                    }
-                }
-                ui.add_space(56.);
-                ui.vertical(|ui| {
-                    ui.add_space(24.);
-                    ui.label(RichText::new("Scan QR code using the phone with your Signal account").font(theme::semibold(24.)));
-                    ui.add_space(24.);
-                    let steps = [
-                        "Open Signal on your phone",
-                        "Tap Settings, then Linked devices",
-                        "Tap Link a new device and scan this code",
-                    ];
-                    for (n, step) in steps.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            let (dot, _) = ui.allocate_exact_size(Vec2::splat(24.), egui::Sense::hover());
-                            ui.painter().circle_filled(dot.center(), 12., palette.fill_secondary);
-                            ui.painter().text(dot.center(), egui::Align2::CENTER_CENTER, (n + 1).to_string(), theme::semibold(13.), palette.text);
-                            ui.label(RichText::new(*step).font(theme::regular(16.)));
-                        });
-                        ui.add_space(10.);
-                    }
-                    if let Some(error) = error {
-                        ui.add_space(8.);
-                        ui.colored_label(palette.destructive, error);
-                        if widgets::pill_button(ui, "Retry", true).clicked() {
+        ui.painter().rect_filled(rect, CornerRadius::same(8), Color32::WHITE);
+        let code = egui::Rect::from_min_size(rect.min + Vec2::new(pad + 8., pad + 8.), Vec2::splat(256.));
+        match (qr, has_url, error) {
+            (_, _, Some(why)) => {
+                // `__qr-code--load-failed`: a gray-05 outline, the red error
+                // icon, what happened, and Retry.
+                ui.painter().rect_stroke(code, CornerRadius::same(10), egui::Stroke::new(1.5, theme::rgb(0xe9e9e9)), egui::StrokeKind::Inside);
+                ui.scope_builder(egui::UiBuilder::new().max_rect(code.shrink(24.)), |ui| {
+                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
+                        ui.add_space(40.);
+                        theme::paint_symbol(ui.painter(), "error-circle", egui::Pos2::new(ui.max_rect().center().x, ui.cursor().top() + 11.), 22., theme::rgb(0xe51d0e));
+                        ui.add_space(30.);
+                        ui.label(RichText::new("An unexpected error occurred.").font(theme::regular(13.)).color(theme::rgb(0x5e5e5e)))
+                            .on_hover_text(why);
+                        ui.label(RichText::new("Please try again.").font(theme::regular(13.)).color(theme::rgb(0x5e5e5e)));
+                        ui.add_space(16.);
+                        let r = ui.add(egui::Label::new(RichText::new("\u{21bb} Retry").font(theme::semibold(13.)).color(blue)).sense(egui::Sense::click()));
+                        if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             *retry = true;
                         }
-                    }
+                    });
                 });
-            });
+            }
+            (Some(qr), _, None) => {
+                egui::Image::new(qr).paint_at(ui, code);
+            }
+            _ => {
+                ui.put(egui::Rect::from_center_size(code.center(), Vec2::splat(32.)), egui::Spinner::new().size(32.).color(Color32::GRAY));
+            }
+        }
+        let text = egui::Rect::from_min_max(egui::Pos2::new(code.right() + 38., rect.top() + pad), egui::Pos2::new(rect.right() - pad, rect.bottom() - pad));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(text), |ui| {
+            ui.spacing_mut().item_spacing.y = 0.;
+            ui.add_space((text.height() - 196.).max(0.) / 2.);
+            let mut title = egui::text::LayoutJob::simple("Scan this code in the Signal app on your phone".into(), theme::semibold(20.), black, text.width());
+            title.sections[0].format.line_height = Some(26.);
+            ui.label(title);
+            ui.add_space(8.);
+            let step = |ui: &mut Ui, parts: &[(&str, bool)]| {
+                let mut job = egui::text::LayoutJob::default();
+                job.wrap.max_width = text.width();
+                for (t, bold) in parts {
+                    job.append(t, 0., egui::TextFormat { font_id: if *bold { theme::semibold(14.) } else { theme::regular(14.) }, color: black, line_height: Some(26.), ..Default::default() });
+                }
+                ui.label(job);
+            };
+            step(ui, &[("1. Open Signal on your phone", false)]);
+            step(ui, &[("2. Tap into ", false), ("Settings", true), (", then tap ", false), ("Linked Devices", true)]);
+            step(ui, &[("3. Tap ", false), ("Link a New Device", true)]);
+            ui.add_space(8.);
+            let help = ui.add(egui::Label::new(RichText::new("Need help?").font(theme::regular(14.)).color(blue)).sense(egui::Sense::click()));
+            if help.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                crate::chat::open_externally(SUPPORT_PAGE);
+            }
         });
     });
 }

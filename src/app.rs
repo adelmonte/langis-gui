@@ -25,6 +25,8 @@ pub enum Phase {
     Starting,
     /// No account yet: the QR code to scan, once it's here.
     Linking { url: Option<String>, error: Option<String>, qr: Option<egui::TextureHandle> },
+    /// The phone scanned the code: the first sync runs until `Ready`.
+    Syncing,
     Ready,
     /// The backend couldn't start.
     Failed(String),
@@ -444,6 +446,7 @@ impl App {
                 let qr = crate::startup::qr_texture(&self.ctx, url.as_str());
                 self.phase = Phase::Linking { url: Some(url.to_string()), error: None, qr };
             }
+            Event::Linked => self.phase = Phase::Syncing,
             Event::LinkFailed(why) => {
                 if let Phase::Linking { error, .. } = &mut self.phase {
                     *error = Some(why);

@@ -148,6 +148,12 @@ fn screenshots() {
     harness.state_mut().phase = Phase::Linking { url: Some("demo".into()), error: None, qr };
     wait(&mut harness, "link screen", |_| true);
     save(&mut harness, "link");
+    harness.state_mut().phase = Phase::Linking { url: None, error: Some("demo failure".into()), qr: None };
+    wait(&mut harness, "link error", |_| true);
+    save(&mut harness, "link-error");
+    harness.state_mut().phase = Phase::Syncing;
+    wait(&mut harness, "syncing", |_| true);
+    save(&mut harness, "link-syncing");
     harness.state_mut().phase = Phase::Setup { passphrase: true, first: String::new(), second: String::new(), error: None };
     wait(&mut harness, "setup screen", |_| true);
     save(&mut harness, "setup");
