@@ -25,7 +25,7 @@ pub struct Contact {
     about: Option<langis_core::ContactDetails>,
     pub about_open: bool,
     /// Add to a group: the groups' search, while picking.
-    add_to_group: Option<String>,
+    pub add_to_group: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]

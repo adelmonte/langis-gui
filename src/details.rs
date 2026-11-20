@@ -316,7 +316,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     }
                 }
                 None => {
-                    let n = c.members.len();
+                    let n = c.members.len() + 1;
                     body(ui, palette, &crate::i18n::tf("icu:ConversationDetailsHeader--members", &format!("{n} members"), &[("number", crate::i18n::Arg::from(n))]));
                 }
             }
@@ -443,19 +443,34 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         && let Some(them) = c.id.as_direct()
     {
         let common: Vec<Conversation> = app.conversations.iter().filter(|g| g.kind == ConversationKind::Group && !g.left && g.members.iter().any(|m| m == them)).cloned().collect();
-        if !common.is_empty() {
-            axo_list::gap(ui);
-            let title = if common.len() == 1 { "1 group in common".to_owned() } else { crate::i18n::tf("icu:ConversationDetailsGroups--title", &format!("{} groups in common", common.len()), &[("count", crate::i18n::Arg::from(&common.len()))]) };
-            axo_list::list(ui, Some(&title), None, |ui| {
-                for g in &common {
-                    let row = group_row(ui, palette, g);
-                    if row.clicked() {
-                        app.panes.details = None;
-                        app.open(g.id.clone());
-                    }
+        axo_list::gap(ui);
+        let n = common.len();
+        let title = if n == 0 {
+            tr("No groups in common").to_owned()
+        } else {
+            crate::i18n::tf("icu:ConversationDetailsGroups--title", &if n == 1 { "1 group in common".to_owned() } else { format!("{n} groups in common") }, &[("count", crate::i18n::Arg::from(n))])
+        };
+        let see_all_id = egui::Id::unique(("common-see-all", c.id.0.as_str()));
+        let all = ui.ctx().data(|d| d.get_temp::<bool>(see_all_id)).unwrap_or(false);
+        axo_list::list(ui, Some(&title), None, |ui| {
+            // Desktop's "Add to a group", then the first five and See all.
+            if axo_list::item(ui, Item::new(tr("Add to a group")).symbol("plus"), End::Click).clicked() {
+                crate::contact_modal::open(app, None, them.to_owned());
+                if let Some(contact) = app.panes.contact.as_mut() {
+                    contact.add_to_group = Some(String::new());
                 }
-            });
-        }
+            }
+            for g in common.iter().take(if all { usize::MAX } else { 5 }) {
+                let row = group_row(ui, palette, g);
+                if row.clicked() {
+                    app.panes.details = None;
+                    app.open(g.id.clone());
+                }
+            }
+            if !all && n > 5 && axo_list::item(ui, Item::new(tr("See all")).symbol("chevron-down"), End::Click).clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(see_all_id, true));
+            }
+        });
     }
 
     // Recent calls with this chat (Desktop's `CallHistoryGroupPanelSection`),
@@ -503,11 +518,14 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             {
                 d.add_members = Some((String::new(), Vec::new()));
             }
-            let mut everyone: Vec<String> = c.members.clone();
+            // Desktop's order: you, then admins, then everyone else.
+            let mut everyone: Vec<String> = c.members.iter().filter(|m| c.admins.contains(m)).cloned().collect();
+            everyone.extend(c.members.iter().filter(|m| !c.admins.contains(m)).cloned());
+            everyone.retain(|m| *m != me);
             everyone.insert(0, me.clone());
             // Desktop's member search (`GroupMembersSearchDialog`) once the
             // list is long, and its first few until View all.
-            const SHOWN: usize = 6;
+            const SHOWN: usize = 5;
             let long = everyone.len() > SHOWN;
             if long && let Some(d) = app.panes.details.as_mut() {
                 ui.horizontal(|ui| {
@@ -520,14 +538,16 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             let (query, all) = app.panes.details.as_ref().map(|d| (d.member_query.trim().to_lowercase(), d.all_members)).unwrap_or_default();
             let names: Vec<(String, String)> = everyone.into_iter().map(|m| { let n = if m == me { tr("You").to_owned() } else { app.name(&m) }; (m, n) }).collect();
             let matching: Vec<(String, String)> = names.into_iter().filter(|(_, n)| query.is_empty() || n.to_lowercase().contains(&query)).collect();
-            let hidden = if query.is_empty() && !all && long { matching.len().saturating_sub(SHOWN) } else { 0 };
+            // "Show all" only when it would show more than one more.
+            let hidden = if query.is_empty() && !all && matching.len() > SHOWN + 1 { matching.len() - SHOWN } else { 0 };
             for (m, name) in matching.into_iter().take(if hidden > 0 { SHOWN } else { usize::MAX }) {
                 let you = m == me;
                 let is_admin = c.admins.contains(&m);
                 let label = c.member_labels.get(&m).map(|l| format!("{} {}", l.emoji.clone().unwrap_or_default(), l.text).trim().to_owned());
                 let color = m.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
                 let photo = if you { app.me.1.clone() } else { app.conversation(&ConversationId::direct(&m)).and_then(|p| p.avatar_path.clone()) };
-                let row = member_row(ui, palette, &name, label.as_deref(), color, photo.as_deref(), is_admin.then_some(tr("Admin")));
+                let label_color = theme::name_color(&m, palette.dark);
+                let row = member_row(ui, palette, &name, label.as_deref().map(|l| (l, label_color)), color, photo.as_deref(), is_admin.then_some(tr("Admin")));
                 if !you && row.clicked() {
                     crate::contact_modal::open(app, Some(c.id.clone()), m.clone());
                 }
@@ -548,7 +568,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     });
                 }
             }
-            if hidden > 0 && axo_list::item(ui, Item::new("View all").symbol("chevron-down"), End::Click).clicked()
+            if hidden > 0 && axo_list::item(ui, Item::new(tr("See all")).symbol("chevron-down"), End::Click).clicked()
                 && let Some(d) = app.panes.details.as_mut()
             {
                 d.all_members = true;
@@ -592,7 +612,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             let red = |item: Item<'static>| Item { destructive: true, ..item };
             // Desktop's ConversationDetailsActions: the last admin of a group
             // with others in it can't leave or block it until they pick one.
-            let last_admin = group && c.admins.len() == 1 && c.admins.contains(&app.aci) && c.members.len() > 1;
+            let last_admin = group && c.admins.len() == 1 && c.admins.contains(&app.aci) && !c.members.is_empty();
             let tip = tr("Before you leave, you must choose at least one new admin for this group.");
             if group && !c.left && !c.ended {
                 let r = axo_list::item(ui, red(Item::new(tr("Leave group")).symbol("leave")).disabled(last_admin), End::Click);
@@ -661,7 +681,7 @@ fn group_row(ui: &mut Ui, palette: &Palette, g: &Conversation) -> egui::Response
 }
 
 #[allow(clippy::too_many_arguments)]
-fn member_row(ui: &mut Ui, palette: &Palette, name: &str, label: Option<&str>, color: u8, photo: Option<&str>, end: Option<&str>) -> egui::Response {
+fn member_row(ui: &mut Ui, palette: &Palette, name: &str, label: Option<(&str, egui::Color32)>, color: u8, photo: Option<&str>, end: Option<&str>) -> egui::Response {
     let width = ui.available_width();
     let h = if label.is_some() { 52. } else { 48. };
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::click());
@@ -672,9 +692,13 @@ fn member_row(ui: &mut Ui, palette: &Palette, name: &str, label: Option<&str>, c
     widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo, ..widgets::AvatarSpec::person(name, color) });
     let x = avatar.right() + 12.;
     match label {
-        Some(label) => {
+        // Desktop's GroupMemberLabel: a pill in the member's name color.
+        Some((label, tint)) => {
             ui.painter().text(egui::pos2(x, rect.center().y - 1.), egui::Align2::LEFT_BOTTOM, name, theme::regular(13.), palette.text);
-            ui.painter().text(egui::pos2(x, rect.center().y + 1.), egui::Align2::LEFT_TOP, label, theme::regular(12.), palette.text_secondary);
+            let g = ui.painter().layout_no_wrap(label.to_owned(), theme::regular(11.), tint);
+            let pill = egui::Rect::from_min_size(egui::pos2(x, rect.center().y + 2.), g.size() + egui::vec2(12., 4.));
+            ui.painter().rect_filled(pill, CornerRadius::same(8), tint.gamma_multiply(0.15));
+            ui.painter().galley(pill.min + egui::vec2(6., 2.), g, tint);
         }
         None => {
             ui.painter().text(egui::pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, name, theme::regular(13.), palette.text);
@@ -817,13 +841,21 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     axo_list::list(ui, None, None, |ui| {
         let mut on = link.is_some();
-        let url = link.as_ref().map(|l| l.url.clone());
-        let mut item = Item::new(tr("Group link")).disabled(!admin);
-        if let Some(url) = &url {
-            item = item.description(url);
-        }
+        let item = Item::new(tr("Group link")).disabled(!admin);
         if axo_list::switch(ui, item, &mut on) {
             app.send(Command::ChangeGroupLink { conversation: c.id.clone(), change: if on { LinkChange::On } else { LinkChange::Off } });
+        }
+        // Desktop's link under the switch copies itself when clicked.
+        if let Some(url) = link.as_ref().map(|l| l.url.clone()) {
+            ui.horizontal(|ui| {
+                ui.add_space(16.);
+                let r = ui.add(egui::Label::new(RichText::new(&url).font(theme::regular(12.)).color(_palette.text_secondary)).sense(egui::Sense::click()));
+                if r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tr("Copy signal.group link to clipboard")).clicked() {
+                    ui.ctx().copy_text(url.clone());
+                    app.toast(tr("Copied group link"));
+                }
+            });
+            ui.add_space(8.);
         }
     });
     let Some(link) = link else { return };
@@ -832,20 +864,9 @@ fn group_link(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) 
     axo_list::list(ui, None, None, |ui| {
         if axo_list::item(ui, Item::new(tr("Copy link")).symbol("copy"), End::Click).clicked() {
             ui.ctx().copy_text(link.url.clone());
-            app.toast("Group link copied.");
+            app.toast(tr("Copied group link"));
         }
-        // Desktop's Share: send it in a chat, or show its QR code.
-        if axo_list::item(ui, Item::new("Share via Signal").symbol("forward"), End::Click).clicked()
-            && let Some(d) = app.panes.details.as_mut()
-        {
-            d.share_link = Some((Vec::new(), String::new()));
-        }
-        if axo_list::item(ui, Item::new("QR code").symbol("qrcode"), End::Click).clicked()
-            && let Some(d) = app.panes.details.as_mut()
-        {
-            d.link_qr = true;
-        }
-        if admin && axo_list::item(ui, Item::new(tr("Reset link")).symbol("arrow-clockwise"), End::Click).clicked() {
+        if axo_list::item(ui, Item::new(tr("Reset link")).symbol("arrow-clockwise"), End::Click).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(ask, true));
         }
     });
@@ -1247,7 +1268,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     if !member && row.inner.clicked() {
                         if on {
                             chosen.retain(|m| m != sid);
-                        } else if crate::panes::may_add(app, c.members.len() + chosen.len() + 1) {
+                        } else if crate::panes::may_add(app, c.members.len() + chosen.len() + 2) {
                             chosen.push(sid.to_owned());
                         }
                     }
