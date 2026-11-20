@@ -160,20 +160,25 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
         chat.emoji_open = false;
     }
     if let Some(what) = send {
-        let quote = chat.quote.take();
-        let command = match what {
+        match what {
             Send::Sticker(pack, sticker) => {
                 remember_sticker(app, &pack.id, sticker.id);
-                Command::SendSticker { conversation: c.id.clone(), pack, sticker, quote }
+                let command = Command::SendSticker { conversation: c.id.clone(), pack, sticker, quote: chat.quote.take() };
+                chat.scroll_to_bottom = 10;
+                app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
             }
-            Send::Gif(gif) => {
+            // Desktop stages a GIF in the composer, to go with the text,
+            // asking first when it would replace an attachment.
+            Send::Gif(gif, path) => {
                 remember_gif(app, &gif);
-                Command::SendGif { conversation: c.id.clone(), gif, quote }
+                if chat.staged.is_empty() {
+                    chat.gif_draft = Some((gif, path));
+                } else {
+                    chat.gif_replacing = Some((gif, path));
+                }
             }
-        };
+        }
         chat.emoji_open = false;
-        chat.scroll_to_bottom = 10;
-        app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
     }
     if let Some(e) = picked {
         app.use_emoji(e);
@@ -248,7 +253,7 @@ fn recent_gifs(ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send> {
                 }
             }
             if r.on_hover_text(&gif.title).clicked() {
-                send = Some(Send::Gif(gif.clone()));
+                send = Some(Send::Gif(gif.clone(), path.clone()));
             }
             heights[column] += h + 6.;
         }
@@ -298,7 +303,7 @@ pub fn parse_recent_gifs(text: &str) -> Vec<(Gif, PathBuf)> {
 
 enum Send {
     Sticker(Arc<StickerPackView>, StickerView),
-    Gif(Gif),
+    Gif(Gif, PathBuf),
 }
 
 fn tabs(ui: &mut Ui, palette: &Palette, tab: &mut Tab) {
@@ -554,7 +559,7 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
                 ui.painter().rect_stroke(rect, CornerRadius::same(8), Stroke::new(2., palette.badge), egui::StrokeKind::Inside);
             }
             if r.on_hover_text(&gif.title).clicked() {
-                send = Some(Send::Gif(gif.clone()));
+                send = Some(Send::Gif(gif.clone(), path.clone()));
             }
             heights[column] += h + 6.;
         }

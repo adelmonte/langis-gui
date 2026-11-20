@@ -398,8 +398,11 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             reply_bar(app, ui, palette, chat);
             take_dropped_and_pasted(app, ui, chat);
             media_editor(ui, chat);
+            gif_replace_confirm(ui, chat);
             if !chat.staged.is_empty() {
                 staged_list(ui, palette, chat, c);
+            } else if chat.gif_draft.is_some() {
+                gif_tile(ui, palette, chat);
             }
             input_row(app, ui, palette, chat, c);
         });
@@ -654,7 +657,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let editing = chat.editing.is_some();
-        let dirty = !chat.composer.is_empty() || !chat.staged.is_empty();
+        let dirty = !chat.composer.is_empty() || !chat.staged.is_empty() || chat.gif_draft.is_some();
         let right_w = if editing { 4. + 28. + 16. + 28. + 4. + 4. + 32. } else if dirty { 4. + 32. } else { 4. + 32. + 8. + 32. } ;
         let width = (ui.available_width() - (4. + 32. + 4.) - 12. - right_w).max(100.);
         ui.add_space(4.);
@@ -1055,6 +1058,19 @@ pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversat
         send_staged(app, chat, c);
         return;
     }
+    if chat.editing.is_none()
+        && let Some((gif, _)) = chat.gif_draft.take()
+    {
+        let (caption, mentions, styles) = chat.spans.to_send(&chat.composer);
+        chat.composer.clear();
+        chat.spans.clear();
+        chat.preview.reset();
+        chat.composer_large = false;
+        chat.scroll_to_bottom = 10;
+        let command = Command::SendGif { conversation: c.id.clone(), gif, quote: chat.quote.take(), caption, mentions, styles };
+        app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
+        return;
+    }
     if chat.composer.trim().is_empty() {
         return;
     }
@@ -1245,6 +1261,56 @@ fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
             chat.staged.push(Staged::new(png.into_inner(), name));
         }
     }
+}
+
+/// A picked GIF while something else waits to go: Desktop's
+/// `ConfirmGifSelection`, "Replace attachment?".
+fn gif_replace_confirm(ui: &Ui, chat: &mut ChatView) {
+    let Some(picked) = chat.gif_replacing.clone() else { return };
+    use crate::dialog::{Answer, Variant};
+    match crate::dialog::show(ui.ctx(), egui::Id::unique("replace-with-gif"), "Replace attachment?", "Adding this GIF will replace the item in your current draft message.", Some("Cancel"), &[("Replace", Variant::StrongPrimary)]) {
+        Some(Answer::Action(_)) => {
+            chat.gif_replacing = None;
+            chat.staged.clear();
+            chat.view_once = false;
+            chat.gif_draft = Some(picked);
+        }
+        Some(Answer::Cancel) => chat.gif_replacing = None,
+        None => {}
+    }
+}
+
+/// The staged GIF's tile, its first frame (playing while hovered), with a
+/// remove button.
+fn gif_tile(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
+    let Some((gif, path)) = chat.gif_draft.clone() else { return };
+    let mut remove = false;
+    egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        let h = 64.;
+        let w = (h * gif.preview.width.max(1) as f32 / gif.preview.height.max(1) as f32).clamp(48., 160.);
+        let (rect, r) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
+        let file = path.to_string_lossy();
+        let radius = CornerRadius::same(8);
+        if !(r.hovered() && crate::video::inline(ui, &file, rect, radius)) {
+            match crate::video::poster(ui.ctx(), &file) {
+                Some(still) => crate::chat::cover_image(ui, &still, rect, radius),
+                None => {
+                    ui.painter().rect_filled(rect, radius, palette.fill);
+                }
+            }
+        }
+        ui.painter().text(rect.left_bottom() + Vec2::new(6., -6.), egui::Align2::LEFT_BOTTOM, "GIF", theme::semibold(11.), Color32::WHITE);
+        let x = Rect::from_center_size(rect.right_top() + Vec2::new(-10., 10.), Vec2::splat(18.));
+        ui.painter().circle_filled(x.center(), 9., Color32::from_black_alpha(140));
+        theme::paint_symbol(ui.painter(), "x", x.center(), 12., Color32::WHITE);
+        if ui.interact(x, ui.scope_id().with("remove-gif"), Sense::click()).on_hover_text("Remove attachment").clicked() {
+            remove = true;
+        }
+    });
+    if remove {
+        chat.gif_draft = None;
+    }
+    ui.add_space(6.);
 }
 
 /// Desktop's `AttachmentList` above the input: each file's tile with a

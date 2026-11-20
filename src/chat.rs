@@ -117,6 +117,11 @@ pub struct ChatView {
     pub recording: Option<crate::voice::Recording>,
     /// A voice message recorded but not sent (Desktop's `CompositionRecordingDraft`).
     pub voice_draft: Option<crate::voice::Draft>,
+    /// A GIF from the picker waiting in the composer with its preview
+    /// file, sent with the text (Desktop stages a GIF as an attachment).
+    pub gif_draft: Option<(langis_core::giphy::Gif, std::path::PathBuf)>,
+    /// A picked GIF waiting on "Replace attachment?".
+    pub gif_replacing: Option<(langis_core::giphy::Gif, std::path::PathBuf)>,
     /// Search in this chat, while open.
     pub find: Option<crate::search::Find>,
 }
@@ -235,6 +240,8 @@ impl ChatView {
             attach_menu: false,
             recording: None,
             voice_draft: None,
+            gif_draft: None,
+            gif_replacing: None,
             find: None,
         }
     }
