@@ -97,6 +97,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's UsernameOnboardingModal ("New ways to connect").
+    pub username_onboarding: bool,
     /// A new group is being made (Create's spinner); a failure shows
     /// Desktop's error.
     pub creating_group: bool,
@@ -481,8 +483,54 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     pending_confirm(app, ui);
     admins_dialog(app, ui);
     accepted_options(app, ui);
+    username_onboarding(app, ui);
     if app.panes.group_failed && crate::dialog::alert(ui.ctx(), egui::Id::unique("group-failed"), "", tr("This group couldn\u{2019}t be created. Check your connection and try again."), tr("OK")) {
         app.panes.group_failed = false;
+    }
+}
+
+/// Desktop's UsernameOnboardingModal: phone number privacy, usernames, QR
+/// codes and links; Set up username opens the editor.
+fn username_onboarding(app: &mut App, ui: &Ui) {
+    if !app.panes.username_onboarding {
+        return;
+    }
+    let palette = Palette::of(ui.ctx());
+    let mut answer = None;
+    let closed = modal(ui, "username-onboarding", 400., |ui| {
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new(tr("New ways to connect")).font(theme::semibold(20.)));
+        });
+        ui.add_space(16.);
+        for (symbol, title, text) in [
+            ("phone", tr("Phone number privacy"), tr("Your phone number is no longer visible in chats. If your number is saved to a friend\u{2019}s contacts, they will still see it.")),
+            ("at", tr("Usernames"), tr("People can now message you using your optional username so you don\u{2019}t have to give out your phone number. Usernames aren\u{2019}t visible on your profile.")),
+            ("qrcode", tr("QR codes and links"), tr("Usernames have a unique QR code and link you can share with friends to quickly start a chat with you.")),
+        ] {
+            ui.horizontal_top(|ui| {
+                let (at, _) = ui.allocate_exact_size(Vec2::splat(28.), Sense::hover());
+                theme::paint_symbol(ui.painter(), symbol, at.center(), 22., palette.text);
+                ui.add_space(8.);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(title).font(theme::semibold(14.)));
+                    ui.add(egui::Label::new(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary)).wrap());
+                });
+            });
+            ui.add_space(12.);
+        }
+        answer = buttons(ui, &[tr("Set up username"), tr("Not now")]);
+    });
+    match answer {
+        Some(0) => {
+            app.panes.username_onboarding = false;
+            app.tab = Tab::Settings;
+            app.settings.page = crate::settings::Page::Profile;
+            crate::profile::open(app);
+            crate::profile::start_username(app);
+        }
+        Some(_) => app.panes.username_onboarding = false,
+        None if closed => app.panes.username_onboarding = false,
+        None => {}
     }
 }
 
@@ -587,11 +635,9 @@ pub fn list_notices(app: &mut App, ui: &mut Ui, palette: &Palette) {
         if let Some(set_up) = answer {
             app.panes.username_megaphone = false;
             crate::settings::write(app, SETTING_USERNAME_MEGAPHONE, "done".into());
+            // Desktop's UsernameOnboardingModal first.
             if set_up {
-                app.tab = Tab::Settings;
-                app.settings.page = crate::settings::Page::Profile;
-                crate::profile::open(app);
-                crate::profile::start_username(app);
+                app.panes.username_onboarding = true;
             }
         }
     }
