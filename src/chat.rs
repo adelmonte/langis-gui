@@ -1959,19 +1959,19 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
     let palette = ctx.palette;
     let outgoing = m.direction == Direction::Outgoing;
     let a = m.attachments.first();
+    // Desktop's `renderTapToViewText`.
     let kind = match a.map(|a| a.content_type.as_str()) {
-        Some(t) if t.starts_with("video/") => "Video",
-        Some(t) if t.starts_with("image/") => "Photo",
-        _ => "Media",
+        Some(t) if t.starts_with("video/") || t == "image/gif" => "View Once Video",
+        _ => "View Once Photo",
     };
     let ready = !outgoing && state == ViewOnce::Ready;
     let downloaded = a.is_some_and(|a| a.local_path.is_some());
     let (icon, label) = match state {
-        ViewOnce::Ready if outgoing => (Icon::ViewOnceDashBold, "Media"),
+        ViewOnce::Ready if outgoing => (Icon::ViewOnceDashBold, "View Once Media"),
         ViewOnce::Ready if downloaded => (Icon::ViewOnce, kind),
         ViewOnce::Ready => (Icon::ArrowDown, kind),
-        ViewOnce::Viewed | ViewOnce::Gone => (Icon::ViewOnceViewedBold, if outgoing { "Media" } else { "Viewed" }),
-        ViewOnce::Invalid => (Icon::ViewOnceDashBold, "Media"),
+        ViewOnce::Viewed | ViewOnce::Gone => (Icon::ViewOnceViewedBold, if outgoing { "View Once Media" } else { "Viewed" }),
+        ViewOnce::Invalid => (Icon::ViewOnceDashBold, "View Once Media"),
     };
     let text_color = if outgoing { palette.bubble_out_text() } else if ready { palette.text } else { palette.text_secondary };
     let meta_color = if outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
@@ -2501,18 +2501,29 @@ fn content_block(
             line(rect.top() + 24., note, theme::regular(13.), secondary);
         }
         MessageContent::GiftBadge(g) => {
-            line(rect.top() + 4., if outgoing { "Gift badge you sent".into() } else { "Gift badge".into() }, theme::semibold(14.), text);
-            let state = match g.state {
-                GiftBadgeState::Unopened if outgoing => "Sent",
-                GiftBadgeState::Unopened => "Open it on your phone to redeem it",
-                GiftBadgeState::Opened => "Opened",
-                GiftBadgeState::Redeemed => "Redeemed",
-                GiftBadgeState::Failed => "Couldn't be redeemed",
-            };
-            line(rect.top() + 24., state.into(), theme::regular(13.), secondary);
-            let left = chrono::DateTime::from_timestamp_millis(g.expiration).map(|t| t.with_timezone(&chrono::Local).format("Expires %b %-d, %Y").to_string());
-            if let Some(left) = left {
-                line(rect.top() + 42., left, theme::regular(12.), secondary);
+            // Desktop's donation message (`renderGiftBadge`).
+            line(rect.top() + 4., "Donation".into(), theme::semibold(14.), text);
+            match g.state {
+                GiftBadgeState::Unopened | GiftBadgeState::Failed => {
+                    let hint = if outgoing { "Tap this message on mobile to view your donation" } else { "View this message on mobile to open it" };
+                    line(rect.top() + 24., hint.into(), theme::regular(13.), secondary);
+                }
+                GiftBadgeState::Opened | GiftBadgeState::Redeemed => {
+                    let left = g.expiration - chrono::Utc::now().timestamp_millis();
+                    let (days, hours, minutes) = (left / 86_400_000, left / 3_600_000, left / 60_000);
+                    let plural = |n: i64, one: &str, many: &str| format!("{n} {} remaining", if n == 1 { one } else { many });
+                    let remaining = if days > 1 {
+                        plural(days, "day", "days")
+                    } else if hours > 1 {
+                        plural(hours, "hour", "hours")
+                    } else if minutes > 0 {
+                        plural(minutes, "minute", "minutes")
+                    } else {
+                        "Expired".into()
+                    };
+                    line(rect.top() + 24., remaining, theme::regular(13.), secondary);
+                    line(rect.top() + 42., if outgoing { "View".into() } else { "\u{2713} Redeemed".into() }, theme::semibold(13.), text);
+                }
             }
         }
     }
