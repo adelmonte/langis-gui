@@ -1952,12 +1952,17 @@ fn message(
             let (l, rt, t, b) = (cell.left() < 1., cell.right() > bubble_w - 1., at_top && cell.top() < 1., media_only && cell.bottom() > h - 1.);
             let mr = CornerRadius { nw: r(l && t, radius.nw), ne: r(rt && t, radius.ne), sw: r(l && b, radius.sw), se: r(rt && b, radius.se) };
             let loading = download_progress(ctx, m, *index, a);
+            let gone = a.local_path.is_none() && ctx.app.unavailable.contains(&(m.id, *index));
             if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
                 match (&a.local_path, loading) {
+                    _ if gone => actions.push(Action::Toast(tr("This media is not available"))),
                     (Some(_), _) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
                     (None, Some(_)) => actions.push(Action::CancelDownload { message_id: m.id, index: *index }),
                     (None, None) => actions.push(Action::Fetch { message_id: m.id, index: *index }),
                 }
+            }
+            if gone {
+                media_gone(ui, palette, rect, mr);
             }
             if let Some(done) = loading {
                 progress_ring(ui, rect.center(), done);
@@ -1988,12 +1993,17 @@ fn message(
         let rect = Rect::from_min_size(Pos2::new(bubble.left(), y), Vec2::new(bubble_w, size.y));
         let mr = if media_only { radius } else if y <= bubble.top() + 1. { CornerRadius { nw: radius.nw, ne: radius.ne, sw: 0, se: 0 } } else { CornerRadius::ZERO };
         let loading = download_progress(ctx, m, *index, a);
+        let gone = a.local_path.is_none() && ctx.app.unavailable.contains(&(m.id, *index));
         if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
             match (&a.local_path, loading) {
+                _ if gone => actions.push(Action::Toast(tr("This media is not available"))),
                 (Some(_), _) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
                 (None, Some(_)) => actions.push(Action::CancelDownload { message_id: m.id, index: *index }),
                 (None, None) => actions.push(Action::Fetch { message_id: m.id, index: *index }),
             }
+        }
+        if gone {
+            media_gone(ui, palette, rect, mr);
         }
         if let Some(done) = loading {
             progress_ring(ui, rect.center(), done);
@@ -2014,8 +2024,10 @@ fn message(
         }
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., 44.));
         let loading = download_progress(ctx, m, *index, a);
+        let gone = a.local_path.is_none() && ctx.app.unavailable.contains(&(m.id, *index));
         if file_row(ui, palette, a, rect, in_color, meta_color, ui.scope_id().with(("file", m.id, *index))) {
             match (&a.local_path, loading) {
+                _ if gone => actions.push(Action::Toast(tr("File not available"))),
                 (Some(path), _) => actions.push(Action::OpenFile { message_id: m.id, index: *index, path: path.clone() }),
                 (None, Some(_)) => actions.push(Action::CancelDownload { message_id: m.id, index: *index }),
                 (None, None) => actions.push(Action::Fetch { message_id: m.id, index: *index }),
@@ -2024,6 +2036,12 @@ fn message(
         if let Some(done) = loading {
             // Over the file's icon: the progress, and a click cancels.
             progress_ring(ui, rect.min + Vec2::new(15., 22.), done);
+        }
+        if gone {
+            // Desktop's "File not available" in place of its size.
+            let at = Rect::from_min_size(rect.min + Vec2::new(40., 24.), Vec2::new(rect.width() - 40., 18.));
+            ui.painter().rect_filled(at, 0, if outgoing { palette.accent } else { palette.bubble_in });
+            ui.painter().text(at.left_center(), Align2::LEFT_CENTER, tr("File not available"), theme::regular(12.), meta_color);
         }
         y += 48.;
     }
@@ -2475,6 +2493,13 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
         ui.painter().add(egui::Shape::convex_polygon(tri.to_vec(), Color32::WHITE, Stroke::NONE));
     }
     response.clicked()
+}
+
+/// Desktop's unavailable media: dimmed, with its crossed-out picture.
+fn media_gone(ui: &Ui, palette: &Palette, rect: Rect, radius: CornerRadius) {
+    ui.painter().rect_filled(rect, radius, palette.fill_secondary);
+    theme::paint_symbol(ui.painter(), "photo-slash", rect.center() - Vec2::new(0., 10.), 28., palette.text_secondary);
+    ui.painter().text(rect.center() + Vec2::new(0., 18.), Align2::CENTER_CENTER, tr("This media is not available"), theme::regular(12.), palette.text_secondary);
 }
 
 /// A file attachment: Desktop's generic file icon, name and size.

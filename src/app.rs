@@ -187,6 +187,9 @@ pub struct App {
     /// Attachments downloading: (message id, index) to bytes received and
     /// the total, from langis's DownloadProgress.
     pub downloads: std::collections::HashMap<(i64, usize), (u64, u64)>,
+    /// Attachments gone for good (Desktop's "This media is not
+    /// available"), from langis's AttachmentUnavailable.
+    pub unavailable: std::collections::HashSet<(i64, usize)>,
     /// Each person's first visible profile badge, as image files for the
     /// light and dark themes (Desktop draws it on their avatar).
     pub badges: std::collections::HashMap<String, (Option<String>, Option<String>)>,
@@ -333,6 +336,7 @@ impl App {
             last_tick: None,
             badges: Default::default(),
             downloads: Default::default(),
+            unavailable: Default::default(),
             drops: crate::wayland_dnd::start(cc),
             input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None, spell: true },
             unread_only: false,
@@ -800,6 +804,11 @@ impl App {
             Event::MessageStickerPack { pack: Some((id, key)), .. } => {
                 self.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
                 self.fun.preview = Some((id, key, None));
+            }
+            Event::AttachmentUnavailable { message_id, index, permanent } => {
+                if permanent {
+                    self.unavailable.insert((message_id, index));
+                }
             }
             Event::DownloadProgress { message_id, index, received, total } => {
                 if received == 0 {
