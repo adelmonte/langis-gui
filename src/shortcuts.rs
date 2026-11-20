@@ -340,7 +340,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         chat.dialog = Some(crate::actions::Dialog::Delete { messages: vec![m.id] });
     }
     if pressed(ctx, CTRL_SHIFT, Key::S) && crate::actions::can_forward(&m) {
-        chat.dialog = Some(crate::actions::Dialog::Forward { messages: vec![m.id], query: String::new(), chosen: Vec::new() });
+        chat.dialog = Some(crate::actions::Dialog::Forward { messages: vec![m.id], query: String::new(), chosen: Vec::new(), editing: None });
     }
     if pressed(ctx, CTRL, Key::S)
         && let Some(index) = m.attachments.iter().position(|a| !a.sticker)

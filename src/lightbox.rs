@@ -431,7 +431,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let messages = vec![item.message_id];
         app.close_lightbox();
         if let Some(view) = app.chat.as_mut().filter(|_| app.selected.as_ref() == Some(&chat)) {
-            view.dialog = Some(crate::actions::Dialog::Forward { messages, query: String::new(), chosen: Vec::new() });
+            view.dialog = Some(crate::actions::Dialog::Forward { messages, query: String::new(), chosen: Vec::new(), editing: None });
         }
         return;
     }

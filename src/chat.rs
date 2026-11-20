@@ -3145,7 +3145,7 @@ fn select_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
                 if chosen.len() > 30 {
                     app.toast("You can only forward up to 30 messages");
                 } else {
-                    chat.dialog = Some(crate::actions::Dialog::Forward { messages: chosen.clone(), query: String::new(), chosen: Vec::new() });
+                    chat.dialog = Some(crate::actions::Dialog::Forward { messages: chosen.clone(), query: String::new(), chosen: Vec::new(), editing: None });
                 }
             }
             if button(ui, rect.right() - 4. - 44. - 22., "trash", "Delete selected messages", !chosen.is_empty()) {

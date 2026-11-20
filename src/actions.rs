@@ -28,7 +28,9 @@ pub enum Dialog {
     /// Desktop's `DeleteMessagesModal`, for one message or a selection.
     Delete { messages: Vec<i64> },
     Pin { message: i64, choice: usize },
-    Forward { messages: Vec<i64>, query: String, chosen: Vec<ConversationId> },
+    /// Desktop's `ForwardMessagesModal`: choose chats, then (for one
+    /// message) its text to edit before sending.
+    Forward { messages: Vec<i64>, query: String, chosen: Vec<ConversationId>, editing: Option<String> },
     Info { message: i64, details: Option<Details> },
     Poll(crate::polls::NewPoll),
     PollVotes { message: i64 },
@@ -250,7 +252,7 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
                     out.push(Do::Command(Command::EndPoll { message_id: id }));
                 }
                 if offer.forward && ui.item(Some("forward"), "Forward") {
-                    out.push(Do::Open(Dialog::Forward { messages: vec![id], query: String::new(), chosen: Vec::new() }));
+                    out.push(Do::Open(Dialog::Forward { messages: vec![id], query: String::new(), chosen: Vec::new(), editing: None }));
                 }
                 if offer.edit && ui.item(Some("pencil"), "Edit") {
                     out.push(Do::Edit(id));
@@ -430,47 +432,116 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 out.push(Do::Close);
             }
         }
-        Dialog::Forward { messages, query, chosen } => {
+        Dialog::Forward { messages, query, chosen, editing } => {
+            let mut send = None;
             let modal = egui::Modal::new(egui::Id::unique("forward-messages")).frame(frame).show(ui.ctx(), |ui| {
                 ui.set_width(380.);
-                ui.label(RichText::new("Forward to").font(theme::semibold(18.)));
+                ui.label(RichText::new("Forward To").font(theme::semibold(18.)));
                 ui.add_space(10.);
-                widgets::text_field(ui, query, "Search", false);
-                ui.add_space(8.);
-                let q = query.trim().to_lowercase();
-                egui::ScrollArea::vertical().max_height(320.).auto_shrink([false, true]).show(ui, |ui| {
-                    for conv in app.conversations.iter().filter(|x| !x.left && !x.blocked && !x.ended && (q.is_empty() || x.title.to_lowercase().contains(&q))) {
-                        let on = chosen.contains(&conv.id);
-                        let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.), Sense::click());
-                        if r.hovered() {
-                            ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
-                        }
-                        widgets::paint_avatar(ui, Rect::from_min_size(rect.min + Vec2::new(8., 8.), Vec2::splat(32.)), &widgets::AvatarSpec::of(conv));
-                        let mut job = egui::text::LayoutJob::simple_singleline(conv.title.clone(), theme::medium(14.), palette.text);
-                        job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 90.);
-                        let g = ui.fonts_mut(|f| f.layout_job(job));
-                        ui.painter().galley(Pos2::new(rect.left() + 50., rect.center().y - g.size().y / 2.), g, palette.text);
-                        check_circle(ui, Pos2::new(rect.right() - 20., rect.center().y), on, &palette);
-                        if r.clicked() {
-                            if on {
-                                chosen.retain(|x| x != &conv.id);
-                            } else {
-                                chosen.push(conv.id.clone());
-                            }
+                if let Some(text) = editing {
+                    // Desktop's `ForwardMessageEditor`: the message as it
+                    // will go, its text editable, then Send.
+                    let original = chat.iter().find(|m| Some(m.id) == messages.first().copied());
+                    if let Some(m) = original {
+                        let files = m.attachments.iter().filter(|a| !a.sticker).count();
+                        if files > 0 {
+                            let thumb = m.attachments.iter().find_map(|a| a.thumbnail_path.clone().or_else(|| a.local_path.clone().filter(|_| a.content_type.starts_with("image/"))));
+                            ui.horizontal(|ui| {
+                                if let Some(path) = thumb {
+                                    let (at, _) = ui.allocate_exact_size(Vec2::splat(56.), Sense::hover());
+                                    crate::chat::cover_image(ui, &path, at, CornerRadius::same(8));
+                                }
+                                let what = m.attachments.first().map(langis_store::attachment_preview).unwrap_or_default();
+                                ui.label(RichText::new(if files > 1 { format!("{what} and {} more", files - 1) } else { what.to_owned() }).color(palette.text_secondary));
+                            });
+                            ui.add_space(8.);
                         }
                     }
-                });
+                    egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                        ui.add(egui::TextEdit::multiline(text).hint_text("Add a message").frame(egui::Frame::NONE).desired_rows(2).desired_width(f32::INFINITY).font(theme::regular(14.)));
+                    });
+                } else {
+                    widgets::text_field(ui, query, "Search", false);
+                    ui.add_space(8.);
+                    let q = query.trim().to_lowercase();
+                    egui::ScrollArea::vertical().max_height(320.).auto_shrink([false, true]).show(ui, |ui| {
+                        for conv in app.conversations.iter().filter(|x| !x.left && !x.blocked && !x.ended && (q.is_empty() || x.title.to_lowercase().contains(&q))) {
+                            let on = chosen.contains(&conv.id);
+                            let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.), Sense::click());
+                            if r.hovered() {
+                                ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                            }
+                            widgets::paint_avatar(ui, Rect::from_min_size(rect.min + Vec2::new(8., 8.), Vec2::splat(32.)), &widgets::AvatarSpec::of(conv));
+                            let mut job = egui::text::LayoutJob::simple_singleline(conv.title.clone(), theme::medium(14.), palette.text);
+                            job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 90.);
+                            let g = ui.fonts_mut(|f| f.layout_job(job));
+                            ui.painter().galley(Pos2::new(rect.left() + 50., rect.center().y - g.size().y / 2.), g, palette.text);
+                            check_circle(ui, Pos2::new(rect.right() - 20., rect.center().y), on, &palette);
+                            if r.clicked() {
+                                if on {
+                                    chosen.retain(|x| x != &conv.id);
+                                } else {
+                                    chosen.push(conv.id.clone());
+                                }
+                            }
+                        }
+                    });
+                    // The chosen chats as pills (Desktop's `ContactPills`).
+                    if !chosen.is_empty() {
+                        ui.add_space(8.);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::splat(4.);
+                            let mut remove = None;
+                            for id in chosen.iter() {
+                                let Some(conv) = app.conversation(id) else { continue };
+                                let g = ui.painter().layout_no_wrap(conv.title.clone(), theme::regular(13.), palette.text);
+                                let (pill, r) = ui.allocate_exact_size(Vec2::new(4. + 20. + 6. + g.size().x + 6. + 14. + 6., 28.), Sense::click());
+                                ui.painter().rect_filled(pill, CornerRadius::same(14), palette.fill_secondary);
+                                widgets::paint_avatar(ui, Rect::from_min_size(pill.min + Vec2::new(4., 4.), Vec2::splat(20.)), &widgets::AvatarSpec::of(conv));
+                                ui.painter().galley(Pos2::new(pill.left() + 30., pill.center().y - g.size().y / 2.), g, palette.text);
+                                theme::paint_symbol(ui.painter(), "x", Pos2::new(pill.right() - 13., pill.center().y), 12., palette.text_secondary);
+                                if r.clicked() {
+                                    remove = Some(id.clone());
+                                }
+                            }
+                            if let Some(id) = remove {
+                                chosen.retain(|x| *x != id);
+                            }
+                        });
+                    }
+                }
                 ui.add_space(12.);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if chosen.len() > 1 { format!("Forward to {}", chosen.len()) } else { "Forward".to_owned() };
-                    if widgets::pill_button(ui, &label, true).clicked() && !chosen.is_empty() {
-                        out.push(Do::Command(Command::Forward { message_ids: messages.clone(), conversations: chosen.clone() }));
+                ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let single = messages.len() == 1;
+                    match editing {
+                        Some(text) => {
+                            if widgets::pill_button(ui, "Send", true).clicked() {
+                                send = Some(Some(text.clone()));
+                            }
+                        }
+                        None if single => {
+                            if ui.add_enabled_ui(!chosen.is_empty(), |ui| widgets::pill_button(ui, "Continue", true)).inner.clicked() {
+                                let body = chat.iter().find(|m| m.id == messages[0]).map(|m| m.body.clone()).unwrap_or_default();
+                                *editing = Some(body);
+                            }
+                        }
+                        None => {
+                            if ui.add_enabled_ui(!chosen.is_empty(), |ui| widgets::pill_button(ui, "Send", true)).inner.clicked() {
+                                send = Some(None);
+                            }
+                        }
                     }
                     if widgets::pill_button(ui, "Cancel", false).clicked() {
                         out.push(Do::Close);
                     }
                 });
             });
+            if let Some(body) = send {
+                // The text as it was goes unchanged (keeping its formatting).
+                let original = chat.iter().find(|m| Some(m.id) == messages.first().copied()).map(|m| m.body.clone());
+                let body = body.filter(|b| Some(b) != original.as_ref());
+                out.push(Do::Command(Command::Forward { message_ids: messages.clone(), conversations: chosen.clone(), body }));
+            }
             if modal.should_close() || !out.is_empty() {
                 out.push(Do::Close);
             }

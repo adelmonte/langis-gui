@@ -250,9 +250,14 @@ fn screenshots_message_actions() {
     });
     save(&mut harness, "info-dialog");
 
-    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Forward { messages: vec![theirs], query: String::new(), chosen: Vec::new() });
+    let picks: Vec<_> = harness.state().conversations.iter().take(2).map(|c| c.id.clone()).collect();
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Forward { messages: vec![theirs], query: String::new(), chosen: picks.clone(), editing: None });
     wait(&mut harness, "forward dialog", |_| true);
     save(&mut harness, "forward-dialog");
+    let body = harness.state().chat.as_ref().unwrap().messages.iter().find(|m| m.id == theirs).map(|m| m.body.clone()).unwrap_or_default();
+    harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::Forward { messages: vec![theirs], query: String::new(), chosen: picks, editing: Some(body) });
+    wait(&mut harness, "forward editor", |_| true);
+    save(&mut harness, "forward-editor");
     harness.state_mut().chat.as_mut().unwrap().dialog = None;
 
     harness.state_mut().chat.as_mut().unwrap().selected = Some(vec![theirs, ours]);

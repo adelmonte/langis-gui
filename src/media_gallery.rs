@@ -408,7 +408,7 @@ fn item_menu(app: &mut App, ui: &Ui, response: &egui::Response, m: &Message, ind
             app.panes.details = None;
             app.open_at(conversation.clone(), m.id);
             if let Some(chat) = app.chat.as_mut() {
-                chat.dialog = Some(crate::actions::Dialog::Forward { messages: vec![m.id], query: String::new(), chosen: Vec::new() });
+                chat.dialog = Some(crate::actions::Dialog::Forward { messages: vec![m.id], query: String::new(), chosen: Vec::new(), editing: None });
             }
         }
         Some(2) => crate::actions::save_attachment(app, m, index.unwrap_or(0)),
