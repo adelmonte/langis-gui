@@ -381,7 +381,7 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                         let admins = ui.add(egui::Label::new(RichText::new(tr("admins")).font(theme::semibold(14.)).color(palette.text_secondary).underline()).sense(Sense::click()));
                         ui.label(RichText::new(" can send messages").font(theme::regular(14.)).color(palette.text_secondary));
                         if admins.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            crate::details::open(app, c.id.clone());
+                            app.panes.admins_of = Some(c.id.clone());
                         }
                     });
                 });

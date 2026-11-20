@@ -38,10 +38,15 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
                 app.tab = Tab::Calls;
                 app.panes.calls_loaded = false;
             }
-            let unseen = crate::stories_unread(app);
-            let stories = tab_item(ui, &palette, if app.tab == Tab::Stories { Icon::StoriesFill } else { Icon::Stories }, app.tab == Tab::Stories, unseen);
-            if stories.on_hover_text("Stories").clicked() {
-                app.tab = Tab::Stories;
+            // Desktop hides the Stories tab while stories are off.
+            if !app.panes.stories.disabled {
+                let unseen = crate::stories_unread(app);
+                let stories = tab_item(ui, &palette, if app.tab == Tab::Stories { Icon::StoriesFill } else { Icon::Stories }, app.tab == Tab::Stories, unseen);
+                if stories.on_hover_text(tr("Stories")).clicked() {
+                    app.tab = Tab::Stories;
+                }
+            } else if app.tab == Tab::Stories {
+                app.tab = Tab::Chats;
             }
             // Settings is the last tab, at the bottom with 8px below it
             // (the profile is in Settings, as in Desktop).

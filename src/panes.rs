@@ -97,6 +97,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's "Message an admin" list for an announcements-only group.
+    pub admins_of: Option<ConversationId>,
     /// The full emoji picker for a call reaction.
     pub call_emoji: Option<crate::emoji_picker::Picker>,
     /// A confirmation that sends its commands on yes (Desktop's many
@@ -470,6 +472,38 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     avatar_lightbox(app, ui);
     crate::collisions::review_dialog(app, ui);
     pending_confirm(app, ui);
+    admins_dialog(app, ui);
+}
+
+/// Desktop's `AnnouncementsOnlyGroupBannerAdminsDialog`: the group's admins;
+/// one clicked opens a chat with them.
+fn admins_dialog(app: &mut App, ui: &mut Ui) {
+    let Some(id) = app.panes.admins_of.clone() else { return };
+    let Some(c) = app.conversation(&id).cloned() else {
+        app.panes.admins_of = None;
+        return;
+    };
+    let palette = Palette::of(ui.ctx());
+    let mut open = None;
+    let closed = modal(ui, "message-an-admin", 360., |ui| {
+        title(ui, tr("Message an admin"));
+        egui::ScrollArea::vertical().max_height(360.).show(ui, |ui| {
+            for a in c.admins.iter().filter(|a| **a != app.aci) {
+                let p = app.conversation(&ConversationId::direct(a)).cloned();
+                let name = app.name(a);
+                let r = contact_row(ui, &palette, &name, None, p.as_ref().map(|p| p.color).unwrap_or(0), p.as_ref().and_then(|p| p.avatar_path.as_deref()));
+                if r.clicked() {
+                    open = Some(ConversationId::direct(a));
+                }
+            }
+        });
+    });
+    if let Some(to) = open {
+        app.panes.admins_of = None;
+        app.open(to);
+    } else if closed {
+        app.panes.admins_of = None;
+    }
 }
 
 /// Desktop's `AvatarLightbox`: the photo large over a dark window; a click
