@@ -1254,7 +1254,7 @@ enum HeroClick {
 }
 
 /// Desktop's `SharedGroupNames`: the groups you share with someone.
-fn shared_groups_text(groups: &[String], accepted: bool) -> String {
+pub fn shared_groups_text(groups: &[String], accepted: bool) -> String {
     match groups {
         [] if accepted => tr("No groups in common").into(),
         [] => tr("No groups in common. Review requests carefully.").into(),

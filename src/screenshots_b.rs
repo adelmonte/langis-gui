@@ -182,6 +182,16 @@ fn screenshots_panes() {
         wait(&mut harness, "collision review", |_| true);
         save(&mut harness, "collision-review");
         harness.state_mut().panes.collision_review = None;
+        let sid = harness.state().selected.clone().and_then(|c| c.as_direct().map(str::to_owned));
+        if let Some(sid) = sid {
+            crate::contact_modal::open(harness.state_mut(), None, sid);
+            if let Some(c) = harness.state_mut().panes.contact.as_mut() {
+                c.about_open = true;
+            }
+            wait(&mut harness, "about contact", |_| true);
+            save(&mut harness, "about-contact");
+            harness.state_mut().panes.contact = None;
+        }
     }
 
     // New chat, and a new group's second step.

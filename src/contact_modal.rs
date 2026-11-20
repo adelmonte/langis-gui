@@ -321,46 +321,94 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
     let palette = Palette::of(ctx);
     let Some(contact) = app.panes.contact.as_ref() else { return };
     if contact.about_open {
+        // Desktop's AboutContactModal: the photo large, then a row for each
+        // thing known about them.
         let details = contact.about.clone();
-        let mut done = false;
-        egui::Modal::new(egui::Id::unique("about-contact")).frame(egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24)).show(ctx, |ui| {
-            ui.set_width(340.);
-            ui.label(egui::RichText::new(tr("About")).font(theme::semibold(18.)));
-            ui.add_space(12.);
-            let row = |ui: &mut egui::Ui, symbol: &str, text: &str| {
-                ui.horizontal(|ui| {
+        let person = app.conversation(&ConversationId::direct(aci)).cloned();
+        let mut safety = false;
+        let mut lightbox = None;
+        let you = aci == app.aci;
+        let closed = crate::panes::modal(&egui::Ui::new(ctx.clone(), egui::Id::unique("about-host"), egui::UiBuilder::new()), "about-contact", 360., |ui| {
+            crate::panes::title(ui, if you { tr("You") } else { tr("About") });
+            ui.vertical_centered(|ui| {
+                let spec = match &person {
+                    Some(p) => widgets::AvatarSpec::of(p),
+                    None => widgets::AvatarSpec::person(name, 0),
+                };
+                let r = widgets::avatar(ui, &spec, 216.).interact(Sense::click());
+                if let Some(path) = person.as_ref().and_then(|p| p.avatar_path.clone()).filter(|_| person.as_ref().is_some_and(|p| !p.avatar_withheld))
+                    && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+                {
+                    lightbox = Some(path);
+                }
+            });
+            ui.add_space(16.);
+            let row = |ui: &mut egui::Ui, symbol: &str, text: &str, tip: Option<String>| -> egui::Response {
+                let r = ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(24.), Sense::hover());
-                    theme::paint_symbol(ui.painter(), symbol, r.center(), 18., palette.text_secondary);
+                    theme::paint_symbol(ui.painter(), symbol, r.center(), 18., palette.text);
                     ui.add(egui::Label::new(egui::RichText::new(text).font(theme::regular(14.))).wrap());
                 });
-                ui.add_space(6.);
+                ui.add_space(8.);
+                let r = ui.interact(r.response.rect, ui.scope_id().with(("about-row", symbol)), Sense::click());
+                match tip {
+                    Some(t) => r.on_hover_text(t),
+                    None => r,
+                }
             };
-            row(ui, "person", name);
+            // The name: with a nickname, the nickname then the real name.
+            let nickname = details.as_ref().and_then(|d| d.nickname.as_ref()).map(|n| format!("{} {}", n.given, n.family).trim().to_owned()).filter(|n| !n.is_empty());
+            let profile_name = details.as_ref().and_then(|d| d.profile.as_ref()).map(|p| format!("{} {}", p.given_name, p.family_name).trim().to_owned()).filter(|n| !n.is_empty());
+            match (&nickname, &profile_name) {
+                (Some(nick), Some(real)) if nick != real => {
+                    let tip = crate::i18n::tf("icu:AboutContactModal__TitleWithoutNickname__Tooltip", &format!("\u{201c}{real}\u{201d} is the profile name this person set for themselves in Signal."), &[("title", crate::i18n::Arg::from(real))]);
+                    row(ui, "person", &format!("{nick} ({real})"), Some(tip));
+                }
+                _ => {
+                    row(ui, "person", name, None);
+                }
+            }
             if let Some(d) = &details {
-                if d.verified {
-                    row(ui, "shield-check", tr("Verified"));
+                if d.verified && row(ui, "shield-check", tr("Verified"), None).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    safety = true;
                 }
-                if let Some(p) = &d.profile {
-                    if !p.about.is_empty() {
-                        row(ui, "pencil", &format!("{} {}", p.about_emoji, p.about).trim().to_owned());
-                    }
-                    if let Some(u) = &p.username {
-                        row(ui, "at", u);
-                    }
+                if d.profile_sharing || person.as_ref().is_some_and(|p| p.accepted) {
+                    row(ui, "connections", tr("Signal Connection"), None);
                 }
-                if let Some(note) = d.nickname.as_ref().map(|n| n.note.as_str()).filter(|n| !n.is_empty()) {
-                    row(ui, "note", note);
+                if d.in_system_contacts {
+                    row(ui, "person-circle", &crate::i18n::tf("icu:AboutContactModal__system-contact", &format!("{name} is in your system contacts"), &[("name", crate::i18n::Arg::from(name))]), None);
                 }
             }
-            if let Some(phone) = app.conversation(&ConversationId::direct(aci)).and_then(|c| c.phone.clone()) {
-                row(ui, "phone", &phone);
+            if let Some(phone) = person.as_ref().and_then(|c| c.phone.clone()) {
+                row(ui, "phone", &langis_core::share_contact::format_phone(&phone, app.phone.as_deref()), None);
             }
-            ui.add_space(8.);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                done = widgets::pill_button(ui, tr("Done"), true).clicked();
-            });
+            if let Some(p) = details.as_ref().and_then(|d| d.profile.as_ref()).filter(|p| !p.about.is_empty()) {
+                row(ui, "edit", &format!("{} {}", p.about_emoji, p.about).trim().to_owned(), None);
+            }
+            if let Some(p) = &person {
+                if p.blocked {
+                    row(ui, "block", &crate::i18n::tf("icu:AboutContactModal__blocked", &format!("{name} is blocked"), &[("name", crate::i18n::Arg::from(name))]), None);
+                } else if !p.accepted {
+                    row(ui, "message", tr("Pending message request"), None);
+                } else if p.last_message_at == 0 {
+                    row(ui, "message", &crate::i18n::tf("icu:AboutContactModal__no-dms", &format!("No direct messages with {name}"), &[("name", crate::i18n::Arg::from(name))]), None);
+                }
+            }
+            let groups: Vec<String> = app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left && g.members.iter().any(|m| m == aci)).map(|g| g.title.clone()).collect();
+            if !groups.is_empty() {
+                row(ui, "group", &crate::chat::shared_groups_text(&groups, true), None);
+            }
+            if let Some(note) = details.as_ref().and_then(|d| d.nickname.as_ref()).map(|n| n.note.clone()).filter(|n| !n.is_empty()) {
+                row(ui, "note", &note, None);
+            }
         });
-        if done && let Some(c) = app.panes.contact.as_mut() {
+        if let Some(path) = lightbox {
+            app.panes.avatar_lightbox = Some(path);
+        }
+        if safety {
+            crate::details::open_safety(app, ConversationId::direct(aci));
+        }
+        if (closed || safety) && let Some(c) = app.panes.contact.as_mut() {
             c.about_open = false;
         }
     }
