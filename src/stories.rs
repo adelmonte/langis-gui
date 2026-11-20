@@ -337,11 +337,46 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 // Ours first: "My Stories", or the prompt to add one.
                 let mine = all.iter().find(|(k, _)| k == "me");
+                // Desktop's MyStoryButton: the newest's time, or how the
+                // sends went.
+                let failed_all = mine.is_some_and(|(_, s)| s.iter().any(|s| !s.failed.is_empty() && s.failed.len() >= s.recipients.len().max(1)));
+                let failed_some = mine.is_some_and(|(_, s)| s.iter().any(|s| !s.failed.is_empty()));
                 let subtitle = match mine {
+                    _ if failed_all => tr("Send failed").to_owned(),
+                    _ if failed_some => tr("Partially sent").to_owned(),
                     Some((_, s)) => crate::format::short_timestamp(s.last().map(|s| s.sent_at).unwrap_or_default()),
-                    None => "Tap to add".into(),
+                    None => tr("Add a story").into(),
                 };
-                if story_row(app, ui, &palette, tr("My Stories"), &subtitle, None, mine.and_then(|(_, s)| s.last()), false).clicked() {
+                let row = story_row(app, ui, &palette, tr("My Stories"), &subtitle, None, mine.and_then(|(_, s)| s.last()), false);
+                if failed_some {
+                    // The subtitle in red, over the grey one.
+                    let at = Pos2::new(row.rect.left() + 10. + 14. + 40. + 12., row.rect.top() + 2. + 32.);
+                    let g = ui.painter().layout_no_wrap(subtitle.clone(), theme::regular(12.), palette.destructive);
+                    ui.painter().rect_filled(Rect::from_min_size(at, g.size()), 0, if row.hovered() { palette.fill } else { palette.sidebar });
+                    ui.painter().galley(at, g, palette.destructive);
+                }
+                // The avatar's "+": Desktop's StoriesAddStoryButton.
+                let avatar = Rect::from_min_size(row.rect.min + Vec2::new(24., 10.), Vec2::splat(40.));
+                let plus = Pos2::new(avatar.right() - 4., avatar.bottom() - 4.);
+                ui.painter().circle_filled(plus, 9., palette.sidebar);
+                ui.painter().circle_filled(plus, 7.5, palette.accent);
+                theme::paint_symbol(ui.painter(), "plus", plus, 11., Color32::WHITE);
+                let add = ui.interact(avatar, ui.scope_id().with("my-story-add"), Sense::click()).on_hover_text(tr("Add a story"));
+                let mut pick = None;
+                crate::menu::dropdown(ui, &add, egui::Id::unique("my-story-add-menu"), |m| {
+                    if m.item(Some("photo"), tr("Photo or video")) {
+                        pick = Some(true);
+                    }
+                    if m.item(Some("text-square"), tr("Text story")) {
+                        pick = Some(false);
+                    }
+                });
+                match pick {
+                    Some(true) => new_media_story(app),
+                    Some(false) => new_composer(app),
+                    None => {}
+                }
+                if row.clicked() && !add.clicked() {
                     match mine {
                         // Desktop's `MyStories` page lists them.
                         Some(_) => {
@@ -550,6 +585,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
     let mut info = None;
     let mut delete = None;
     let mut view = None;
+    let mut forward: Option<Story> = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(full.shrink2(Vec2::new(32., 24.))), |ui| {
         ui.horizontal(|ui| {
             if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() {
@@ -663,6 +699,9 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                             let _ = std::fs::copy(path, to);
                         }
                     }
+                    if m.item(Some("forward"), tr("Forward")) {
+                        forward = Some(s.clone());
+                    }
                     if m.item(Some("info"), tr("Info")) {
                         info = Some(s.id);
                     }
@@ -676,6 +715,9 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
     });
     if let Some(id) = info {
         app.panes.stories.info_of = Some(id);
+    }
+    if let Some(s) = forward {
+        forward_story(app, &s);
     }
     // Its Info dialog, here as in the viewer.
     if let Some(id) = app.panes.stories.info_of
@@ -692,6 +734,24 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
     }
 }
 
+
+/// Desktop's Forward for our story: its text, or its photo or video with
+/// the caption, to chats picked in the share dialog.
+fn forward_story(app: &mut App, s: &Story) {
+    match &s.content {
+        StoryContent::Text(t) => {
+            app.panes.share_text = Some((t.text.clone(), Vec::new(), String::new()));
+            app.panes.share_media = None;
+        }
+        StoryContent::Media { attachment, caption, .. } => match &attachment.local_path {
+            Some(path) => {
+                app.panes.share_text = Some((caption.clone(), Vec::new(), String::new()));
+                app.panes.share_media = Some((path.clone(), attachment.content_type.clone()));
+            }
+            None => app.toast(tr("Downloading")),
+        },
+    }
+}
 
 /// Where a story's failed download is remembered (`StoryDownloadFailed`).
 pub fn failed_id(id: i64) -> egui::Id {

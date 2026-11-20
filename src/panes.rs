@@ -88,6 +88,9 @@ pub struct Panes {
     /// A link being shared in chats picked from a list: the text, the chats
     /// chosen, the search.
     pub share_text: Option<(String, Vec<ConversationId>, String)>,
+    /// With `share_text`, a file to send (a forwarded story's photo or
+    /// video: path, type); the text is its caption.
+    pub share_media: Option<(String, String)>,
     /// The Calls tab shows only missed calls (Desktop's filter).
     pub calls_missed_only: bool,
     /// A call link waiting on Delete link's confirmation.
@@ -2336,7 +2339,7 @@ fn share_text_dialog(app: &mut App, ui: &mut Ui) {
     let Some((text, mut chosen, mut query)) = app.panes.share_text.take() else { return };
     let mut answer = None;
     let closed = modal(ui, "share-text", 400., |ui| {
-        title(ui, "Share via Signal");
+        title(ui, if app.panes.share_media.is_some() { tr("Forward to") } else { "Share via Signal" });
         widgets::text_field(ui, &mut query, "Search", false);
         ui.add_space(6.);
         let q = query.trim().to_lowercase();
@@ -2356,13 +2359,35 @@ fn share_text_dialog(app: &mut App, ui: &mut Ui) {
     });
     match answer {
         Some(0) if !chosen.is_empty() => {
-            for to in &chosen {
-                app.send(Command::SendText { conversation: to.clone(), body: text.clone(), quote: None, preview: None, mentions: Vec::new(), styles: Vec::new() });
+            match app.panes.share_media.take() {
+                Some((path, content_type)) => {
+                    let Ok(bytes) = std::fs::read(&path) else {
+                        app.toast("That file couldn't be read.");
+                        return;
+                    };
+                    let bytes = std::sync::Arc::new(bytes);
+                    let file_name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "story".into());
+                    for to in &chosen {
+                        let command = if content_type.starts_with("image/") && content_type != "image/gif" {
+                            Command::SendImages { conversation: to.clone(), images: vec![langis_core::OutgoingImage { bytes: bytes.clone(), file_name: Some(file_name.clone()) }], caption: text.clone(), quote: None, mentions: Vec::new(), styles: Vec::new() }
+                        } else {
+                            Command::SendFile { conversation: to.clone(), file: langis_core::OutgoingFile { bytes: bytes.clone(), file_name: file_name.clone(), voice: false }, caption: text.clone(), quote: None, mentions: Vec::new(), styles: Vec::new() }
+                        };
+                        app.send(command);
+                    }
+                    app.toast(tr("Message sent"));
+                }
+                None => {
+                    for to in &chosen {
+                        app.send(Command::SendText { conversation: to.clone(), body: text.clone(), quote: None, preview: None, mentions: Vec::new(), styles: Vec::new() });
+                    }
+                    let link = text.starts_with("https://");
+                    app.toast(if !link { tr("Message sent").to_owned() } else if chosen.len() == 1 { "Link sent.".to_owned() } else { format!("Link sent to {} chats.", chosen.len()) });
+                }
             }
-            app.toast(if chosen.len() == 1 { "Link sent.".to_owned() } else { format!("Link sent to {} chats.", chosen.len()) });
         }
-        Some(_) => {}
-        None if closed => {}
+        Some(_) => app.panes.share_media = None,
+        None if closed => app.panes.share_media = None,
         None => app.panes.share_text = Some((text, chosen, query)),
     }
 }
