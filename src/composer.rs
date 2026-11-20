@@ -1137,10 +1137,30 @@ fn attach(app: &mut App, chat: &mut ChatView, media: bool) {
     }
 }
 
+/// Signal's attachment limit (Desktop's `getMaximumOutgoingAttachmentSizeInKb`, 100 MB).
+const MAX_FILE_BYTES: u64 = 100 * 1000 * 1000;
+
 fn stage_path(app: &mut App, chat: &mut ChatView, path: &std::path::Path) {
     if chat.staged.len() >= MAX_STAGED {
         app.toast(format!("You can add up to {MAX_STAGED} attachments to a message."));
         return;
+    }
+    // Only regular files, within what Signal sends: a dropped `/dev/zero`
+    // or a FIFO would otherwise read forever.
+    match std::fs::metadata(path) {
+        Ok(meta) if !meta.is_file() => {
+            app.toast(format!("{} isn't a file.", path.display()));
+            return;
+        }
+        Ok(meta) if meta.len() > MAX_FILE_BYTES => {
+            app.toast("Can’t send this file because it’s too large. You can send files up to 100MB.");
+            return;
+        }
+        Err(error) => {
+            app.toast(format!("Couldn't read {}: {error}", path.display()));
+            return;
+        }
+        Ok(_) => {}
     }
     match std::fs::read(path) {
         Ok(bytes) => {

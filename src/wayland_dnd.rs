@@ -126,7 +126,8 @@ fn read_drop(state: &mut State, offer: WlDataOffer) {
     std::thread::spawn(move || {
         use std::io::Read;
         let mut text = String::new();
-        let _ = std::fs::File::from(read).read_to_string(&mut text);
+        // A file list is small; a source that sends more is cut off.
+        let _ = std::fs::File::from(read).take(1 << 20).read_to_string(&mut text);
         let paths = parse_uri_list(&text);
         if !paths.is_empty()
             && let Ok(mut dropped) = drops.dropped.lock()
