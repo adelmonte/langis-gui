@@ -326,7 +326,7 @@ fn sticker_image(ui: &Ui, path: &std::path::Path, rect: Rect) {
     if ui.rect_contains_pointer(rect) && crate::anim::paint(ui, &file, rect) {
         return;
     }
-    egui::Image::new(format!("file://{}", path.display())).maintain_aspect_ratio(true).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+    egui::Image::new(crate::thumbs::uri(ui.ctx(), &file, rect.size())).maintain_aspect_ratio(true).fit_to_exact_size(rect.size()).paint_at(ui, rect);
 }
 
 fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send> {

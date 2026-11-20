@@ -43,6 +43,13 @@ pub fn uri(ctx: &Context, path: &str, size: Vec2) -> String {
     format!("{SCHEME}{}/{path}", px.next_power_of_two().min(2048))
 }
 
+/// The URI for `path` at full size, for the lightbox: shrunk only to
+/// 4096 pixels a side, under every GPU's texture limit (a picture wider
+/// than the limit made wgpu panic).
+pub fn full_uri(path: &str) -> String {
+    format!("{SCHEME}4096/{path}")
+}
+
 /// Whether `rect` is on screen in `ui`; images that aren't aren't drawn,
 /// so they aren't decoded.
 pub fn visible(ui: &egui::Ui, rect: Rect) -> bool {
@@ -50,7 +57,15 @@ pub fn visible(ui: &egui::Ui, rect: Rect) -> bool {
 }
 
 fn decode(path: &str, max: u32) -> Result<ColorImage, String> {
-    let image = image::ImageReader::open(path).map_err(|e| e.to_string())?.with_guessed_format().map_err(|e| e.to_string())?.decode().map_err(|e| e.to_string())?;
+    // A sender's picture: its header is checked before decoding, and the
+    // decode may allocate at most 256 MB.
+    let mut reader = image::ImageReader::open(path).map_err(|e| e.to_string())?.with_guessed_format().map_err(|e| e.to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16384);
+    limits.max_image_height = Some(16384);
+    limits.max_alloc = Some(256 << 20);
+    reader.limits(limits);
+    let image = reader.decode().map_err(|e| e.to_string())?;
     let image = if image.width() > max || image.height() > max { image.thumbnail(max, max) } else { image };
     let rgba = image.to_rgba8();
     Ok(ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw()))

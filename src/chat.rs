@@ -1196,7 +1196,7 @@ fn message(
         {
             // Animated stickers (APNG, WebP) play, as in Desktop.
             if !crate::anim::paint(ui, path, rect) {
-                egui::Image::new(format!("file://{path}")).maintain_aspect_ratio(true).paint_at(ui, rect);
+                egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).maintain_aspect_ratio(true).paint_at(ui, rect);
             }
         }
         let r = ui.interact(rect, ui.scope_id().with(("sticker", m.id)), Sense::click());

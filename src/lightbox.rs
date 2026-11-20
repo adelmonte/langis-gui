@@ -121,11 +121,11 @@ impl App {
         // Full size only while it's open.
         for item in &lightbox.items {
             if let Some(path) = &item.path {
-                self.ctx.forget_image(&format!("file://{path}"));
+                self.ctx.forget_image(&crate::thumbs::full_uri(path));
             }
         }
         if let Some(path) = lightbox.view_once {
-            self.ctx.forget_image(&format!("file://{}", path.display()));
+            self.ctx.forget_image(&crate::thumbs::full_uri(&path.to_string_lossy()));
             if let Err(error) = std::fs::remove_file(&path) {
                 tracing::warn!(%error, "couldn't delete the view-once copy");
             }
@@ -293,11 +293,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 let shown = Rect::from_center_size(media.center() + Vec2::new(tx, ty), media.size() * s);
                 ui.scope(|ui| {
                     ui.set_clip_rect(rect);
-                    egui::Image::new(format!("file://{path}")).fit_to_exact_size(shown.size()).paint_at(ui, shown);
+                    egui::Image::new(crate::thumbs::full_uri(path)).fit_to_exact_size(shown.size()).paint_at(ui, shown);
                 });
             }
             Some(path) => {
-                egui::Image::new(format!("file://{path}")).fit_to_exact_size(media.size()).paint_at(ui, media);
+                egui::Image::new(crate::thumbs::full_uri(path)).fit_to_exact_size(media.size()).paint_at(ui, media);
             }
             None => {
                 ui.painter().rect_filled(media, CornerRadius::same(4), Color32::from_gray(40));
