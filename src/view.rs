@@ -32,7 +32,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 crate::sidebar::chat_list(app, ui);
                 egui::CentralPanel::no_frame().show(ui, |ui| {
                     ui.painter().rect_filled(ui.max_rect(), 0, palette.background);
-                    let details = app.panes.details.as_ref().is_some_and(|d| app.selected.as_ref() == Some(&d.conversation));
+                    let details = app.panes.details.as_ref().is_some_and(|d| app.selected.as_ref() == Some(&d.conversation) && d.calls.is_none());
                     if details {
                         crate::details::show(app, ui);
                     } else if app.chat.is_some() {

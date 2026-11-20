@@ -30,6 +30,9 @@ pub enum Page {
 
 pub struct Details {
     pub conversation: ConversationId,
+    /// Opened from the Calls tab: that call group (what, when, missed),
+    /// shown as Desktop's `CallHistoryGroupPanelSection`, with Message.
+    pub calls: Option<Vec<(String, i64, bool)>>,
     pub page: Page,
     pub safety: Option<Result<SafetyNumber, String>>,
     pub key_transparency: Option<bool>,
@@ -93,6 +96,7 @@ impl Details {
             label_emoji: String::new(),
             label_picker: None,
             answer_request: None,
+            calls: None,
         }
     }
 }
@@ -191,6 +195,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     };
     let page = details.page;
+    let from_calls = details.calls.is_some();
     // A top bar with the back arrow.
     egui::Panel::top("details-header")
         .exact_size(52.)
@@ -203,7 +208,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.add_space(12.);
                 if widgets::icon_button(ui, Icon::ChevronLeft, 20., tr("Back")).clicked() {
                     match page {
-                        Page::Main => app.panes.details = None,
+                        Page::Main => {
+                            if from_calls {
+                                app.panes.call_details = None;
+                            }
+                            app.panes.details = None;
+                        }
                         _ => {
                             if let Some(d) = app.panes.details.as_mut() {
                                 d.page = Page::Main;
@@ -477,30 +487,16 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         });
     }
 
-    // Recent calls with this chat (Desktop's `CallHistoryGroupPanelSection`),
-    // from its loaded messages.
-    let calls: Vec<(String, i64)> = app
-        .chat
-        .as_ref()
-        .filter(|chat| chat.id == c.id)
-        .map(|chat| {
-            chat.messages
-                .iter()
-                .rev()
-                .filter_map(|m| match &m.notice {
-                    Some(n @ (langis_store::Notice::Call { .. } | langis_store::Notice::GroupCall { .. })) => Some((crate::notices::notice_text(n, |sid| app.name(sid)), m.sent_at)),
-                    _ => None,
-                })
-                .take(5)
-                .collect()
-        })
-        .unwrap_or_default();
-    if !calls.is_empty() {
+    // Desktop's `CallHistoryGroupPanelSection`, from the Calls tab only:
+    // the group's day, then each call with its time.
+    if let Some(calls) = app.panes.details.as_ref().and_then(|d| d.calls.clone()).filter(|v| !v.is_empty()) {
         axo_list::gap(ui);
-        axo_list::list(ui, Some(tr("Calls")), None, |ui| {
-            for (text, at) in &calls {
-                let when = crate::format::short_timestamp(*at);
-                axo_list::item(ui, Item::new(text).symbol("phone"), End::Arrow(Some(&when)));
+        let day = crate::format::day_label(calls[0].1);
+        axo_list::list(ui, Some(&day), None, |ui| {
+            for (text, at, _) in &calls {
+                let when = crate::format::message_time(*at);
+                let symbol = if c.kind == ConversationKind::Group || text.to_lowercase().contains("video") { "videocamera" } else { "phone" };
+                axo_list::item(ui, Item::new(text).symbol(symbol), End::Arrow(Some(&when)));
             }
         });
     }
@@ -723,6 +719,10 @@ fn header_buttons(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversatio
     let group = c.kind == ConversationKind::Group;
     let callable = c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked && !c.ended;
     let mut buttons: Vec<(&str, &str)> = Vec::new();
+    // Desktop's Message button, in the Calls tab.
+    if app.panes.details.as_ref().is_some_and(|d| d.calls.is_some()) {
+        buttons.push(("message", "Message"));
+    }
     if c.kind != ConversationKind::NoteToSelf && !c.ended {
         buttons.push(("videocamera", "Video"));
         if !group {
@@ -749,6 +749,12 @@ fn header_buttons(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversatio
         match *label {
             "Video" if clicked && callable => start_call(app, c, true),
             "Audio" if clicked && callable => start_call(app, c, false),
+            "Message" if clicked => {
+                app.panes.details = None;
+                app.panes.call_details = None;
+                app.tab = crate::app::Tab::Chats;
+                app.open(c.id.clone());
+            }
             "Unmute" if clicked => app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(0) }),
             "Mute" => {
                 let id = c.id.clone();

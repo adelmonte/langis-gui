@@ -341,7 +341,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.painter().rect_filled(ui.max_rect(), 0, palette.background);
         match (app.panes.link_details.clone(), app.panes.call_details.clone()) {
             (Some(room), _) => link_details(app, ui, &palette, &room),
-            (None, Some((conversation, calls))) => call_details(app, ui, &palette, &conversation, &calls),
+            (None, Some((conversation, calls))) => {
+                // Desktop shows the chat's details here, with Message and
+                // this call group.
+                if !app.panes.details.as_ref().is_some_and(|d| d.conversation == conversation && d.calls.as_ref() == Some(&calls)) {
+                    crate::details::open(app, conversation);
+                    if let Some(d) = app.panes.details.as_mut() {
+                        d.calls = Some(calls);
+                    }
+                }
+                crate::details::show(app, ui);
+            }
             (None, None) => {
                 // `CallsTab__EmptyStateText--with-icon-2`.
                 ui.centered_and_justified(|ui| {
@@ -356,57 +366,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 });
             }
         }
-    });
-}
-
-/// Desktop's call details for a chat's call group: the chat with its
-/// Message, Voice and Video buttons, then the calls, each with its time.
-fn call_details(app: &mut App, ui: &mut Ui, palette: &Palette, conversation: &ConversationId, calls: &[(String, i64, bool)]) {
-    let Some(c) = app.conversation(conversation).cloned() else { return };
-    ui.vertical_centered(|ui| {
-        ui.add_space(40.);
-        widgets::avatar(ui, &widgets::AvatarSpec::of(&c), 80.);
-        ui.add_space(12.);
-        ui.label(RichText::new(&c.title).font(theme::semibold(20.)));
-        ui.add_space(16.);
-        ui.horizontal(|ui| {
-            let group = c.kind == langis_store::ConversationKind::Group;
-            let n = if group { 2. } else { 3. };
-            ui.add_space(((ui.available_width() - n * 88.) / 2.).max(0.));
-            let tile = |ui: &mut Ui, symbol: &str, label: &str| {
-                let (rect, r) = ui.allocate_exact_size(Vec2::new(80., 56.), Sense::click());
-                ui.painter().rect_filled(rect, CornerRadius::same(10), if r.hovered() { palette.fill_pressed } else { palette.fill });
-                theme::paint_symbol(ui.painter(), symbol, Pos2::new(rect.center().x, rect.top() + 20.), 18., palette.text);
-                ui.painter().text(Pos2::new(rect.center().x, rect.bottom() - 10.), egui::Align2::CENTER_BOTTOM, label, theme::regular(12.), palette.text);
-                r.clicked()
-            };
-            if tile(ui, "message", tr("Message")) {
-                app.open(c.id.clone());
-            }
-            if !group && tile(ui, "phone", tr("Voice")) {
-                crate::panes::open_lobby(app, c.id.clone(), false);
-            }
-            if tile(ui, "videocamera", tr("Video")) {
-                crate::panes::open_lobby(app, c.id.clone(), true);
-            }
-        });
-        ui.add_space(20.);
-        let width = 360f32.min(ui.available_width() - 32.);
-        egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
-            ui.set_width(width);
-            if let Some((_, at, _)) = calls.first() {
-                ui.label(RichText::new(crate::format::day_label(*at)).font(theme::semibold(13.)));
-                ui.add_space(8.);
-            }
-            for (what, at, missed) in calls {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(crate::format::message_time(*at)).font(theme::regular(13.)).color(palette.text_secondary));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(what).font(theme::regular(13.)).color(if *missed { palette.destructive } else { palette.text }));
-                    });
-                });
-            }
-        });
     });
 }
 
