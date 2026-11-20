@@ -347,7 +347,13 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             }
             let note_to_self = c.kind == ConversationKind::NoteToSelf;
             let now = chrono::Utc::now().timestamp_millis();
-            let for_everyone = chosen.iter().all(|m| langis_core::deletes::can_send(m, note_to_self, now));
+            // Desktop's `canDeleteForEveryone`: our own messages while
+            // allowed, or anyone's as a group admin when the remote config
+            // allows admin deletes (langis sends the right kind).
+            let group = c.kind == ConversationKind::Group;
+            let admin = group && !c.left && c.admins.iter().any(|a| *a == app.aci);
+            let rules = langis_core::deletes::Chat::new(note_to_self, group, admin, c.ended, &langis_core::remote_config::current());
+            let for_everyone = chosen.iter().all(|m| langis_core::deletes::send_kind(m, rules, now).is_some());
             let n = chosen.len();
             let title = if n == 1 { "Delete selected message?".to_owned() } else { format!("Delete selected {n} messages?") };
             let body = match (note_to_self, n) {
