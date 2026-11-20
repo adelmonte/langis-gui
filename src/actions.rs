@@ -456,6 +456,15 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         }
         Dialog::Pin { message, choice } => {
             let id = *message;
+            // Desktop's PinMessageDisappearingMessagesWarningDialog first.
+            let disappearing = chat.iter().find(|m| m.id == id).is_some_and(|m| m.expires_in > 0);
+            let warned_id = egui::Id::unique(("pin-disappearing-warned", id));
+            if disappearing && !ui.ctx().data(|d| d.get_temp::<bool>(warned_id)).unwrap_or(false) {
+                if crate::dialog::alert(ui.ctx(), egui::Id::unique("pin-disappearing"), tr("Pinning disappearing messages"), tr("Disappearing messages will be unpinned when their timer expires and the message is removed from the chat."), tr("Okay")) {
+                    ui.ctx().data_mut(|d| d.insert_temp(warned_id, true));
+                }
+                return out;
+            }
             let modal = egui::Modal::new(egui::Id::unique("pin-message")).frame(frame).show(ui.ctx(), |ui| {
                 ui.set_width(320.);
                 ui.label(RichText::new(tr("Pin message for...")).font(theme::semibold(18.)));
