@@ -97,6 +97,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// The AvatarEditor for a new group's photo.
+    pub new_group_avatar: Option<crate::avatar_editor::AvatarEditor>,
     /// Desktop's CallLinkAddNameModal, open.
     pub link_name_open: bool,
     /// Desktop's UsernameOnboardingModal ("New ways to connect").
@@ -1617,6 +1619,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
     let Some(mut compose) = app.panes.compose.take() else { return false };
     // A Custom time picked for the new group, opened once the pane's done.
     let mut custom_for_group: Option<(u32, usize)> = None;
+    let mut open_group_avatar = false;
     let palette = Palette::of(ui.ctx());
     let mut keep = true;
     let mut next: Option<Compose> = None;
@@ -1660,10 +1663,9 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                         theme::paint_symbol(ui.painter(), "camera", rect.center(), 32., palette.text_secondary);
                     }
                 }
-                if response.on_hover_text("Choose a photo").clicked()
-                    && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp"]).pick_file()
-                {
-                    *avatar = std::fs::read(path).ok();
+                // Desktop's AvatarEditor for the new group's photo.
+                if response.on_hover_text(tr("Edit photo")).clicked() {
+                    open_group_avatar = true;
                 }
                 ui.add_space(16.);
                 ui.horizontal(|ui| {
@@ -1893,6 +1895,26 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
     }
     if let Some((value, unit)) = custom_for_group {
         app.panes.custom_timer = Some((TimerTarget::NewGroup, value, unit));
+    }
+    if open_group_avatar && let Some(Compose::Group { title, .. }) = app.panes.compose.as_ref() {
+        app.panes.new_group_avatar = Some(crate::avatar_editor::AvatarEditor::new(None, if title.trim().is_empty() { "Group" } else { title.trim() }));
+    }
+    // Its result, into the group being made.
+    if let Some(editor) = app.panes.new_group_avatar.as_mut() {
+        let mut toast = None;
+        if let Some(change) = editor.show(ui, &mut toast) {
+            app.panes.new_group_avatar = None;
+            if let Some(Compose::Group { avatar, .. }) = app.panes.compose.as_mut() {
+                match change {
+                    langis_core::profiles::AvatarChange::New(bytes) => *avatar = Some(bytes.to_vec()),
+                    langis_core::profiles::AvatarChange::Remove => *avatar = None,
+                    langis_core::profiles::AvatarChange::Keep => {}
+                }
+            }
+        }
+        if let Some(t) = toast {
+            app.toast(t);
+        }
     }
     true
 }
