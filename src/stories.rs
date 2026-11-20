@@ -341,7 +341,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
                 if all.iter().all(|(k, _)| k == "me") {
                     ui.add_space(24.);
-                    ui.vertical_centered(|ui| body(ui, &palette, tr("No recent stories to show right now")));
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new(tr("No stories")).font(theme::semibold(14.)));
+                        body(ui, &palette, tr("New updates will appear here."));
+                    });
                 }
             });
         });
@@ -361,7 +364,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             None => {
                 ui.painter().rect_filled(rect, 0, palette.background);
                 ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("No story selected").font(theme::regular(14.)).color(palette.text_secondary));
+                    ui.label(RichText::new(tr("Click to view a story")).font(theme::regular(14.)).color(palette.text_secondary));
                 });
             }
         }

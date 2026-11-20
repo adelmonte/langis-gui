@@ -90,12 +90,12 @@ impl Picker {
         if !q.is_empty() {
             let options = langis_emoji::SearchOptions { limit: 120, ..Default::default() };
             let found = keep(langis_emoji::search(q, &options).into_iter().map(|m| m.emoji).collect());
-            return vec![Section { title: "Search results", symbol: Some("search"), glyph: "", emoji: found }];
+            return vec![Section { title: tr("Search Results"), symbol: Some("search"), glyph: "", emoji: found }];
         }
         let mut out = Vec::new();
         let recents: Vec<&'static Emoji> = recent.iter().filter_map(|e| langis_emoji::by_glyph(e).map(|(e, _)| e)).collect();
         if !recents.is_empty() {
-            out.push(Section { title: "Recents", symbol: Some("recent"), glyph: "", emoji: keep(recents) });
+            out.push(Section { title: tr("Recently Used"), symbol: Some("recent"), glyph: "", emoji: keep(recents) });
         }
         for g in Group::PICKER {
             out.push(Section { title: g.label(), symbol: group_symbol(g), glyph: g.icon(), emoji: keep(langis_emoji::in_group(g).collect()) });
@@ -262,7 +262,7 @@ impl Picker {
                 index += s.emoji.len();
             }
             if sections.iter().all(|s| s.emoji.is_empty()) {
-                ui.painter().text(origin + Vec2::new(ui.available_width() / 2., 60.), Align2::CENTER_CENTER, tr("No results"), theme::regular(14.), palette.text_secondary);
+                ui.painter().text(origin + Vec2::new(ui.available_width() / 2., 60.), Align2::CENTER_CENTER, tr("No emoji found"), theme::regular(14.), palette.text_secondary);
             }
         });
         let offset = output.state.clamped_offset().y;

@@ -212,7 +212,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if !blocked {
                 items.push(("block", tr("Block").into(), Do::Block));
             }
-            items.push(("shield-check", tr("View safety number").into(), Do::Safety));
+            items.push(("shield-check", tr("View Safety Number").into(), Do::Safety));
             if we_admin && is_member {
                 items.push(("key", if is_admin { tr("Remove as admin") } else { tr("Make admin") }.into(), Do::Confirm(Confirm::Admin)));
                 items.push(("minus-circle", tr("Remove from group").into(), Do::Confirm(Confirm::Remove)));

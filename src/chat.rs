@@ -977,7 +977,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                         let label = match k {
                             0 => crate::i18n::tf("icu:collapsedGroupUpdates", &format!("{run} group updates"), &[("count", crate::i18n::Arg::from(&run))]),
                             1 => format!("{run} disappearing message timer changes"),
-                            _ => format!("{run} calls"),
+                            _ => crate::i18n::tf("icu:collapsedCallEvents", &format!("{run} call events"), &[("count", crate::i18n::Arg::from(run))]),
                         };
                         let r = ui
                             .vertical_centered(|ui| {
@@ -2005,6 +2005,10 @@ fn message(
         let at = response.interact_pointer_pos().unwrap_or(bubble.center());
         actions.push(Action::Menu { message_id: m.id, at });
     }
+    // Desktop's double-click replies.
+    if !ctx.selecting && !m.deleted && response.double_clicked() {
+        actions.push(Action::Reply(m.id));
+    }
     revealed_now
 }
 
@@ -2809,12 +2813,12 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
             let latest = ctx.app.chat.as_ref().is_none_or(|c| !c.messages.iter().any(|o| o.sent_at > m.sent_at && matches!(o.notice, Some(Notice::GroupCall { .. }))));
             let ours = ctx.app.call.as_ref().is_some_and(|c| c.conversation == *ctx.chat_id);
             match (going && latest, ours) {
-                (true, false) => Some((tr("Join"), NoticeButton::Join)),
+                (true, false) => Some((tr("Join call"), NoticeButton::Join)),
                 (_, true) if latest => Some((tr("Return to call"), NoticeButton::Return)),
                 _ => None,
             }
         }
-        Notice::SafetyNumberChanged { who } => Some((tr("View safety number"), NoticeButton::Safety(who.clone()))),
+        Notice::SafetyNumberChanged { who } => Some((tr("View Safety Number"), NoticeButton::Safety(who.clone()))),
         Notice::PollEnded { by, sent_at, .. } => Some((tr("View poll"), NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
         Notice::Pinned { author, sent_at, .. } => Some((tr("Go to message"), NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),
         Notice::SessionRefreshed => Some((
@@ -3221,18 +3225,38 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
     let id = c.id.clone();
     let group = c.kind == ConversationKind::Group;
     crate::menu::dropdown(ui, more, egui::Id::unique("chat-header-menu"), |m| {
+        // Desktop's menu for a message request: answer it, nothing else.
+        if !c.accepted && c.kind != ConversationKind::NoteToSelf {
+            if c.blocked {
+                if m.item(Some("message-thread"), tr("Unblock")) {
+                    app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Unblock));
+                }
+            } else if m.item(Some("block"), tr("Block")) {
+                app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Block));
+            }
+            if m.item(Some("check-circle"), tr("Accept")) {
+                app.panes.confirm_answer = Some((id.clone(), langis_store::MessageRequestResponse::Accept));
+            }
+            if m.item(Some("flag"), tr("Report spam")) {
+                app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::ReportSpam));
+            }
+            if m.item(Some("trash"), tr("Delete chat")) {
+                app.panes.delete_chat = Some((id.clone(), group && !c.left && !c.ended));
+            }
+            return;
+        }
         if !group || c.can_edit_info {
-            m.sub(Some("timer"), "Disappearing messages", |m| {
+            m.sub(Some("timer"), tr("Disappearing messages"), |m| {
                 // expirationTimer.DEFAULT_DURATIONS_IN_SECONDS
                 const DEFAULTS: [u32; 8] = [0, 2_419_200, 604_800, 86_400, 28_800, 3_600, 300, 30];
                 for seconds in DEFAULTS {
-                    let label = if seconds == 0 { "Off".to_owned() } else { crate::format::timer_long(seconds) };
+                    let label = if seconds == 0 { tr("Off").to_owned() } else { crate::format::timer_long(seconds) };
                     if m.check(c.expire_timer == seconds, &label) {
                         app.send(Command::SetExpireTimer { conversation: id.clone(), seconds });
                     }
                 }
                 let custom = !DEFAULTS.contains(&c.expire_timer);
-                let label = if custom { format!("Custom time ({})", crate::format::timer_long(c.expire_timer)) } else { "Custom time...".to_owned() };
+                let label = if custom { format!("Custom time ({})", crate::format::timer_long(c.expire_timer)) } else { tr("Custom time...").to_owned() };
                 if m.check(custom, &label) {
                     let (value, unit) = crate::panes::custom_timer_start(if custom { c.expire_timer } else { 3_600 });
                     app.panes.custom_timer = Some((crate::panes::TimerTarget::Chat(id.clone()), value, unit));
@@ -3240,46 +3264,43 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
             });
         }
         if c.muted {
-            if m.item(Some("bell"), "Unmute") {
+            if m.item(Some("bell"), tr("Unmute")) {
                 app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MutedUntil(0) });
             }
         } else {
-            m.sub(Some("bell-slash"), "Mute notifications", |m| crate::panes::mute_items(app, m, &id));
+            m.sub(Some("bell-slash"), tr("Mute notifications"), |m| crate::panes::mute_items(app, m, &id));
         }
-        if m.item(Some("settings"), if group { "Group settings" } else { "Chat settings" }) {
+        if m.item(Some("settings"), if group { tr("Group settings") } else { tr("Chat settings") }) {
             crate::details::open(app, id.clone());
         }
-        if m.item(Some("album"), "All media") {
+        if m.item(Some("album"), tr("All media")) {
             crate::details::open_media(app, id.clone());
         }
         m.separator();
-        if m.item(Some("check-circle"), "Select messages") {
+        if m.item(Some("check-circle"), tr("Select messages")) {
             app.select_requested = true;
         }
         m.separator();
-        if !c.marked_unread && m.item(Some("message-badge"), "Mark as unread") {
+        if !c.marked_unread && m.item(Some("message-badge"), tr("Mark as unread")) {
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(true) });
         }
-        if m.item(Some(if c.pinned { "pin-slash" } else { "pin" }), if c.pinned { "Unpin chat" } else { "Pin chat" }) {
+        if m.item(Some(if c.pinned { tr("pin-slash") } else { tr("pin") }), if c.pinned { tr("Unpin chat") } else { tr("Pin chat") }) {
             app.send(Command::SetPinned { conversation: id.clone(), pinned: !c.pinned });
         }
-        if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { "Unarchive" } else { "Archive" }) {
+        if m.item(Some(if c.archived { tr("archive-up") } else { tr("archive") }), if c.archived { tr("Unarchive") } else { tr("Archive") }) {
             app.set_archived(id.clone(), !c.archived);
         }
         if !c.ended {
-            if !c.blocked && m.item(Some("block"), "Block") {
+            if !c.blocked && m.item(Some("block"), tr("Block")) {
                 app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Block));
             }
-            if c.blocked && m.item(Some("message-thread"), "Unblock") {
+            if c.blocked && m.item(Some("message-thread"), tr("Unblock")) {
                 app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Unblock));
             }
         }
-        if m.item(Some("trash"), "Delete") {
+        if m.item(Some("trash"), tr("Delete")) {
             let member = group && !c.left && !c.ended;
             app.panes.delete_chat = Some((id.clone(), member));
-        }
-        if group && !c.ended && !c.left && m.item(Some("leave"), "Leave group") {
-            app.panes.chat_confirm = Some((id.clone(), crate::panes::ChatConfirm::Leave));
         }
     });
 }

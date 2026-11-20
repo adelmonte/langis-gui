@@ -730,7 +730,7 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
         "present",
         Icon::ShareScreenFillLight,
         if !can_present { Look::Disabled } else if call.sharing { Look::Highlighted } else { Look::Regular },
-        if call.sharing { tr("Stop presenting") } else { "Present" },
+        if call.sharing { tr("Stop presenting") } else { tr("Start presenting") },
     ));
     if call.group {
         buttons.push(("react", Icon::HeartPlusFill, if app.panes.reactions_open { Look::Highlighted } else { Look::Regular }, tr("React")));

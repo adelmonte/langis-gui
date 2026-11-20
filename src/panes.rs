@@ -1002,7 +1002,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
             .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin::symmetric(24, 16)))
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
-                    let text = if c.ended { "This group was ended by an admin." } else { "You are no longer a member of this group." };
+                    let text = if c.ended { tr("You can\u{2019}t send messages because the group has ended.") } else { "You are no longer a member of this group." };
                     ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
                     if ui.link(tr("Delete chat")).clicked() {
                         app.panes.delete_chat = Some((c.id.clone(), false));

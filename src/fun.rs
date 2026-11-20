@@ -410,7 +410,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                 ui.painter().rect_filled(rect, CornerRadius::same(8), if fun.sticker_recents { palette.fill_pressed } else { palette.fill });
             }
             theme::paint_symbol(ui.painter(), "recent", rect.center(), 18., palette.text);
-            if r.on_hover_text("Recents").clicked() {
+            if r.on_hover_text(tr("Recently Used")).clicked() {
                 fun.sticker_recents = true;
                 fun.chose_pack = true;
             }
@@ -485,8 +485,8 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
             .collect(),
     };
     let title = match &fun.pack {
-        _ if !query.is_empty() => "Search results".to_owned(),
-        _ if fun.sticker_recents => "Recents".to_owned(),
+        _ if !query.is_empty() => tr("Search Results").to_owned(),
+        _ if fun.sticker_recents => tr("Recently Used").to_owned(),
         Some(id) => fun.packs.iter().find(|p| &p.id == id).map(|p| p.title.clone()).unwrap_or_default(),
         None => tr("Favorites").to_owned(),
     };
@@ -495,7 +495,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
         ui.add_space(40.);
         ui.vertical_centered(|ui| {
             let text = if !query.is_empty() {
-                tr("No results")
+                tr("No stickers found")
             } else if fun.pack.is_none() {
                 "Stickers you favorite show up here."
             } else {
@@ -725,18 +725,19 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
             ui.set_width(420.);
             match &result {
                 None => {
-                    ui.label(RichText::new("Sticker pack").font(theme::semibold(18.)));
+                    ui.label(RichText::new(tr("Sticker Pack")).font(theme::semibold(18.)));
                     ui.add_space(30.);
                     ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
                     ui.add_space(30.);
                 }
                 Some(Err(error)) => {
-                    ui.label(RichText::new("Sticker pack").font(theme::semibold(18.)));
+                    ui.label(RichText::new(tr("Sticker Pack")).font(theme::semibold(18.)));
                     ui.add_space(12.);
-                    ui.label(RichText::new(format!("This pack couldn't be opened: {error}")).color(palette.text_secondary));
+                    let _ = error;
+                    ui.label(RichText::new(tr("Error opening sticker pack. Check your internet connection and try again.")).color(palette.text_secondary));
                 }
                 Some(Ok(preview)) => {
-                    ui.label(RichText::new(if preview.pack.title.is_empty() { "Sticker pack" } else { &preview.pack.title }).font(theme::semibold(18.)));
+                    ui.label(RichText::new(if preview.pack.title.is_empty() { tr("Sticker Pack") } else { &preview.pack.title }).font(theme::semibold(18.)));
                     if !preview.pack.author.is_empty() {
                         ui.label(RichText::new(&preview.pack.author).color(palette.text_secondary));
                     }

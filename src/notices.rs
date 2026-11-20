@@ -150,7 +150,7 @@ fn group_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -> Str
             format!("{} changed who can edit group membership to \"{}\"", actor(), admins_only(*only))
         }
         GroupNotice::LabelAccess { admins_only: only } => {
-            format!("{} changed who can set member labels to \"{}\"", actor(), admins_only(*only))
+            format!("{} changed who can add member labels to \"{}\"", actor(), admins_only(*only))
         }
         GroupNotice::AnnouncementsOnly { on: true } => {
             crate::i18n::tf("icu:GroupV2--announcements--admin--other", &format!("{} changed the group settings to only allow admins to send messages.", actor()), &[("memberName", crate::i18n::Arg::from(&actor()))])

@@ -575,7 +575,7 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
     // Desktop's `DeleteLinkModal`.
     if app.panes.confirm_delete_link.as_deref() == Some(room) {
         let (title, body_text, action) = if admin {
-            ("Delete link?", tr("This link will no longer work for anyone who has it."), tr("Delete"))
+            (tr("Delete call link?"), tr("This link will no longer work for anyone who has it."), tr("Delete"))
         } else {
             ("Remove link?", "This link will be removed from your call history. You can join again if someone shares it with you.", tr("Remove"))
         };
