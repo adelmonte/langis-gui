@@ -500,7 +500,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         axo_list::list(ui, Some(tr("Calls")), None, |ui| {
             for (text, at) in &calls {
                 let when = crate::format::short_timestamp(*at);
-                axo_list::item(ui, Item::new(text).symbol(tr("phone")), End::Arrow(Some(&when)));
+                axo_list::item(ui, Item::new(text).symbol("phone"), End::Arrow(Some(&when)));
             }
         });
     }

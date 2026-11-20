@@ -41,7 +41,8 @@ for f in sorted(glob.glob('src/*.rs')):
             before, after = line[:m.start()], line[m.end():]
             # Inside a string already (an odd number of quotes before) is
             # handled by finditer; skip non-messages and guarded contexts.
-            if norm(rust_unescape(lit)) not in plain or BEFORE_SKIP.search(before) or AFTER_SKIP.search(after) or before.endswith("r#"):
+            # Symbol names, ids and setting values are lower-case words.
+            if re.fullmatch(r'[a-z][a-z0-9-]*', lit) or norm(rust_unescape(lit)) not in plain or BEFORE_SKIP.search(before) or AFTER_SKIP.search(after) or before.endswith("r#"):
                 continue
             pieces.append(line[last:m.start()])
             pieces.append(f'tr({m.group(0)})')

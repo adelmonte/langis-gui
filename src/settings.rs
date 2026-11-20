@@ -716,7 +716,7 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     // here (Desktop's "Sent media quality" is the nearest).
     axo_list::gap(ui);
     axo_list::list(ui, Some(tr("Media")), None, |ui| {
-        let levels = ["max", "fast", tr("off")];
+        let levels = ["max", "fast", "off"];
         let chosen = levels.iter().position(|l| *l == s.optimization).or(Some(0));
         let item = Item::new("Sent image optimization").description("Every level keeps the picture as it is and removes its metadata; smaller takes longer");
         if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("optimization"), item, &["Smallest", "Faster", tr("Off")], chosen) {
@@ -1442,7 +1442,7 @@ fn reset_notifications(app: &mut App) {
 
 fn while_muted(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::list(ui, None, None, |ui| {
-        account_switch(app, ui, s, AccountSetting::NotifyCallsIfMuted, Item::new(tr("Calls")).symbol(tr("phone")).description(tr("Ring or notify when a call is started in muted chats.")));
+        account_switch(app, ui, s, AccountSetting::NotifyCallsIfMuted, Item::new(tr("Calls")).symbol("phone").description(tr("Ring or notify when a call is started in muted chats.")));
         account_switch(app, ui, s, AccountSetting::NotifyMentionsIfMuted, Item::new(tr("Mentions")).symbol("at").description(tr("Notify when you are mentioned in muted chats.")));
         account_switch(app, ui, s, AccountSetting::NotifyRepliesIfMuted, Item::new(tr("Replies")).symbol("reply").description(tr("Notify when someone replies to your message in muted chats.")));
     });

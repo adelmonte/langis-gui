@@ -1390,7 +1390,7 @@ fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_s
             if m.item(Some("message"), tr("Message")) {
                 action = Some(0);
             }
-            if m.item(Some(tr("phone")), tr("Voice call")) {
+            if m.item(Some("phone"), tr("Voice call")) {
                 action = Some(1);
             }
             if m.item(Some("videocamera"), tr("Video call")) {

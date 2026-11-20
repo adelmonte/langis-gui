@@ -383,7 +383,7 @@ fn call_details(app: &mut App, ui: &mut Ui, palette: &Palette, conversation: &Co
             if tile(ui, "message", tr("Message")) {
                 app.open(c.id.clone());
             }
-            if !group && tile(ui, tr("phone"), tr("Voice")) {
+            if !group && tile(ui, "phone", tr("Voice")) {
                 crate::panes::open_lobby(app, c.id.clone(), false);
             }
             if tile(ui, "videocamera", tr("Video")) {

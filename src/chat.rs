@@ -798,7 +798,7 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                                 return;
                             }
                             // Groups get video only (OutgoingCallButtonStyle.JustVideo).
-                            if !group && widgets::axo_icon_button(ui, tr("phone"), tip("Start a voice call")).clicked() {
+                            if !group && widgets::axo_icon_button(ui, "phone", tip("Start a voice call")).clicked() {
                                 crate::panes::open_lobby(app, c.id.clone(), false);
                             }
                             if widgets::axo_icon_button(ui, "videocamera", tip(tr("Start a video call"))).clicked() {
@@ -3395,10 +3395,10 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
         if !c.marked_unread && m.item(Some("message-badge"), tr("Mark as unread")) {
             app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::MarkedUnread(true) });
         }
-        if m.item(Some(if c.pinned { tr("pin-slash") } else { tr("pin") }), if c.pinned { tr("Unpin chat") } else { tr("Pin chat") }) {
+        if m.item(Some(if c.pinned { "pin-slash" } else { "pin" }), if c.pinned { tr("Unpin chat") } else { tr("Pin chat") }) {
             app.send(Command::SetPinned { conversation: id.clone(), pinned: !c.pinned });
         }
-        if m.item(Some(if c.archived { tr("archive-up") } else { tr("archive") }), if c.archived { tr("Unarchive") } else { tr("Archive") }) {
+        if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { tr("Unarchive") } else { tr("Archive") }) {
             app.set_archived(id.clone(), !c.archived);
         }
         if !c.ended {

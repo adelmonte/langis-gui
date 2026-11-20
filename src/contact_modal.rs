@@ -185,7 +185,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
             // `AxoStackedButton.Row`: Message, Video, Voice.
             ui.add_space(16.);
-            let buttons = [("message", tr("Message")), ("videocamera", tr("Video")), (tr("phone"), tr("Voice"))];
+            let buttons = [("message", tr("Message")), ("videocamera", tr("Video")), ("phone", tr("Voice"))];
             let cell_w = 72.;
             let total = buttons.len() as f32 * cell_w + (buttons.len() - 1) as f32 * 8.;
             let (row, _) = ui.allocate_exact_size(Vec2::new(width, 36. + 6. + 14.), Sense::hover());
@@ -353,7 +353,7 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
                 }
             }
             if let Some(phone) = app.conversation(&ConversationId::direct(aci)).and_then(|c| c.phone.clone()) {
-                row(ui, tr("phone"), &phone);
+                row(ui, "phone", &phone);
             }
             ui.add_space(8.);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
