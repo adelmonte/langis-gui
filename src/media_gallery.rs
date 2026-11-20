@@ -111,10 +111,10 @@ fn section(millis: i64) -> String {
         return "Yesterday".into();
     }
     if start(7).is_some_and(|t| time >= t) {
-        return "This week".into();
+        return "This Week".into();
     }
     if time.year() == now.year() && time.month() == now.month() {
-        return "This month".into();
+        return "This Month".into();
     }
     time.format("%B %Y").to_string()
 }

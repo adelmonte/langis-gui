@@ -1043,34 +1043,43 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         painter.galley(pill.center() - galley.size() / 2., galley, palette.text_secondary.gamma_multiply(shown));
     }
     // Desktop's `ScrollDownButton`s: unread mentions above, then to the
-    // bottom, each with its count.
-    let mut next_above = output.inner_rect.bottom() - 56.;
+    // bottom, each with its count. 36px circles with no border, two
+    // shadows, white or gray-75, the chevron-down and @ symbols.
+    let button = |ui: &Ui, rect: Rect| {
+        let fill = if palette.dark { theme::rgb(0x3b3b3b) } else { Color32::WHITE };
+        for shadow in [
+            egui::epaint::Shadow { offset: [0, 0], blur: 4, spread: 0, color: Color32::from_black_alpha(20) },
+            egui::epaint::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(if palette.dark { 77 } else { 31 }) },
+        ] {
+            ui.painter().add(shadow.as_shape(rect, CornerRadius::same(18)));
+        }
+        ui.painter().circle_filled(rect.center(), 18., fill);
+    };
+    let mut next_above = output.inner_rect.bottom() - 52.;
     if chat.scrolled_up {
         next_above -= 48.;
     }
     if let Some(&mention) = chat.unread_mentions.first() {
-        let rect = Rect::from_min_size(Pos2::new(output.inner_rect.right() - 56., next_above), Vec2::splat(40.));
+        let rect = Rect::from_min_size(Pos2::new(output.inner_rect.right() - 52., next_above), Vec2::splat(36.));
         let r = ui.interact(rect, ui.scope_id().with("to-mention"), Sense::click());
-        ui.painter().circle_filled(rect.center(), 20., palette.popover);
-        ui.painter().circle_stroke(rect.center(), 20., Stroke::new(1., palette.border));
-        Icon::At.paint(ui, rect, 20., palette.text);
+        button(ui, rect);
+        theme::paint_symbol(ui.painter(), "at", rect.center(), 17., palette.text);
         widgets::count_badge(ui, Pos2::new(rect.right() + 4., rect.top() + 2.), chat.unread_mentions.len() as u32, false);
-        if r.on_hover_text("Go to next unread mention").clicked() {
+        if r.on_hover_text("New mentions below").clicked() {
             chat.unread_mentions.remove(0);
             actions.push(Action::Jump(mention));
         }
     }
     if chat.scrolled_up {
-        let rect = Rect::from_min_size(output.inner_rect.right_bottom() - Vec2::new(56., 56.), Vec2::splat(40.));
+        let rect = Rect::from_min_size(output.inner_rect.right_bottom() - Vec2::new(52., 52.), Vec2::splat(36.));
         let r = ui.interact(rect, ui.scope_id().with("to-bottom"), Sense::click());
-        ui.painter().circle_filled(rect.center(), 20., palette.popover);
-        ui.painter().circle_stroke(rect.center(), 20., Stroke::new(1., palette.border));
-        Icon::ChevronShallowDown.paint(ui, rect, 20., palette.text);
+        button(ui, rect);
+        theme::paint_symbol(ui.painter(), "chevron-down", rect.center(), 20., palette.text);
         let unread = c.unread_count + c.marked_unread as u32;
         if unread > 0 {
             widgets::count_badge(ui, Pos2::new(rect.right() + 4., rect.top() + 2.), unread, false);
         }
-        if r.on_hover_text("Scroll to bottom").clicked() {
+        if r.on_hover_text("Scroll to bottom of chat").clicked() {
             if chat.at_end {
                 chat.scroll_to_bottom = 10;
             } else {
@@ -1845,7 +1854,7 @@ fn message(
         let r = ui.interact(button, ui.scope_id().with(("cta", m.id)), Sense::click());
         let fill = if outgoing { Color32::from_white_alpha(if r.hovered() { 70 } else { 50 }) } else if r.hovered() { palette.fill_pressed } else { palette.fill };
         ui.painter().rect_filled(button, CornerRadius::same(16), fill);
-        ui.painter().text(button.center(), Align2::CENTER_CENTER, cta.text.clone().unwrap_or_else(|| "Donate".into()), theme::semibold(14.), in_color);
+        ui.painter().text(button.center(), Align2::CENTER_CENTER, cta.text.clone().unwrap_or_else(|| "Donate Now".into()), theme::semibold(14.), in_color);
         if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             actions.push(Action::Open("https://signal.org/donate/".into()));
         }
