@@ -123,6 +123,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
     let mut todo = None;
     let mut lightbox: Option<String> = None;
+    let mut story: Option<String> = None;
     let fill = if palette.dark { Color32::from_rgb(0x32, 0x32, 0x32) } else { Color32::from_rgb(0xfa, 0xfa, 0xfa) };
     let modal = egui::Modal::new(egui::Id::unique("contact-modal"))
         .frame(egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(34)).inner_margin(egui::Margin { left: 0, right: 0, top: 12, bottom: 16 }))
@@ -148,10 +149,24 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             match &person {
                 Some(p) => {
                     widgets::paint_avatar(ui, rect, &widgets::AvatarSpec::of(p));
-                    if let Some(path) = p.avatar_path.clone().filter(|_| !p.avatar_withheld)
-                        && ui.interact(rect, ui.scope_id().with("contact-photo"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
-                    {
-                        lightbox = Some(path);
+                    // Desktop's ring for their stories (a click views them),
+                    // their badge, and a held-back photo downloading on click.
+                    let ring = crate::stories::of_chat(app, p);
+                    if let Some((_, unread)) = &ring {
+                        ui.painter().circle_stroke(rect.center(), 43., egui::Stroke::new(2.5, if *unread { palette.badge } else { palette.text_secondary }));
+                    }
+                    if let Some(badge) = app.badge_for(&aci) {
+                        widgets::paint_badge(ui, rect, badge);
+                    }
+                    let hit = ui.interact(rect, ui.scope_id().with("contact-photo"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if hit.clicked() {
+                        if let Some((k, _)) = ring {
+                            story = Some(k);
+                        } else if p.avatar_withheld {
+                            app.send(Command::DownloadPhoto { conversation: p.id.clone() });
+                        } else if let Some(path) = p.avatar_path.clone() {
+                            lightbox = Some(path);
+                        }
                     }
                 }
                 None => {
@@ -166,6 +181,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             let (row, _) = ui.allocate_exact_size(Vec2::new(width, galley.size().y), Sense::hover());
             let name_rect = Rect::from_min_size(Pos2::new(row.center().x - galley.size().x / 2., row.top()), galley.size());
             ui.painter().galley(name_rect.min, galley, palette.text);
+            // After the name: the contacts icon, then the chevron to About.
+            let mut x = name_rect.right() + 6.;
+            if person.as_ref().is_some_and(|p| p.system_contact) {
+                theme::paint_symbol(ui.painter(), "person-circle", Pos2::new(x + 7., name_rect.center().y), 14., palette.text_secondary);
+                x += 18.;
+            }
+            crate::icons::Icon::ChevronRight.paint(ui, Rect::from_center_size(Pos2::new(x + 8., name_rect.center().y), Vec2::splat(16.)), 16., palette.text_secondary);
+            let name_rect = name_rect.union(Rect::from_min_size(Pos2::new(x, name_rect.top()), Vec2::new(16., name_rect.height())));
             // Desktop's name opens `AboutContactModal`.
             if ui.interact(name_rect, ui.scope_id().with("contact-name"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 todo = Some(Do::About);
@@ -262,6 +285,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let Some(todo) = todo else { return };
     if lightbox.is_some() {
         app.panes.avatar_lightbox = lightbox;
+    }
+    if let Some(k) = story {
+        app.panes.contact = None;
+        crate::stories::view(app, k);
+        return;
     }
     match todo {
         Do::About => {
