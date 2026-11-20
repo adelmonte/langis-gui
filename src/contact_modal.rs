@@ -19,7 +19,7 @@ pub struct Contact {
     confirm: Option<Confirm>,
     /// Their about, number and verification, for the About view.
     about: Option<langis_core::ContactDetails>,
-    about_open: bool,
+    pub about_open: bool,
     /// Add to a group: the groups' search, while picking.
     add_to_group: Option<String>,
 }

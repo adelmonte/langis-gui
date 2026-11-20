@@ -109,6 +109,8 @@ pub struct ChatView {
     pub staged: Vec<crate::composer::Staged>,
     /// Desktop's media editor, open on a staged photo.
     pub media_editor: Option<crate::media_editor::Editor>,
+    /// A dialog from the ConversationHero: Safety tips, or Name not verified.
+    pub hero_dialog: Option<HeroDialog>,
     pub view_once: bool,
     pub attach_menu: bool,
     /// A voice message being recorded.
@@ -226,6 +228,7 @@ impl ChatView {
             composer_large: false,
             staged: Vec::new(),
             media_editor: None,
+            hero_dialog: None,
             view_once: false,
             attach_menu: false,
             recording: None,
@@ -564,6 +567,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
             todo.push((true, d));
         }
     }
+    hero_dialog(ui.ctx(), &mut chat);
     if let Some(dialog) = chat.dialog.as_mut() {
         for d in crate::actions::show_dialog(app, ui, dialog, &chat.messages, &conversation) {
             todo.push((false, d));
@@ -880,7 +884,21 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
         ui.set_width(width);
         ui.add_space(12.);
         if chat.at_start && chat.loaded {
-            chat_intro(ui, palette, c);
+            if let Some(click) = chat_intro(app, ui, palette, c) {
+                match click {
+                    // Desktop's hero title opens AboutContactModal.
+                    HeroClick::About => {
+                        if let Some(sid) = c.id.as_direct() {
+                            crate::contact_modal::open(app, None, sid.to_owned());
+                            if let Some(contact) = app.panes.contact.as_mut() {
+                                contact.about_open = true;
+                            }
+                        }
+                    }
+                    HeroClick::Details => crate::details::open(app, c.id.clone()),
+                    HeroClick::Dialog(d) => chat.hero_dialog = Some(d),
+                }
+            }
         } else if !chat.loaded || chat.loading_older {
             ui.vertical_centered(|ui| ui.spinner());
         }
@@ -1081,21 +1099,205 @@ struct Ctx<'a> {
     kb_selected: Option<i64>,
 }
 
-/// The top of a chat's history: Desktop's `ConversationHero`.
-fn chat_intro(ui: &mut Ui, palette: &Palette, c: &langis_store::Conversation) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HeroDialog {
+    SafetyTips,
+    NameWarning { group: bool },
+}
+
+enum HeroClick {
+    About,
+    Details,
+    Dialog(HeroDialog),
+}
+
+/// Desktop's `SharedGroupNames`: the groups you share with someone.
+fn shared_groups_text(groups: &[String], accepted: bool) -> String {
+    match groups {
+        [] if accepted => "No groups in common".into(),
+        [] => "No groups in common. Review requests carefully.".into(),
+        [a] => format!("Member of {a}"),
+        [a, b] => format!("Member of {a} and {b}"),
+        [a, b, c] => format!("Member of {a}, {b}, and {c}"),
+        [a, b, c, _] => format!("Member of {a}, {b}, {c} and one more"),
+        [a, b, c, rest @ ..] => format!("Member of {a}, {b}, {c} and {} more", rest.len()),
+    }
+}
+
+/// Desktop's `GroupMembersNames` (`icu:ConversationHero--group-members-*`).
+fn group_members_text(others: &[String], you: bool) -> String {
+    match (others, you) {
+        ([], false) => "No group members".into(),
+        ([], true) => "No other group members yet".into(),
+        ([a], false) => a.clone(),
+        ([a], true) => format!("{a} and you"),
+        ([a, b], false) => format!("{a} and {b}"),
+        ([a, b], true) => format!("{a}, {b}, and you"),
+        ([a, b, c], false) => format!("{a}, {b}, and {c}"),
+        ([a, b, c, rest @ ..], _) => format!("{a}, {b}, {c}, and {} {}", rest.len() + you as usize, if rest.len() + you as usize == 1 { "other" } else { "others" }),
+    }
+}
+
+/// The top of a chat's history: Desktop's `ConversationHero`, a 256px card
+/// with a 2px border and rounded-4xl corners, the 72px avatar over its
+/// top edge, the 20px title (a 1:1's opens About), "Name not verified",
+/// the shared groups or members, and Safety tips for a request.
+fn chat_intro(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conversation) -> Option<HeroClick> {
+    let mut click = None;
+    let direct = c.kind == ConversationKind::Direct;
+    let note = c.kind == ConversationKind::NoteToSelf;
+    let group = c.kind == ConversationKind::Group;
+    ui.add_space(36.);
     ui.vertical_centered(|ui| {
-        ui.add_space(24.);
-        widgets::avatar(ui, &widgets::AvatarSpec::of(c), 80.);
-        ui.add_space(8.);
-        ui.label(RichText::new(&c.title).font(theme::semibold(18.)));
-        if let Some(phone) = &c.phone {
-            ui.label(RichText::new(phone).font(theme::regular(13.)).color(palette.text_secondary));
-        }
-        if c.kind == ConversationKind::Group {
-            ui.label(RichText::new(format!("{} members", c.members.len() + 1)).font(theme::regular(13.)).color(palette.text_secondary));
-        }
-        ui.add_space(24.);
+        let width = 256f32.min(ui.available_width() - 32.);
+        let border = if palette.dark { Color32::from_white_alpha(31) } else { Color32::from_black_alpha(31) };
+        // The card's border goes under everything in it, its top edge 18px
+        // below the avatar's top (`-mt-4.5`).
+        let behind = ui.painter().add(egui::Shape::Noop);
+        let top = ui.cursor().top();
+        let frame = egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 20, top: 0, bottom: 20 });
+        let card = frame.show(ui, |ui| {
+            ui.set_width(width - 40.);
+            ui.spacing_mut().item_spacing.y = 0.;
+            ui.vertical_centered(|ui| {
+                let (at, _) = ui.allocate_exact_size(Vec2::splat(72.), Sense::hover());
+                // The avatar sits on the card's top edge: the page behind it.
+                ui.painter().circle_filled(at.center(), 38., palette.background);
+                widgets::paint_avatar(ui, at, &widgets::AvatarSpec::of(c));
+                ui.add_space(12.);
+                let title = if note { "Note to Self".to_owned() } else { c.title.clone() };
+                let mut job = egui::text::LayoutJob::default();
+                job.append(&title, 0., egui::TextFormat { font_id: theme::medium(20.), color: palette.text, line_height: Some(24.), ..Default::default() });
+                if direct {
+                    job.append("\u{a0}", 0., egui::TextFormat { font_id: theme::medium(20.), color: palette.text, ..Default::default() });
+                }
+                job.wrap.max_width = width - 40.;
+                job.halign = egui::Align::Center;
+                let galley = ui.fonts_mut(|f| f.layout_job(job));
+                let extra = if direct { 18. } else { 0. };
+                let (rect, r) = ui.allocate_exact_size(Vec2::new(galley.size().x + extra, galley.size().y), if direct { Sense::click() } else { Sense::hover() });
+                ui.painter().galley(Pos2::new(rect.center().x - extra / 2., rect.top()), galley, palette.text);
+                if direct {
+                    theme::paint_symbol(ui.painter(), "chevron-[end]", Pos2::new(rect.right() - 9., rect.bottom() - 12.), 18., palette.text_secondary);
+                    if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        click = Some(HeroClick::About);
+                    }
+                }
+                if note {
+                    ui.add_space(8.);
+                    ui.label(RichText::new("You can add notes for yourself in this chat. If your account has any linked devices, new notes will be synced.").font(theme::regular(14.)).color(palette.text));
+                    return;
+                }
+                // Desktop shows the warning when the name isn't one you gave
+                // (a nickname or a system contact).
+                if (direct && !c.system_contact) || (group && !c.accepted) {
+                    ui.add_space(8.);
+                    let safety = if palette.dark { theme::rgb(0xeb977d) } else { theme::rgb(0xb94b29) };
+                    let tint = if palette.dark { Color32::from_rgba_unmultiplied(0xeb, 0x97, 0x7d, 36) } else { Color32::from_rgba_unmultiplied(0xb9, 0x4b, 0x29, 26) };
+                    let text = ui.painter().layout_no_wrap("Name not verified".into(), theme::medium(14.), safety);
+                    let size = Vec2::new(10. + 16. + 4. + text.size().x + 10., 28.);
+                    let (pill, r) = ui.allocate_exact_size(size, Sense::click());
+                    ui.painter().rect_filled(pill, CornerRadius::same(14), if r.is_pointer_button_down_on() { tint.gamma_multiply(1.5) } else { tint });
+                    theme::paint_symbol(ui.painter(), if group { "group-question" } else { "person-question" }, Pos2::new(pill.left() + 18., pill.center().y), 16., safety);
+                    ui.painter().galley(Pos2::new(pill.left() + 30., pill.center().y - text.size().y / 2.), text, safety);
+                    if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        click = Some(HeroClick::Dialog(HeroDialog::NameWarning { group }));
+                    }
+                }
+                if group && let Some(description) = c.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                    ui.add_space(8.);
+                    let mut job = egui::text::LayoutJob::simple(description.to_owned(), theme::regular(14.), palette.text, width - 40.);
+                    job.wrap.max_rows = 2;
+                    job.wrap.overflow_character = Some('\u{2026}');
+                    job.halign = egui::Align::Center;
+                    let g = ui.fonts_mut(|f| f.layout_job(job));
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(width - 40., g.size().y), Sense::hover());
+                    ui.painter().galley(Pos2::new(rect.center().x, rect.top()), g, palette.text);
+                }
+                ui.add_space(10.);
+                let line = if group {
+                    let me = app.aci.as_str();
+                    let others: Vec<String> = c.members.iter().filter(|m| m.as_str() != me).map(|m| app.name(m)).collect();
+                    group_members_text(&others, !c.left)
+                } else {
+                    let sid = c.id.as_direct().unwrap_or_default();
+                    let groups: Vec<String> = app.conversations.iter().filter(|g| g.kind == ConversationKind::Group && g.members.iter().any(|m| m == sid)).map(|g| g.title.clone()).collect();
+                    shared_groups_text(&groups, c.accepted)
+                };
+                let mut job = egui::text::LayoutJob::default();
+                job.append(&line, 20., egui::TextFormat { font_id: theme::regular(14.), color: palette.text, line_height: Some(20.), ..Default::default() });
+                job.wrap.max_width = width - 40.;
+                job.halign = egui::Align::Center;
+                let g = ui.fonts_mut(|f| f.layout_job(job));
+                let (rect, r) = ui.allocate_exact_size(Vec2::new(width - 40., g.size().y), if group { Sense::click() } else { Sense::hover() });
+                if let Some(row) = g.rows.first() {
+                    let x = rect.center().x + row.pos.x + row.glyphs.first().map_or(0., |gl| gl.pos.x) - 20.;
+                    theme::paint_symbol(ui.painter(), "group", Pos2::new(x + 8., rect.top() + 10.), 15., palette.text);
+                }
+                ui.painter().galley(Pos2::new(rect.center().x, rect.top()), g, palette.text);
+                if group && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    click = Some(HeroClick::Details);
+                }
+                if !c.accepted {
+                    ui.add_space(12.);
+                    if widgets::axo_button(ui, "Safety tips", widgets::Axo::SubtleSecondary).clicked() {
+                        click = Some(HeroClick::Dialog(HeroDialog::SafetyTips));
+                    }
+                }
+            });
+        });
+        let rect = Rect::from_min_max(Pos2::new(card.response.rect.left(), top + 18.), card.response.rect.max);
+        ui.painter().set(behind, egui::Shape::rect_stroke(rect, CornerRadius::same(32), Stroke::new(2., border), StrokeKind::Inside));
     });
+    ui.add_space(24.);
+    click
+}
+
+/// The hero's dialogs: Desktop's `SafetyTipsModal` (its summary) and
+/// `ProfileNameWarningModal`.
+pub fn hero_dialog(ctx: &egui::Context, chat: &mut ChatView) {
+    let Some(dialog) = chat.hero_dialog else { return };
+    let (title, items): (&str, Vec<(&str, &str)>) = match dialog {
+        HeroDialog::SafetyTips => (
+            "Safety tips",
+            vec![
+                ("Don\u{2019}t respond to chats from Signal", "Signal will never message you for your registration code, PIN, or recovery key. Never respond to a chat pretending to be Signal."),
+                ("Review names and photos", "Look out for the \u{201c}Name not verified\u{201d} notice. Everyone sets their own profile name in Signal."),
+                ("Look out for scams", "Avoid vague messages that try to get you to reply. Be aware of financial tips and suspicious web links."),
+            ],
+        ),
+        HeroDialog::NameWarning { group: false } => (
+            "Profile names on Signal are chosen by their account holder:",
+            vec![
+                ("", "Signal can\u{2019}t verify names and photos"),
+                ("", "Signal will never contact you for your registration code, PIN, or recovery key"),
+                ("", "Be cautious of accounts that impersonate others"),
+                ("", "Don't share personal information with people you don't know"),
+            ],
+        ),
+        HeroDialog::NameWarning { group: true } => (
+            "Group names are chosen by members of the group.",
+            vec![
+                ("", "Be cautious of groups that impersonate organizations and businesses"),
+                ("", "Profile names of members in groups are not verified"),
+                ("", "Don't share personal information with people you don't know"),
+            ],
+        ),
+    };
+    let ok = if dialog == HeroDialog::SafetyTips { "Done" } else { "OK" };
+    let answer = crate::dialog::show_with(ctx, egui::Id::unique("hero-dialog"), title, "", None, &[(ok, crate::dialog::Variant::StrongPrimary)], |ui| {
+        let palette = Palette::of(ui.ctx());
+        for (head, body) in &items {
+            if !head.is_empty() {
+                ui.label(RichText::new(*head).font(theme::semibold(14.)).color(palette.text));
+            }
+            ui.label(RichText::new(if head.is_empty() { format!("\u{2022}  {body}") } else { (*body).to_owned() }).font(theme::regular(13.)).color(palette.text_secondary));
+            ui.add_space(8.);
+        }
+    });
+    if answer.is_some() {
+        chat.hero_dialog = None;
+    }
 }
 
 /// Desktop's `TimelineDateHeader`: the day, 13px, with 20 around it.
