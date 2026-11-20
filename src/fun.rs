@@ -65,6 +65,10 @@ pub struct Fun {
     gif_recents: bool,
     pub manager: Option<StickerManagerView>,
     pub manager_open: bool,
+    /// The manager's tab: Available (0) or Installed (1).
+    manager_tab: usize,
+    /// "Uninstall sticker pack?" for this pack (id, key).
+    confirm_uninstall: Option<(Vec<u8>, Vec<u8>)>,
     /// A pack opened for its preview, and what came for it.
     pub preview: Option<(Vec<u8>, Vec<u8>, Option<Result<StickerPackPreview, String>>)>,
 }
@@ -756,12 +760,16 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                     let installed = preview.pack.installed || app.fun.packs.iter().any(|p| p.id == id);
                     if installed {
                         if widgets::pill_button(ui, "Uninstall", false).clicked() {
-                            app.send(Command::UninstallStickerPack { id: id.clone(), key: key.clone() });
-                            close = true;
+                            app.fun.confirm_uninstall = Some((id.clone(), key.clone()));
                         }
                     } else if widgets::pill_button(ui, "Install", true).clicked() {
                         app.send(Command::InstallStickerPack { id: id.clone(), key: key.clone() });
                         close = true;
+                    }
+                    // Desktop's share menu's Copy link.
+                    if widgets::pill_button(ui, "Copy link", false).clicked() {
+                        ui.ctx().copy_text(pack_link(&id, &key));
+                        app.toast("Link copied");
                     }
                 }
                 if widgets::pill_button(ui, "Close", false).clicked() {
@@ -772,6 +780,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         if close || modal.should_close() {
             app.fun.preview = None;
         }
+        uninstall_confirm(app, ui);
         return;
     }
     if !app.fun.manager_open {
@@ -780,16 +789,34 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
     let mut close = false;
     let mut open = None;
     let manager = app.fun.manager.clone().unwrap_or_default();
+    let mut tab = app.fun.manager_tab;
     let modal = egui::Modal::new(egui::Id::unique("sticker-manager")).frame(frame).show(ui.ctx(), |ui| {
         ui.set_width(440.);
         ui.label(RichText::new("Sticker packs").font(theme::semibold(18.)));
         ui.add_space(8.);
-        egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
-            for (title, packs, empty) in [
-                ("Installed stickers", &manager.installed, "No stickers installed"),
-                ("Signal Artist Series", &manager.blessed, ""),
-                ("Stickers you received", &manager.received, "Stickers from incoming messages will appear here"),
-            ] {
+        // Desktop's StickerManager tabs.
+        ui.horizontal(|ui| {
+            let half = ui.available_width() / 2.;
+            for (i, label) in ["Available", "Installed"].iter().enumerate() {
+                let (r, hit) = ui.allocate_exact_size(Vec2::new(half - 4., 32.), Sense::click());
+                let on = tab == i;
+                ui.painter().text(r.center(), Align2::CENTER_CENTER, *label, theme::semibold(14.), if on { palette.text } else { palette.text_secondary });
+                if on {
+                    ui.painter().hline(r.x_range().shrink(half / 4.), r.bottom() - 1., Stroke::new(2., palette.text));
+                }
+                if hit.clicked() {
+                    tab = i;
+                }
+            }
+        });
+        ui.add_space(4.);
+        let sections: Vec<(&str, &Vec<StickerPackSummary>, &str)> = if tab == 1 {
+            vec![("Installed stickers", &manager.installed, "No stickers installed")]
+        } else {
+            vec![("Signal Artist Series", &manager.blessed, ""), ("Stickers you received", &manager.received, "Stickers from incoming messages will appear here")]
+        };
+        egui::ScrollArea::vertical().max_height(460.).min_scrolled_height(300.).auto_shrink([false, true]).show(ui, |ui| {
+            for (title, packs, empty) in sections {
                 if packs.is_empty() && empty.is_empty() {
                     continue;
                 }
@@ -812,7 +839,11 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                             }
                             PackAction::Open => open = Some((pack.id.clone(), pack.key.clone())),
                             PackAction::Install => app.send(Command::InstallStickerPack { id: pack.id.clone(), key: pack.key.clone() }),
-                            PackAction::Uninstall => app.send(Command::UninstallStickerPack { id: pack.id.clone(), key: pack.key.clone() }),
+                            PackAction::Uninstall => app.fun.confirm_uninstall = Some((pack.id.clone(), pack.key.clone())),
+                            PackAction::Copy => {
+                                ui.ctx().copy_text(pack_link(&pack.id, &pack.key));
+                                app.toast("Link copied");
+                            }
                         }
                     }
                 }
@@ -825,9 +856,11 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
             }
         });
     });
-    if close || modal.should_close() {
+    app.fun.manager_tab = tab;
+    if (close || modal.should_close()) && app.fun.confirm_uninstall.is_none() {
         app.fun.manager_open = false;
     }
+    uninstall_confirm(app, ui);
     if let Some((id, key)) = open {
         app.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
         app.fun.preview = Some((id, key, None));
@@ -839,6 +872,34 @@ enum PackAction {
     Open,
     Install,
     Uninstall,
+    Copy,
+}
+
+/// A pack's signal.art link.
+fn pack_link(id: &[u8], key: &[u8]) -> String {
+    let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+    format!("https://signal.art/addstickers/#pack_id={}&pack_key={}", hex(id), hex(key))
+}
+
+/// Desktop's "Uninstall sticker pack?" before it goes.
+fn uninstall_confirm(app: &mut App, ui: &Ui) {
+    let Some((id, key)) = app.fun.confirm_uninstall.clone() else { return };
+    match crate::dialog::confirm(
+        ui.ctx(),
+        egui::Id::unique("sticker-uninstall"),
+        "",
+        "You may not be able to reinstall this sticker pack if you no longer have the source message.",
+        "Uninstall",
+        crate::dialog::Variant::StrongDestructive,
+    ) {
+        Some(crate::dialog::Choice::Action) => {
+            app.fun.confirm_uninstall = None;
+            app.fun.preview = None;
+            app.send(Command::UninstallStickerPack { id, key });
+        }
+        Some(crate::dialog::Choice::Cancel) => app.fun.confirm_uninstall = None,
+        None => {}
+    }
 }
 
 fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: &str, moves: (bool, bool)) -> Option<PackAction> {
@@ -854,7 +915,11 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
         }
     }
     let title = if pack.title.is_empty() { "Sticker pack" } else { &pack.title };
-    ui.painter().text(Pos2::new(rect.left() + 60., rect.top() + 10.), Align2::LEFT_TOP, title, theme::medium(14.), palette.text);
+    let t = ui.painter().text(Pos2::new(rect.left() + 60., rect.top() + 10.), Align2::LEFT_TOP, title, theme::medium(14.), palette.text);
+    // Desktop's Signal Artist badge after a blessed pack's title.
+    if pack.blessed {
+        theme::paint_symbol(ui.painter(), "badge-fill", Pos2::new(t.right() + 10., t.center().y), 14., palette.badge);
+    }
     let sub = if pack.author.is_empty() { format!("{} stickers", pack.sticker_count) } else { format!("{} · {} stickers", pack.author, pack.sticker_count) };
     ui.painter().text(Pos2::new(rect.left() + 60., rect.top() + 30.), Align2::LEFT_TOP, sub, theme::regular(12.), palette.text_secondary);
     let label = if pack.installed { "Uninstall" } else { "Install" };
@@ -882,6 +947,21 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
         if mr.on_hover_text(if up { "Move up" } else { "Move down" }).clicked() {
             return Some(PackAction::Move(up));
         }
+    }
+    let menu = egui::Id::unique(("pack-menu", section, &pack.id));
+    if r.secondary_clicked()
+        && let Some(at) = r.interact_pointer_pos()
+    {
+        crate::menu::open_at(ui.ctx(), menu, at);
+    }
+    let mut copy = false;
+    crate::menu::show(ui.ctx(), menu, |m| {
+        if m.item(Some("link"), "Copy link") {
+            copy = true;
+        }
+    });
+    if copy {
+        return Some(PackAction::Copy);
     }
     r.clicked().then_some(PackAction::Open)
 }
