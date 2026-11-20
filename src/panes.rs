@@ -97,6 +97,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's AcceptedOptionsModal for this chat: Block or Report spam.
+    pub accepted_options: Option<ConversationId>,
     /// Desktop's "Message an admin" list for an announcements-only group.
     pub admins_of: Option<ConversationId>,
     /// The full emoji picker for a call reaction.
@@ -473,6 +475,28 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     crate::collisions::review_dialog(app, ui);
     pending_confirm(app, ui);
     admins_dialog(app, ui);
+    accepted_options(app, ui);
+}
+
+/// Desktop's MessageRequestActionsConfirmation for an accepted request:
+/// "If this was a mistake…", then Report spam or Block (each asked as usual).
+fn accepted_options(app: &mut App, ui: &Ui) {
+    let Some(id) = app.panes.accepted_options.clone() else { return };
+    let name = app.conversation(&id).map(|c| c.title.clone()).unwrap_or_default();
+    let body = crate::i18n::tf("icu:MessageRequests--AcceptedOptionsModal--body", &format!("You accepted a message request from {name}. If this was a mistake, you can choose an action below."), &[("name", crate::i18n::Arg::from(&name))]);
+    use crate::dialog::{Answer, Variant};
+    match crate::dialog::show(ui.ctx(), egui::Id::unique("accepted-options"), "", &body, Some(tr("Cancel")), &[(tr("Report spam"), Variant::SubtleDestructive), (tr("Block"), Variant::StrongDestructive)]) {
+        Some(Answer::Action(0)) => {
+            app.panes.accepted_options = None;
+            app.panes.chat_confirm = Some((id, ChatConfirm::ReportSpam));
+        }
+        Some(Answer::Action(_)) => {
+            app.panes.accepted_options = None;
+            app.panes.chat_confirm = Some((id, ChatConfirm::Block));
+        }
+        Some(Answer::Cancel) => app.panes.accepted_options = None,
+        None => {}
+    }
 }
 
 /// Desktop's `AnnouncementsOnlyGroupBannerAdminsDialog`: the group's admins;

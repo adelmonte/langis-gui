@@ -534,6 +534,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 NoticeButton::Call { video } => crate::panes::open_lobby(app, id.clone(), video),
                 NoticeButton::Join => crate::panes::open_lobby(app, id.clone(), true),
                 NoticeButton::Return => app.call_view.pip = false,
+                NoticeButton::AcceptedOptions => app.panes.accepted_options = Some(id.clone()),
                 NoticeButton::Safety(who) => crate::details::open_safety(app, ConversationId::direct(&who)),
                 NoticeButton::Go { author, sent_at } => {
                     let conversation = id.clone();
@@ -617,6 +618,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
     // The menu's "React" opens the reaction bar in its place.
     let mut replaced = false;
     let mut opened = None;
+    let mut asked = None;
     for (from_popup, d) in todo {
         match d {
             Do::Close => {
@@ -667,6 +669,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
                 }
             }
             Do::OpenChat(to) => opened = Some(to),
+            Do::Ask(title, body, action, commands) => asked = Some((title, body, action, commands)),
             Do::Open(dialog) => {
                 if let crate::actions::Dialog::Info { message, .. } = &dialog {
                     crate::actions::load_details(app, *message);
@@ -678,6 +681,9 @@ fn popups(app: &mut App, ui: &mut Ui) {
     app.chat = Some(chat);
     if let Some(to) = opened {
         app.open(to);
+    }
+    if let Some((title, body, action, commands)) = asked {
+        crate::panes::ask(app, title, body, action, true, commands);
     }
 }
 
@@ -2815,6 +2821,8 @@ pub enum NoticeButton {
     Join,
     /// Back to the call we're in (Desktop's "Return to call").
     Return,
+    /// Desktop's accepted-request options: Block or Report spam.
+    AcceptedOptions,
     Safety(String),
     Go { author: Option<String>, sent_at: i64 },
     /// Desktop's explainer dialog: a title, its text, and (for a chat
@@ -2847,6 +2855,18 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
         Notice::SafetyNumberChanged { who } => Some((tr("View Safety Number"), NoticeButton::Safety(who.clone()))),
         Notice::PollEnded { by, sent_at, .. } => Some((tr("View poll"), NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
         Notice::Pinned { author, sent_at, .. } => Some((tr("Go to message"), NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),
+        // Desktop's MessageRequestResponseNotification: once accepted, a way
+        // back (Block or Report...).
+        Notice::MessageRequest { event: langis_store::MessageRequestEvent::Accept, group: false, .. } if ctx.app.conversation(ctx.chat_id).is_some_and(|c| !c.blocked) => {
+            Some((tr("Block or Report..."), NoticeButton::AcceptedOptions))
+        }
+        // Desktop's ConversationMergeNotification: its explainer.
+        Notice::Merged { who, .. } => {
+            let name = ctx.app.name(who);
+            let line1 = crate::i18n::tf("icu:ConversationMerge--explainer-dialog--line-1", &format!("After messaging with {name} you learned this number belongs to {name}. Their phone number is private."), &[("obsoleteConversationTitle", crate::i18n::Arg::from(&name)), ("conversationTitle", crate::i18n::Arg::from(&name))]);
+            let body = format!("{line1}\n\n{}", tr("Your message history for both chats have been merged here."));
+            Some((tr("Learn More"), NoticeButton::Explain(tr("Message history merged").into(), body, false)))
+        }
         // Desktop's ChatSessionRefreshedDialog and DeliveryIssueDialog.
         Notice::SessionRefreshed => Some((
             tr("Learn More"),

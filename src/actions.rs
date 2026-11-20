@@ -99,6 +99,8 @@ pub enum Do {
     Open(Dialog),
     /// Opens a chat (a shared contact's Send message).
     OpenChat(langis_store::ConversationId),
+    /// Asks first (title, text, action), then sends.
+    Ask(String, String, String, Vec<Command>),
     /// Select mode, starting with this message.
     Select(i64),
     /// Scrolls to a message, loading around it if it isn't here.
@@ -426,8 +428,17 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             match crate::dialog::show(ui.ctx(), egui::Id::unique("delete-messages"), &title, body, Some(tr("Cancel")), &actions) {
                 Some(crate::dialog::Answer::Action(0)) => out.push(Do::Command(Command::DeleteForMe { message_ids: ids })),
                 Some(crate::dialog::Answer::Action(_)) => {
-                    for message_id in ids {
-                        out.push(Do::Command(Command::DeleteForEveryone { message_id }));
+                    let commands: Vec<Command> = ids.iter().map(|&message_id| Command::DeleteForEveryone { message_id }).collect();
+                    // An admin deleting others' messages: Desktop asks again.
+                    if chosen.iter().any(|m| m.direction == Direction::Incoming) {
+                        let description = crate::i18n::tf(
+                            "icu:DeleteMessagesModal--adminDeleteConfirmation--description__rollout",
+                            &if n == 1 { "Group members on the latest versions of Signal will see that you deleted this message.".to_owned() } else { "Group members on the latest versions of Signal will see that you deleted these messages.".to_owned() },
+                            &[("count", crate::i18n::Arg::from(n))],
+                        );
+                        out.push(Do::Ask(tr("Delete for everyone?").into(), description, tr("Delete for everyone").into(), commands));
+                    } else {
+                        out.extend(commands.into_iter().map(Do::Command));
                     }
                 }
                 Some(crate::dialog::Answer::Cancel) => {}
