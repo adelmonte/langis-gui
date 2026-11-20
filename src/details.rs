@@ -575,10 +575,15 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             if (admin || state.link.is_some()) && axo_list::item(ui, Item::new(tr("Group link")).symbol("link"), End::Arrow(Some(if state.link.is_some() { tr("On") } else { tr("Off") }))).clicked() {
                 set_page(app, Page::GroupLink);
             }
-            if !c.left && c.can_label {
+            // Desktop keeps the row when labels are admins' only, greyed
+            // out with why.
+            if !c.left && !c.ended {
                 let mine = c.member_labels.get(&me).map(|l| l.text.clone()).unwrap_or_default();
                 let emoji = c.member_labels.get(&me).and_then(|l| l.emoji.clone()).unwrap_or_default();
-                if axo_list::item(ui, Item::new(tr("Member label")).symbol("label"), End::Arrow(None)).clicked()
+                let r = axo_list::item(ui, Item::new(tr("Member label")).symbol("label").disabled(!c.can_label), End::Arrow(None));
+                if !c.can_label {
+                    r.row.on_hover_text(tr("Only admins can add member labels in this group."));
+                } else if r.clicked()
                     && let Some(d) = app.panes.details.as_mut()
                 {
                     d.label = Some(mine);
@@ -1352,8 +1357,8 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     if let Some(mut text) = d.label.take() {
         let mut answer = None;
         let closed = modal(ui, "member-label", 360., |ui| {
-            title(ui, "Your member label");
-            body(ui, palette, "A label shown next to your name in this group.");
+            title(ui, tr("Member label"));
+            body(ui, palette, tr("Set a member label to describe yourself or your role in this group. Member labels are only visible within this group."));
             ui.add_space(8.);
             // Desktop's `GroupMemberLabelEditor`: an emoji, then the text.
             ui.horizontal(|ui| {
@@ -1363,7 +1368,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 if ui.add(egui::Button::new(job).corner_radius(CornerRadius::same(8))).on_hover_text("Choose an emoji").clicked() {
                     d.label_picker = if d.label_picker.is_some() { None } else { Some(Default::default()) };
                 }
-                widgets::text_field(ui, &mut text, "Label", false);
+                widgets::text_field(ui, &mut text, tr("Enter your member label"), false);
             });
             if !d.label_emoji.is_empty() && ui.link("Remove emoji").clicked() {
                 d.label_emoji.clear();
@@ -1375,6 +1380,35 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     d.label_picker = None;
                 }
             }
+            // Desktop's Preview: our name with the label over "Hello!".
+            ui.add_space(12.);
+            ui.label(RichText::new(tr("Preview")).font(theme::semibold(13.)).color(palette.text_secondary));
+            ui.add_space(4.);
+            egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&app.me.0).font(theme::semibold(13.)).color(theme::name_color(&app.aci, palette.dark)));
+                    let shown = format!("{} {}", d.label_emoji, text).trim().to_owned();
+                    if !shown.is_empty() {
+                        ui.label(RichText::new(shown).font(theme::regular(11.)).color(theme::name_color(&app.aci, palette.dark)));
+                    }
+                });
+                ui.label(RichText::new(tr("Hello!")).font(theme::regular(14.)));
+            });
+            // Desktop's list of the group's other labels.
+            ui.add_space(12.);
+            ui.label(RichText::new(tr("Group members with labels")).font(theme::semibold(13.)).color(palette.text_secondary));
+            let others: Vec<(String, String)> = c.member_labels.iter().filter(|(m, _)| **m != app.aci).map(|(m, l)| (app.name(m), format!("{} {}", l.emoji.clone().unwrap_or_default(), l.text).trim().to_owned())).collect();
+            if others.is_empty() {
+                body(ui, palette, tr("No other members have labels"));
+            }
+            egui::ScrollArea::vertical().max_height(140.).show(ui, |ui| {
+                for (name, label) in others {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(name).font(theme::regular(13.)));
+                        ui.label(RichText::new(label).font(theme::regular(12.)).color(palette.text_secondary));
+                    });
+                }
+            });
             answer = buttons(ui, &[tr("Save"), tr("Cancel")]);
         });
         let emoji = Some(d.label_emoji.clone()).filter(|e| !e.is_empty());
