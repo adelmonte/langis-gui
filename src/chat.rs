@@ -943,23 +943,50 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                     ui.scroll_to_rect_animation(rect, Some(egui::Align::Min), egui::style::ScrollAnimation::none());
                 }
             }
-            // Desktop's `CollapseSet`: a run of group updates folds into one
-            // line ("4 group updates") until it's opened.
-            let foldable = |o: &Message| matches!(o.notice, Some(langis_store::Notice::Group { .. } | langis_store::Notice::Timer { .. })) && crate::format::same_day(o.sent_at, m.sent_at);
-            if foldable(m) {
-                let first = (0..=i).rev().take_while(|&k| foldable(&messages[k])).last().unwrap_or(i);
+            // Desktop's `CollapseSet`: a run of the same kind of update
+            // (group changes, timer changes, calls) folds into one line until
+            // it's opened, and can be folded again from its first.
+            let kind = |o: &Message| match o.notice {
+                Some(langis_store::Notice::Group { .. }) => Some(0u8),
+                Some(langis_store::Notice::Timer { .. }) => Some(1),
+                Some(langis_store::Notice::Call { .. } | langis_store::Notice::GroupCall { .. }) => Some(2),
+                _ => None,
+            };
+            if let Some(k) = kind(m) {
+                let foldable = |o: &Message| kind(o) == Some(k) && crate::format::same_day(o.sent_at, m.sent_at);
+                let first = (0..=i).rev().take_while(|&x| foldable(&messages[x])).last().unwrap_or(i);
                 let run = messages[first..].iter().take_while(|o| foldable(o)).count();
-                if run >= 2 && !chat.unfolded.contains(&messages[first].id) {
+                if run >= 2 {
+                    let open = chat.unfolded.contains(&messages[first].id);
                     if i == first {
                         ui.add_space(10.);
-                        let label = format!("{run} group updates");
-                        let r = ui.vertical_centered(|ui| ui.add(egui::Button::new(RichText::new(label).font(theme::regular(13.)).color(palette.text_secondary)).frame(false))).inner;
-                        if r.on_hover_text("Show them").clicked() {
-                            chat.unfolded.insert(m.id);
+                        let label = match k {
+                            0 => format!("{run} group updates"),
+                            1 => format!("{run} disappearing message timer changes"),
+                            _ => format!("{run} calls"),
+                        };
+                        let r = ui
+                            .vertical_centered(|ui| {
+                                let mut job = egui::text::LayoutJob::default();
+                                job.append(&label, 0., egui::TextFormat { font_id: theme::regular(13.), color: palette.text_secondary, ..Default::default() });
+                                let r = ui.add(egui::Button::new(job).frame(false));
+                                let chevron = Pos2::new(r.rect.right() + 8., r.rect.center().y);
+                                theme::paint_symbol(ui.painter(), if open { "chevron-up" } else { "chevron-down" }, chevron, 12., palette.text_secondary);
+                                r
+                            })
+                            .inner;
+                        if r.on_hover_text(if open { "Hide them" } else { "Show them" }).clicked() {
+                            if open {
+                                chat.unfolded.remove(&m.id);
+                            } else {
+                                chat.unfolded.insert(m.id);
+                            }
                         }
-                        ui.add_space(10.);
+                        ui.add_space(if open { 2. } else { 10. });
                     }
-                    continue;
+                    if !open {
+                        continue;
+                    }
                 }
             }
             let revealed = chat.revealed.contains(&m.id);
