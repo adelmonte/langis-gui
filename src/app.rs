@@ -203,6 +203,8 @@ pub struct InputPrefs {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, args: crate::Args) -> Self {
         let ctx = cc.egui_ctx.clone();
+        // Posters a crash left behind.
+        crate::video::clear_posters();
         if args.minimized {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
@@ -1090,6 +1092,7 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         self.shutdown();
+        crate::video::clear_posters();
     }
 }
 

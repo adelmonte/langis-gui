@@ -38,7 +38,7 @@ pub struct Probe {
 
 pub fn probe(path: &str) -> Option<Probe> {
     let out = Command::new("ffprobe")
-        .args(["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "default=noprint_wrappers=1", path])
+        .args(["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "default=noprint_wrappers=1", "-protocol_whitelist", "file", path])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
@@ -174,7 +174,7 @@ impl Player {
                 video.args(["-stream_loop", "-1"]);
             }
             video
-                .args(["-ss", &format!("{at:.3}"), "-i", &path, "-an"])
+                .args(["-protocol_whitelist", "file", "-ss", &format!("{at:.3}"), "-i", &path, "-an"])
                 .args(["-vf", &format!("scale={w}:{h}"), "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -193,7 +193,7 @@ impl Player {
             if !muted && p.audio {
                 let sound = die_with_parent(
                     Command::new("ffmpeg")
-                        .args(["-nostdin", "-v", "error", "-ss", &format!("{at:.3}"), "-i", &path, "-vn", "-ac", "2", "-ar", "48000", "-f", "f32le", "-"])
+                        .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-ss", &format!("{at:.3}"), "-i", &path, "-vn", "-ac", "2", "-ar", "48000", "-f", "f32le", "-"])
                         .stdin(Stdio::null())
                         .stdout(Stdio::piped())
                         .stderr(Stdio::null()),
@@ -332,7 +332,9 @@ pub fn inline(ui: &egui::Ui, path: &str, rect: egui::Rect, radius: egui::CornerR
     let max = ((rect.width() * ppp).ceil() as u32, (rect.height() * ppp).ceil() as u32);
     // Decode a little larger than the box's longer side, so cropping to
     // fill still has the pixels.
-    let side = max.0.max(max.1).max(64);
+    // A power of two, so resizing the window doesn't start a player for
+    // every pixel width.
+    let side = max.0.max(max.1).max(64).next_power_of_two();
     let key = (path.to_owned(), side, side);
     let mut guard = INLINE.lock().unwrap();
     let inline = guard.get_or_insert_with(Default::default);
@@ -359,13 +361,34 @@ pub fn gc() {
     }
 }
 
-/// Where posters are kept: the cache directory, by the video's path.
+/// Where posters are kept: a folder for this run only, in the session's
+/// runtime directory (memory, private to the user, gone at logout), by the
+/// video's path. A poster of a video that disappears or is deleted
+/// doesn't outlive the app: [`clear_posters`] empties the folder at exit
+/// and at start.
+fn posters_dir() -> Option<PathBuf> {
+    Some(dirs::runtime_dir().or_else(dirs::cache_dir)?.join("langis-gui").join("posters"))
+}
+
 fn poster_path(path: &str) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hasher);
-    let dir = dirs::cache_dir()?.join("langis-gui").join("posters");
-    Some(dir.join(format!("{:016x}.jpg", hasher.finish())))
+    Some(posters_dir()?.join(format!("{:016x}.jpg", hasher.finish())))
+}
+
+/// Deletes every poster made (and the folder older versions kept in the
+/// cache directory).
+pub fn clear_posters() {
+    if let Some(dir) = posters_dir() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    if let Some(old) = dirs::cache_dir().map(|d| d.join("langis-gui").join("posters")) {
+        let _ = std::fs::remove_dir_all(old);
+    }
+    if let Some(making) = MAKING.lock().unwrap().as_mut() {
+        making.clear();
+    }
 }
 
 static MAKING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
@@ -384,11 +407,12 @@ pub fn poster(ctx: &Context, path: &str) -> Option<String> {
         let (path, ctx) = (path.to_owned(), ctx.clone());
         std::thread::spawn(move || {
             if let Some(dir) = out.parent() {
-                let _ = std::fs::create_dir_all(dir);
+                use std::os::unix::fs::DirBuilderExt;
+                let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir);
             }
             let tmp = out.with_extension("part.jpg");
             let made = Command::new("ffmpeg")
-                .args(["-nostdin", "-v", "error", "-y", "-i", &path, "-frames:v", "1", "-vf", "scale='min(800,iw)':-2", "-q:v", "4", &tmp.to_string_lossy()])
+                .args(["-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file", "-i", &path, "-frames:v", "1", "-vf", "scale='min(800,iw)':-2", "-q:v", "4", &tmp.to_string_lossy()])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

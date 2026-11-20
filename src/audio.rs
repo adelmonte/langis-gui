@@ -140,7 +140,9 @@ fn die_with_parent(command: &mut Command) -> &mut Command {
 fn decode(path: &str) -> Option<Vec<f32>> {
     let mut child = die_with_parent(
         Command::new("ffmpeg")
-            .args(["-nostdin", "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", &WAVEFORM_RATE.to_string(), "-f", "f32le", "-"])
+            // The first 30 minutes at most: 32 KB a second, so a long file
+            // can't fill memory.
+            .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-t", "1800", "-i", path, "-vn", "-ac", "1", "-ar", &WAVEFORM_RATE.to_string(), "-f", "f32le", "-"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null()),
@@ -191,7 +193,7 @@ impl Player {
         self.stop_children();
         let decoder = die_with_parent(
             Command::new("ffmpeg")
-                .args(["-nostdin", "-v", "error", "-ss", &format!("{:.3}", self.offset), "-i", &self.path, "-vn"])
+                .args(["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-ss", &format!("{:.3}", self.offset), "-i", &self.path, "-vn"])
                 .args(["-filter:a", &format!("atempo={}", self.rate), "-ac", "1", "-ar", &PLAY_RATE.to_string(), "-f", "f32le", "-"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
