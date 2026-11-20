@@ -845,7 +845,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             let mut r = None;
             at_bottom(ui, 28., &mut |ui| r = Some(ui.allocate_exact_size(Vec2::splat(28.), Sense::click())));
             let (accept, r) = r.unwrap();
-            ui.painter().circle_filled(accept.center(), 14., theme::rgb(0x3b45fd));
+            ui.painter().circle_filled(accept.center(), 14., theme::rgb(0x2c6bed));
             theme::paint_symbol(ui.painter(), "check", accept.center(), 20., Color32::WHITE);
             if r.on_hover_text("Save").clicked() {
                 send = true;

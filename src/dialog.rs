@@ -64,7 +64,8 @@ pub fn show_with(ctx: &egui::Context, id: Id, title: &str, description: &str, ca
     let width = 288.;
     let last_h = ctx.data(|d| d.get_temp::<f32>(id.with("height"))).unwrap_or(160.);
     let pos = Pos2::new(screen.center().x - width / 2., screen.center().y - last_h / 2.);
-    let fill = if palette.dark { Color32::from_rgb(0x32, 0x32, 0x32) } else { Color32::from_rgb(0xfa, 0xfa, 0xfa) };
+    // material-dialog: #353535 at 90% in dark.
+    let fill = if palette.dark { Color32::from_rgba_unmultiplied(0x35, 0x35, 0x35, 230) } else { Color32::from_rgb(0xfa, 0xfa, 0xfa) };
     let shadow = Shadow { offset: [0, 6], blur: 16, spread: 0, color: Color32::from_black_alpha(if palette.dark { 61 } else { 31 }) };
     let mut answer = None;
     let mut buttons: Vec<(&str, Option<Variant>)> = Vec::new();
@@ -109,7 +110,7 @@ pub fn show_with(ctx: &egui::Context, id: Id, title: &str, description: &str, ca
                     None => (palette.fill, palette.fill_pressed, palette.text),
                     Some(Variant::StrongDestructive) if palette.dark => (theme::rgb(0xee382c), theme::rgb(0xef493e), Color32::WHITE),
                     Some(Variant::StrongDestructive) => (theme::rgb(0xf21c0d), theme::rgb(0xe41a0c), Color32::WHITE),
-                    Some(Variant::StrongPrimary) => (palette.accent, palette.accent.gamma_multiply(0.9), Color32::WHITE),
+                    Some(Variant::StrongPrimary) => (palette.badge, palette.badge.gamma_multiply(0.9), Color32::WHITE),
                     // `fill-destructive-tint`, `label-destructive`.
                     Some(Variant::SubtleDestructive) if palette.dark => (Color32::from_rgba_unmultiplied(0xff, 0x4a, 0x3a, 31), Color32::from_rgba_unmultiplied(0xff, 0x4a, 0x3a, 41), theme::rgb(0xff4a3a)),
                     Some(Variant::SubtleDestructive) => (Color32::from_rgba_unmultiplied(0xf2, 0x16, 0x02, 15), Color32::from_rgba_unmultiplied(0xf2, 0x16, 0x02, 26), theme::rgb(0xf21602)),
