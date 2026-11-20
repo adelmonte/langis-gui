@@ -1544,7 +1544,7 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
             for t in options {
                 ui.horizontal(|ui| {
                     let mut on = c.targets.contains(&t);
-                    if ui.checkbox(&mut on, target_label(app, &t)).changed() {
+                    if crate::widgets::checkbox(ui, &mut on, target_label(app, &t)).changed() {
                         if on {
                             c.targets.push(t.clone());
                         } else {
@@ -1583,7 +1583,7 @@ fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
             egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
                 for g in app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left && (q.is_empty() || g.title.to_lowercase().contains(&q))) {
                     let mut on = picked.contains(&g.id);
-                    if ui.checkbox(&mut on, &g.title).changed() {
+                    if crate::widgets::checkbox(ui, &mut on, &g.title).changed() {
                         if on {
                             picked.push(g.id.clone());
                         } else {
@@ -1675,7 +1675,7 @@ fn privacy(app: &mut App, ui: &mut Ui) {
             app.panes.stories.editing = Some(my.clone());
         }
         let mut replies = my.allows_replies;
-        if ui.checkbox(&mut replies, "Allow replies and reactions").changed() {
+        if crate::widgets::checkbox(ui, &mut replies, "Allow replies and reactions").changed() {
             app.send(Command::SaveStoryList(StoryList { allows_replies: replies, ..my.clone() }));
         }
         ui.add_space(12.);
@@ -1738,7 +1738,7 @@ fn list_editor(app: &mut App, ui: &mut Ui) {
         egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
             for (sid, name) in &people {
                 let mut on = list.members.contains(sid);
-                if ui.checkbox(&mut on, name).changed() {
+                if crate::widgets::checkbox(ui, &mut on, name).changed() {
                     if on {
                         list.members.push(sid.clone());
                     } else {

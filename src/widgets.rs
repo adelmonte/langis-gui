@@ -1,7 +1,7 @@
 //! Small pieces drawn the way Desktop draws them: avatars, icon buttons,
 //! pill buttons, badges and text fields.
 
-use egui::{RichText, Align2, Color32, CornerRadius, Rect, Response, Sense, Ui, Vec2};
+use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Response, RichText, Sense, Stroke, Ui, Vec2};
 use langis_store::{Conversation, ConversationKind};
 
 use crate::icons::Icon;
@@ -279,5 +279,61 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
     ui.painter().rect_filled(rect, CornerRadius::same(12), fill);
     let x = egui::lerp(rect.left() + 12.0..=rect.right() - 12., t);
     ui.painter().circle_filled(egui::pos2(x, rect.center().y), 9., Color32::WHITE);
+    response
+}
+
+/// Desktop's `AxoCheckbox`: a 20px rounded box, its border quiet until
+/// checked, then filled with the primary color and a white check.
+pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetText>) -> Response {
+    let palette = Palette::of(ui.ctx());
+    let text: egui::WidgetText = text.into();
+    let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
+    let size = Vec2::new(20. + 10. + galley.size().x, galley.size().y.max(24.));
+    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    if response.clicked() {
+        *checked = !*checked;
+        response.mark_changed();
+    }
+    let boxed = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - 10.), Vec2::splat(20.));
+    if *checked {
+        let fill = if response.hovered() { palette.badge.gamma_multiply(0.9) } else { palette.badge };
+        ui.painter().rect_filled(boxed, CornerRadius::same(6), fill);
+        theme::paint_symbol(ui.painter(), "check", boxed.center(), 16., Color32::WHITE);
+    } else {
+        if response.hovered() {
+            ui.painter().rect_filled(boxed, CornerRadius::same(6), palette.fill);
+        }
+        ui.painter().rect_stroke(boxed, CornerRadius::same(6), Stroke::new(1.5, palette.text_secondary.gamma_multiply(0.7)), egui::StrokeKind::Inside);
+    }
+    ui.painter().galley(Pos2::new(boxed.right() + 10., rect.center().y - galley.size().y / 2.), galley, palette.text);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *checked, ""));
+    response
+}
+
+/// Desktop's `SpinnerV2`: a faint ring with a quarter of it, in `color`,
+/// going round.
+pub fn paint_spinner(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+    let stroke = (size / 9.).clamp(2., 5.);
+    let radius = size / 2. - stroke / 2.;
+    ui.painter().circle_stroke(center, radius, Stroke::new(stroke, color.gamma_multiply(0.2)));
+    let start = ui.input(|i| i.time) as f32 * std::f32::consts::TAU * 0.9;
+    let points: Vec<Pos2> = (0..=24).map(|i| {
+        let a = start + i as f32 / 24. * std::f32::consts::FRAC_PI_2 * 1.2;
+        center + radius * Vec2::angled(a)
+    }).collect();
+    ui.painter().add(egui::Shape::line(points, Stroke::new(stroke, color)));
+    for end in [start, start + std::f32::consts::FRAC_PI_2 * 1.2] {
+        ui.painter().circle_filled(center + radius * Vec2::angled(end), stroke / 2., color);
+    }
+    ui.ctx().request_repaint();
+}
+
+/// A spinner in the layout, `size` across, in the secondary text color.
+pub fn spinner(ui: &mut Ui, size: f32) -> Response {
+    let color = Palette::of(ui.ctx()).text_secondary;
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        paint_spinner(ui, rect.center(), size, color);
+    }
     response
 }

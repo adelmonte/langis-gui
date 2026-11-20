@@ -645,7 +645,7 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
         ui.add_space(30.);
         ui.vertical_centered(|ui| {
             if fun.gif_loading {
-                ui.spinner();
+                crate::widgets::spinner(ui, 24.);
             } else {
                 ui.label(RichText::new("No GIFs found").color(palette.text_secondary));
             }
@@ -722,7 +722,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                 None => {
                     ui.label(RichText::new("Sticker pack").font(theme::semibold(18.)));
                     ui.add_space(30.);
-                    ui.vertical_centered(|ui| ui.spinner());
+                    ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
                     ui.add_space(30.);
                 }
                 Some(Err(error)) => {

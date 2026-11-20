@@ -687,7 +687,7 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     ui.vertical_centered(|ui| {
         match state {
             None => {
-                ui.spinner();
+                crate::widgets::spinner(ui, 24.);
             }
             Some(Err(why)) => body(ui, palette, &why),
             Some(Ok(number)) => {
@@ -844,7 +844,7 @@ fn share_link_dialogs(app: &mut App, ui: &mut Ui, url: &str, c: &Conversation) {
         egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
             for chat in app.conversations.iter().filter(|x| !x.left && !x.blocked && x.id != c.id && (q.is_empty() || x.title.to_lowercase().contains(&q))) {
                 let mut on = chosen.contains(&chat.id);
-                if ui.checkbox(&mut on, &chat.title).changed() {
+                if crate::widgets::checkbox(ui, &mut on, &chat.title).changed() {
                     if on {
                         chosen.push(chat.id.clone());
                     } else {

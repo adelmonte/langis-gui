@@ -161,7 +161,7 @@ fn syncing(ui: &mut Ui, palette: &Palette) {
         ui.painter().rect_filled(ui.max_rect(), 0, page);
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             ui.add_space((ui.available_height() / 2. - 80.).max(24.));
-            ui.add(egui::Spinner::new().size(50.).color(palette.text_secondary));
+            crate::widgets::spinner(ui, 50.);
             ui.add_space(24.);
             ui.label(RichText::new("Syncing contacts and groups").font(theme::semibold(20.)));
             ui.add_space(8.);
@@ -214,7 +214,7 @@ fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHan
                 egui::Image::new(qr).paint_at(ui, code);
             }
             _ => {
-                ui.put(egui::Rect::from_center_size(code.center(), Vec2::splat(32.)), egui::Spinner::new().size(32.).color(Color32::GRAY));
+                crate::widgets::paint_spinner(ui, code.center(), 32., Color32::GRAY);
             }
         }
         let text = egui::Rect::from_min_max(egui::Pos2::new(code.right() + 38., rect.top() + pad), egui::Pos2::new(rect.right() - pad, rect.bottom() - pad));

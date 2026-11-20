@@ -1450,7 +1450,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                         }
                         None if *searching => {
                             ui.add_space(8.);
-                            ui.vertical_centered(|ui| ui.spinner());
+                            ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
                         }
                         None => {}
                     }
@@ -1883,7 +1883,7 @@ fn share_text_dialog(app: &mut App, ui: &mut Ui) {
         egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
             for chat in app.conversations.iter().filter(|x| !x.left && !x.blocked && !x.archived && (q.is_empty() || x.title.to_lowercase().contains(&q))) {
                 let mut on = chosen.contains(&chat.id);
-                if ui.checkbox(&mut on, &chat.title).changed() {
+                if crate::widgets::checkbox(ui, &mut on, &chat.title).changed() {
                     if on {
                         chosen.push(chat.id.clone());
                     } else {

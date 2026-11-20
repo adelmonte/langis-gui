@@ -916,7 +916,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 }
             }
         } else if !chat.loaded || chat.loading_older {
-            ui.vertical_centered(|ui| ui.spinner());
+            ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
         }
         let menu_for = chat.popup.as_ref().map(|p| match p {
             crate::actions::Popup::Menu { message, .. } | crate::actions::Popup::Reactions { message, .. } => *message,
@@ -998,7 +998,7 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
             chat.highlight = Some((id, Instant::now()));
         }
         if !chat.at_end && chat.loaded {
-            ui.vertical_centered(|ui| ui.spinner());
+            ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
         }
         if !typing.is_empty() {
             typing_bubble(ui, &ctx, &typing);
@@ -2255,7 +2255,7 @@ fn audio_row(ui: &Ui, ctx: &Ctx<'_>, m: &Message, a: &langis_store::AttachmentMe
             }
         }
         (Some(_), None) => {
-            egui::Spinner::new().size(16.).color(icon_color).paint_at(ui, Rect::from_center_size(button.center(), Vec2::splat(16.)));
+            crate::widgets::paint_spinner(ui, button.center(), 16., icon_color);
         }
         (Some(path), Some(peaks)) => {
             Icon::paint(if playing { Icon::PauseFill } else { Icon::PlayFill }, ui, icon_rect, 20., icon_color);

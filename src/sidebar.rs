@@ -361,7 +361,7 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
                 match icon {
                     Some(icon) => icon.paint(ui, at, 24., black),
                     None => {
-                        ui.put(at.shrink(1.), egui::Spinner::new().size(22.).color(black));
+                        crate::widgets::paint_spinner(ui, at.center(), 22., black);
                     }
                 }
                 ui.add_space(18.);

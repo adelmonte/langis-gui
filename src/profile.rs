@@ -123,7 +123,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let closed = modal(ui, "profile", 420., |ui| {
         title(ui, "Profile");
         if !e.loaded {
-            ui.spinner();
+            crate::widgets::spinner(ui, 24.);
             return;
         }
         ui.vertical_centered(|ui| {
@@ -359,7 +359,7 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
     let closed = modal(ui, "username-link", 380., |ui| {
         title(ui, "Username link");
         let Some((name, link)) = &state else {
-            ui.spinner();
+            crate::widgets::spinner(ui, 24.);
             body(ui, &palette, "Set a username in your profile to get a link and QR code.");
             close = buttons(ui, &["Done"]).is_some();
             return;

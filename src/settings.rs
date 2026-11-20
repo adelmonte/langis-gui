@@ -255,7 +255,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             app.settings.page = page.top();
         }
         let Some(snapshot) = app.settings.snapshot.clone() else {
-            ui.centered_and_justified(|ui| ui.spinner());
+            ui.centered_and_justified(|ui| crate::widgets::spinner(ui, 24.));
             return;
         };
         egui::ScrollArea::vertical().id_salt(("settings-page", page as u8)).auto_shrink(false).show(ui, |ui| {
@@ -367,7 +367,7 @@ fn help_window(app: &mut App, ui: &mut Ui) {
                         ui.add_space(10.);
                         match log {
                             None => {
-                                ui.vertical_centered(|ui| ui.spinner());
+                                ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
                             }
                             Some(text) => {
                                 // Desktop shows the start of it, read-only.
@@ -378,7 +378,7 @@ fn help_window(app: &mut App, ui: &mut Ui) {
                                 ui.add_space(12.);
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     if *uploading {
-                                        ui.spinner();
+                                        crate::widgets::spinner(ui, 24.);
                                     } else if widgets::pill_button(ui, "Submit", true).clicked() {
                                         submit = Some(text.clone());
                                     }
@@ -832,16 +832,16 @@ fn folder_editor(app: &mut App, ui: &mut Ui) {
         crate::panes::title(ui, if new { "Create a folder" } else { "Edit folder" });
         widgets::text_field(ui, &mut params.name, "Folder name", false);
         ui.add_space(8.);
-        ui.checkbox(&mut params.include_all_individual_chats, "All 1:1 chats");
-        ui.checkbox(&mut params.include_all_group_chats, "All group chats");
-        ui.checkbox(&mut params.show_only_unread, "Only show unread chats");
-        ui.checkbox(&mut params.show_muted_chats, "Show muted chats");
+        crate::widgets::checkbox(ui, &mut params.include_all_individual_chats, "All 1:1 chats");
+        crate::widgets::checkbox(ui, &mut params.include_all_group_chats, "All group chats");
+        crate::widgets::checkbox(ui, &mut params.show_only_unread, "Only show unread chats");
+        crate::widgets::checkbox(ui, &mut params.show_muted_chats, "Show muted chats");
         ui.add_space(8.);
         ui.label(egui::RichText::new("Included chats").font(theme::semibold(13.)));
         egui::ScrollArea::vertical().id_salt("folder-included").max_height(180.).show(ui, |ui| {
             for c in app.conversations.iter() {
                 let mut on = params.included.contains(&c.id);
-                if ui.checkbox(&mut on, &c.title).changed() {
+                if crate::widgets::checkbox(ui, &mut on, &c.title).changed() {
                     if on {
                         params.included.push(c.id.clone());
                         params.excluded.retain(|x| *x != c.id);
@@ -862,7 +862,7 @@ fn folder_editor(app: &mut App, ui: &mut Ui) {
                 };
                 for c in app.conversations.iter().filter(covered) {
                     let mut on = params.excluded.contains(&c.id);
-                    if ui.checkbox(&mut on, &c.title).changed() {
+                    if crate::widgets::checkbox(ui, &mut on, &c.title).changed() {
                         if on {
                             params.excluded.push(c.id.clone());
                             params.included.retain(|x| *x != c.id);
@@ -1022,7 +1022,7 @@ fn screen_sharing(app: &mut App, ui: &mut Ui) {
                     }
                     ui.add(egui::Slider::new(&mut q.max_height, 144..=2160).suffix("p").step_by(2.));
                 }
-                ui.checkbox(&mut native, "Full");
+                crate::widgets::checkbox(ui, &mut native, "Full");
             });
             if native {
                 q.max_height = 0;

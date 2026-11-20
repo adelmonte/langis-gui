@@ -273,6 +273,10 @@ pub fn install(ctx: &egui::Context) {
             v.widgets.active.weak_bg_fill = palette.fill_secondary;
             v.widgets.active.bg_fill = palette.accent;
             v.widgets.open.weak_bg_fill = palette.fill_pressed;
+            // Desktop's Slider: a 4px rail filled up to a round handle.
+            v.slider_trailing_fill = true;
+            v.handle_shape = egui::style::HandleShape::Circle;
+            style.spacing.slider_rail_height = 4.;
         });
     }
 }

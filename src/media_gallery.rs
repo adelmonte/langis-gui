@@ -145,7 +145,7 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, conversation: &Conver
     let tab = d.media_tab;
     let Some(messages) = d.media.clone() else {
         ui.add_space(40.);
-        ui.vertical_centered(|ui| ui.spinner());
+        ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
         return;
     };
     let list = entries(&messages, tab);

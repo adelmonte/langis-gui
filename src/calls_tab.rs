@@ -472,7 +472,7 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
 fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
     let Some(link) = app.panes.links.iter().find(|l| l.room_id == room).cloned() else {
         ui.centered_and_justified(|ui| {
-            ui.spinner();
+            crate::widgets::spinner(ui, 24.);
         });
         return;
     };

@@ -581,7 +581,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                         widgets::text_field(ui, query, "Search", false);
                         ui.add_space(8.);
                         let Some(list) = candidates else {
-                            ui.vertical_centered(|ui| ui.spinner());
+                            ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
                             return;
                         };
                         let shown: Vec<share::ShareCandidate> = list.iter().filter(|c| share::matches(c, query)).cloned().collect();
@@ -613,7 +613,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                     ShareStep::Loading => {
                         ui.label(RichText::new("Share contact").font(theme::semibold(18.)));
                         ui.add_space(24.);
-                        ui.vertical_centered(|ui| ui.spinner());
+                        ui.vertical_centered(|ui| crate::widgets::spinner(ui, 24.));
                         ui.add_space(24.);
                     }
                     ShareStep::Share { draft, selection } => {
@@ -631,13 +631,13 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                         ui.add_space(12.);
                         // The optional details, each a checkbox as Desktop's.
                         if let Some(e164) = &draft.e164 {
-                            ui.checkbox(&mut selection.e164, RichText::new(format!("Phone  {}", share::format_phone(e164, None))).font(theme::regular(14.)));
+                            crate::widgets::checkbox(ui, &mut selection.e164, RichText::new(format!("Phone  {}", share::format_phone(e164, None))).font(theme::regular(14.)));
                         }
                         if let Some((given, family)) = &draft.nickname {
-                            ui.checkbox(&mut selection.nickname, RichText::new(format!("Nickname  {} {}", given, family).trim().to_owned()).font(theme::regular(14.)));
+                            crate::widgets::checkbox(ui, &mut selection.nickname, RichText::new(format!("Nickname  {} {}", given, family).trim().to_owned()).font(theme::regular(14.)));
                         }
                         if let Some(note) = &draft.note {
-                            ui.checkbox(&mut selection.note, RichText::new(format!("Notes  {note}")).font(theme::regular(14.)));
+                            crate::widgets::checkbox(ui, &mut selection.note, RichText::new(format!("Notes  {note}")).font(theme::regular(14.)));
                         }
                         ui.add_space(16.);
                         let shared = share::apply_selection(draft, *selection);
@@ -877,7 +877,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                             versions.push(v);
                         }
                     } else {
-                        ui.spinner();
+                        crate::widgets::spinner(ui, 24.);
                     }
                     let outgoing = m.direction == Direction::Outgoing;
                     for v in versions {
@@ -1020,7 +1020,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
     }
     let Some(details) = details else {
         ui.add_space(8.);
-        ui.spinner();
+        crate::widgets::spinner(ui, 24.);
         return;
     };
     if m.direction == Direction::Outgoing && !details.states.is_empty() {
