@@ -136,6 +136,7 @@ enum Action {
     React { message_id: i64, emoji: String, remove: bool },
     Reply(i64),
     Open(String),
+    OpenFile { message_id: i64, index: usize, path: String },
     /// A person's `ContactModal`.
     Contact(String),
     /// Opens a 1:1 chat (a shared contact's Message).
@@ -432,6 +433,19 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             Action::Open(path) => open_link(app, &path),
+            Action::OpenFile { message_id, index, path } => {
+                let m = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == message_id)).cloned();
+                let name = m.as_ref().and_then(|m| m.attachments.get(index)).and_then(|a| a.file_name.clone()).unwrap_or_default();
+                // Desktop's `isFileDangerous`: never opened from here, only saved.
+                if is_file_dangerous(&name) || is_file_dangerous(&path) {
+                    app.toast("Attachment type not allowed for security reasons");
+                    if let Some(m) = m {
+                        crate::actions::save_attachment(app, &m, index);
+                    }
+                } else {
+                    open_externally(&path);
+                }
+            }
             Action::Audio { message_id, title, path, duration, at, voice } => {
                 let starting = app.audio.active(message_id).is_none_or(|p| !p.playing());
                 app.audio.toggle(message_id, &id, title, &path, duration, at);
@@ -628,6 +642,19 @@ pub fn extension_for(content_type: &str) -> &'static str {
         "application/pdf" => "pdf",
         _ => "bin",
     }
+}
+
+/// Desktop's `isFileDangerous` (`ts/util/isFileDangerous`), plus what
+/// runs on Linux: launchers, scripts, AppImages and pages a browser would
+/// open with a `file://` origin.
+pub fn is_file_dangerous(name: &str) -> bool {
+    const DANGEROUS: &[&str] = &[
+        "ade", "adp", "apk", "bat", "cab", "chm", "cmd", "com", "cpl", "diagcab", "dll", "dmg", "exe", "hta", "inf", "ins", "isp", "jar", "js", "jse", "lib", "lnk", "mde", "mht", "msc", "msi", "msp", "mst", "nsh", "pif", "ps1", "psc1", "psm1", "psrc", "reg", "scr", "sct", "settingcontent-ms", "shb", "sys", "vb", "vbe", "vbs", "vxd", "wsc", "wsf", "wsh",
+        "desktop", "sh", "bash", "zsh", "fish", "csh", "run", "bin", "appimage", "flatpakref", "py", "pl", "rb", "deb", "rpm", "html", "htm", "xhtml", "svg", "xht", "elf", "so", "kdesktop", "service",
+    ];
+    // Trailing dots and spaces don't hide the type (Desktop's `(\.|\s)*?$`).
+    let trimmed = name.trim_end_matches(|c: char| c == '.' || c.is_whitespace());
+    trimmed.rsplit_once('.').is_some_and(|(_, ext)| DANGEROUS.contains(&ext.to_ascii_lowercase().as_str()))
 }
 
 /// Opens a file or web link with the desktop's default app.
@@ -1457,7 +1484,7 @@ fn message(
         let loading = download_progress(ctx, m, *index, a);
         if file_row(ui, palette, a, rect, in_color, meta_color, ui.scope_id().with(("file", m.id, *index))) {
             match (&a.local_path, loading) {
-                (Some(path), _) => actions.push(Action::Open(path.clone())),
+                (Some(path), _) => actions.push(Action::OpenFile { message_id: m.id, index: *index, path: path.clone() }),
                 (None, Some(_)) => actions.push(Action::CancelDownload { message_id: m.id, index: *index }),
                 (None, None) => actions.push(Action::Fetch { message_id: m.id, index: *index }),
             }
@@ -2708,6 +2735,9 @@ mod tests {
 
     #[test]
     fn only_web_links() {
+        assert!(super::is_file_dangerous("invoice.EXE"));
+        assert!(super::is_file_dangerous("run me.desktop. "));
+        assert!(!super::is_file_dangerous("trail map.pdf"));
         let links = find_links("see https://example.org/a, www.example.com. not file:///etc/passwd");
         let urls: Vec<_> = links.iter().map(|(_, u)| u.as_str()).collect();
         assert_eq!(urls, ["https://example.org/a", "https://www.example.com"]);
