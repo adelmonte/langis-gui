@@ -97,6 +97,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's CallLinkPendingParticipantModal for this person.
+    pub pending_person: Option<String>,
     /// The AvatarEditor for a new group's photo.
     pub new_group_avatar: Option<crate::avatar_editor::AvatarEditor>,
     /// Desktop's CallLinkAddNameModal, open.

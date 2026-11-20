@@ -908,12 +908,13 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
         let n = pending.len();
         let expanded = app.panes.pending_expanded && n > 1;
         let mut act: Vec<(String, bool)> = Vec::new();
+        let mut open_pending: Option<String> = None;
         let mut toggle = false;
         egui::Area::new(egui::Id::unique("call-pending")).fixed_pos(Pos2::new(area.left() + 20., area.top() + 20.)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             egui::Frame::new().fill(theme::rgb(0x2e2e2e)).corner_radius(CornerRadius::same(16)).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
                 ui.set_width(320.);
-                let person = |ui: &mut Ui, aci: &str, subtitle: Option<&str>, act: &mut Vec<(String, bool)>| {
-                    ui.horizontal(|ui| {
+                let person = |ui: &mut Ui, aci: &str, subtitle: Option<&str>, act: &mut Vec<(String, bool)>, open: &mut Option<String>| {
+                    let row = ui.horizontal(|ui| {
                         let name = app.name(aci);
                         let color = aci.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
                         let photo = app.conversation(&ConversationId::direct(aci)).and_then(|c| c.avatar_path.clone());
@@ -941,6 +942,11 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                             }
                         });
                     });
+                    // The person opens Desktop's CallLinkPendingParticipantModal.
+                    let who = egui::Rect::from_min_max(row.response.rect.min, egui::pos2(row.response.rect.right() - 80., row.response.rect.bottom()));
+                    if ui.interact(who, ui.scope_id().with(("pending-person", aci)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        *open = Some(aci.to_owned());
+                    }
                 };
                 if expanded {
                     ui.horizontal(|ui| {
@@ -956,7 +962,7 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                     ui.add_space(8.);
                     egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
                         for aci in &pending {
-                            person(ui, aci, None, &mut act);
+                            person(ui, aci, None, &mut act, &mut open_pending);
                             ui.add_space(6.);
                         }
                     });
@@ -970,7 +976,7 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                         }
                     });
                 } else {
-                    person(ui, &pending[0], Some(tr("Would like to join...")), &mut act);
+                    person(ui, &pending[0], Some(tr("Would like to join...")), &mut act, &mut open_pending);
                     if n > 1 {
                         ui.add_space(6.);
                         let more = n - 1;
@@ -984,6 +990,44 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
         });
         if toggle {
             app.panes.pending_expanded = !app.panes.pending_expanded;
+        }
+        if let Some(aci) = open_pending {
+            app.panes.pending_person = Some(aci);
+        }
+        // Desktop's CallLinkPendingParticipantModal: who's asking, then
+        // Approve entry or Deny entry.
+        if let Some(aci) = app.panes.pending_person.clone() {
+            let name = app.name(&aci);
+            let p = app.conversation(&ConversationId::direct(&aci)).cloned();
+            let mut answer = None;
+            let closed = crate::panes::modal(ui, "pending-person", 320., |ui| {
+                ui.vertical_centered(|ui| {
+                    let spec = match &p {
+                        Some(p) => widgets::AvatarSpec::of(p),
+                        None => widgets::AvatarSpec::person(&name, 0),
+                    };
+                    widgets::avatar(ui, &spec, 80.);
+                    ui.add_space(10.);
+                    ui.label(RichText::new(&name).font(theme::semibold(18.)));
+                    if let Some(phone) = p.as_ref().and_then(|p| p.phone.clone()) {
+                        ui.label(RichText::new(phone).font(theme::regular(13.)).color(palette.text_secondary));
+                    }
+                    ui.add_space(14.);
+                    if widgets::pill_button(ui, tr("Approve entry"), true).clicked() {
+                        answer = Some(true);
+                    }
+                    ui.add_space(6.);
+                    if widgets::pill_button(ui, tr("Deny entry"), false).clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if let Some(approve) = answer {
+                act.push((aci, approve));
+                app.panes.pending_person = None;
+            } else if closed {
+                app.panes.pending_person = None;
+            }
         }
         for (aci, approve) in act {
             app.send(Command::ApproveCallJoin { aci, approve });
