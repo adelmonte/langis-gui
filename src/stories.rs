@@ -205,6 +205,35 @@ fn key(s: &Story) -> String {
     }
 }
 
+/// A chat's stories up now (Desktop's avatar story ring): their key and
+/// whether any is unread.
+pub fn of_chat(app: &App, c: &langis_store::Conversation) -> Option<(String, bool)> {
+    let mine: Vec<&Story> = app
+        .panes
+        .stories
+        .list
+        .iter()
+        .filter(|s| match (&s.group, &s.author, c.id.as_direct()) {
+            (Some(g), _, _) => *g == c.id,
+            (None, Some(a), Some(sid)) => a == sid,
+            _ => false,
+        })
+        .collect();
+    let first = mine.first()?;
+    Some((key(first), mine.iter().any(|s| !s.read)))
+}
+
+/// Opens a chat's stories in the viewer, from its first unread.
+pub fn view(app: &mut App, k: String) {
+    let all = groups(&app.panes.stories.list);
+    let Some((_, stories)) = all.iter().find(|(key, _)| *key == k) else { return };
+    let first = stories.iter().position(|s| !s.read).unwrap_or(0);
+    app.tab = crate::app::Tab::Stories;
+    app.panes.stories.viewer = Some((k, first, Instant::now()));
+    app.panes.stories.player = None;
+    app.panes.stories.paused = None;
+}
+
 /// Stories by whose, newest group first; ours come separately.
 fn groups(list: &[Story]) -> Vec<(String, Vec<Story>)> {
     let mut out: Vec<(String, Vec<Story>)> = Vec::new();

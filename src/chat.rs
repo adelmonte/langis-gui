@@ -753,8 +753,24 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
             }
             ui.horizontal_centered(|ui| {
                 ui.add_space(16.);
-                if widgets::avatar(ui, &widgets::AvatarSpec::of(c), 32.).on_hover_text("Chat settings").clicked() {
-                    crate::details::open(app, c.id.clone());
+                // Desktop's header avatar: a ring when they have stories
+                // (opening them), and their badge.
+                let ring = crate::stories::of_chat(app, c);
+                let avatar = widgets::avatar(ui, &widgets::AvatarSpec::of(c), 32.);
+                if let Some((_, unread)) = &ring {
+                    ui.painter().circle_stroke(avatar.rect.center(), 18.5, Stroke::new(2., if *unread { palette.badge } else { palette.text_secondary }));
+                }
+                if let Some(badge) = c.id.as_direct().and_then(|sid| app.badge_for(sid)).map(str::to_owned) {
+                    widgets::paint_badge(ui, avatar.rect, &badge);
+                }
+                match ring {
+                    Some((k, _)) if avatar.clone().on_hover_text(tr("View story")).clicked() => crate::stories::view(app, k),
+                    Some(_) => {}
+                    None => {
+                        if avatar.on_hover_text(tr("Chat settings")).clicked() {
+                            crate::details::open(app, c.id.clone());
+                        }
+                    }
                 }
                 ui.add_space(4.);
                 ui.vertical(|ui| {
@@ -2229,6 +2245,10 @@ fn avatar_for(ui: &Ui, ctx: &Ctx<'_>, m: &Message, at: Pos2) -> Option<Action> {
     let spec = widgets::AvatarSpec { name: &name, color, photo: photo.as_deref(), group: false, note_to_self: false };
     let rect = Rect::from_min_size(at, Vec2::splat(28.));
     widgets::paint_avatar(ui, rect, &spec);
+    // Desktop's badge on an author's avatar.
+    if let Some(badge) = m.author.as_deref().and_then(|a| ctx.app.badge_for(a)) {
+        widgets::paint_badge(ui, rect, badge);
+    }
     let response = ui.interact(rect, ui.scope_id().with(("avatar", m.id)), Sense::click());
     if response.hovered() && !ctx.selecting {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
