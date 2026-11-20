@@ -835,6 +835,8 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
     // each opening their ContactModal.
     if app.panes.participants_open {
         let mut close = false;
+        let mut copied = false;
+        let mut share_link: Option<String> = None;
         let mut open_contact = None;
         egui::Area::new(egui::Id::unique("call-participants")).fixed_pos(Pos2::new(area.right() - 336., area.top() + 20.)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             egui::Frame::new().fill(theme::rgb(0x2e2e2e)).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::same(5)).show(ui, |ui| {
@@ -889,11 +891,40 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
                             open_contact = Some(p.aci.clone());
                         }
                     }
+                    // A call link's: Desktop's Copy and Share buttons.
+                    if let Some(room) = call.conversation.as_call_link()
+                        && let Some(url) = app.panes.links.iter().find(|l| l.room_id == room).and_then(|l| langis_core::call_link_url(&l.root_key))
+                    {
+                        ui.add_space(8.);
+                        for (symbol, label, share) in [("copy", tr("Copy call link"), false), ("forward", tr("Share call link via Signal"), true)] {
+                            let (r, hit) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.), Sense::click());
+                            if hit.hovered() {
+                                ui.painter().rect_filled(r, CornerRadius::same(8), egui::Color32::from_white_alpha(20));
+                            }
+                            theme::paint_symbol(ui.painter(), symbol, Pos2::new(r.left() + 18., r.center().y), 18., white);
+                            ui.painter().text(Pos2::new(r.left() + 40., r.center().y), egui::Align2::LEFT_CENTER, label, theme::regular(14.), white);
+                            if hit.clicked() {
+                                if share {
+                                    share_link = Some(url.clone());
+                                } else {
+                                    ui.ctx().copy_text(url.clone());
+                                    copied = true;
+                                }
+                            }
+                        }
+                    }
                 });
             });
         });
         if close {
             app.panes.participants_open = false;
+        }
+        if copied {
+            app.panes.call_toasts.push((tr("Link copied").into(), std::time::Instant::now()));
+        }
+        if let Some(url) = share_link {
+            app.panes.share_text = Some((url, Vec::new(), String::new()));
+            app.call_view.pip = true;
         }
         if let Some(aci) = open_contact {
             crate::contact_modal::open(app, Some(call.conversation.clone()), aci);
