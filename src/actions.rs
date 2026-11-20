@@ -1034,6 +1034,17 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                             ui.vertical(|ui| {
                                 ui.set_width(width - 32.);
                                 info_body(app, ui, &palette, m, details.as_ref());
+                                // Desktop's MessageDetail actions.
+                                ui.add_space(16.);
+                                ui.horizontal(|ui| {
+                                    if m.edited && widgets::axo_button(ui, tr("View edit history"), widgets::Axo::SubtleSecondary).clicked() {
+                                        out.push(Do::Close);
+                                        out.push(Do::Open(Dialog::EditHistory { message: m.id, details: None }));
+                                    }
+                                    if widgets::axo_button(ui, tr("Copy timestamp"), widgets::Axo::SubtleSecondary).clicked() {
+                                        out.push(Do::Copy(m.sent_at.to_string()));
+                                    }
+                                });
                             });
                         });
                         ui.add_space(20.);

@@ -682,7 +682,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
             Do::OpenChat(to) => opened = Some(to),
             Do::Ask(title, body, action, commands) => asked = Some((title, body, action, commands)),
             Do::Open(dialog) => {
-                if let crate::actions::Dialog::Info { message, .. } = &dialog {
+                if let crate::actions::Dialog::Info { message, .. } | crate::actions::Dialog::EditHistory { message, .. } = &dialog {
                     crate::actions::load_details(app, *message);
                 }
                 chat.dialog = Some(dialog);
