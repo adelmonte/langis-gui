@@ -127,6 +127,7 @@ enum Ask {
     NobodyCanFind,
     Unblock(langis_store::ConversationId, String, bool),
     DeleteFolder(String, String),
+    ResetNotifications,
 }
 
 /// A folder as the editor holds it: its id, not new, and what it holds.
@@ -1269,21 +1270,33 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             write(app, SETTING_NOTIFICATION_CONTENT, content);
             app.settings.stale = true;
         }
-        let item = Item::new("While muted").description("Choose notifications to show for muted chats.");
-        if axo_list::item(ui, item, End::Arrow(None)).clicked() {
+        // What shows while muted, in Desktop's summary.
+        let shown: Vec<&str> = [(AccountSetting::NotifyCallsIfMuted, "Calls"), (AccountSetting::NotifyMentionsIfMuted, "Mentions"), (AccountSetting::NotifyRepliesIfMuted, "Replies")]
+            .into_iter()
+            .filter(|(k, _)| account_on(s, *k))
+            .map(|(_, l)| l)
+            .collect();
+        let summary = if shown.is_empty() { "None".to_owned() } else { shown.join(", ") };
+        let item = Item::new("While muted").description("Choose notifications to show for muted chats.").disabled(!s.notifications);
+        if axo_list::item(ui, item, End::Arrow(Some(&summary))).clicked() && s.notifications {
             app.settings.page = Page::WhileMuted;
         }
     });
     // Desktop's sound and attention rows, then its call ones.
+    let enabled = s.notifications;
+    for (label, rows) in [
+        (
+            "Sounds",
+            vec![
+                (0usize, "Notification sound", "Play a sound with each notification"),
+                (1, "In-chat sounds", "Play a sound for new messages in the chat you're reading"),
+                (4, "Draw attention to this window when a notification arrives", ""),
+            ],
+        ),
+        ("Calls", vec![(3, "Incoming call notifications", "Show a notification when a call comes in"), (2, "Call ringtone", "Play a ringtone for incoming calls")]),
+    ] {
     axo_list::gap(ui);
-    axo_list::list(ui, None, None, |ui| {
-        let rows: [(usize, &str, &str); 5] = [
-            (0, "Notification sound", "Play a sound with each notification"),
-            (1, "In-chat sounds", "Play a sound for new messages in the chat you're reading"),
-            (4, "Draw attention to this window when a notification arrives", ""),
-            (3, "Incoming call notifications", "Show a notification when a call comes in"),
-            (2, "Call ringtone", "Play a ringtone for incoming calls"),
-        ];
+    axo_list::list(ui, Some(label), None, |ui| {
         for (i, title, description) in rows {
             let prefs = &mut app.sound;
             let slot = match i {
@@ -1294,8 +1307,10 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
                 _ => &mut prefs.attention,
             };
             let mut on = *slot;
-            let item = if description.is_empty() { Item::new(title) } else { Item::new(title).description(description) };
-            if axo_list::switch(ui, item, &mut on) {
+            // Message sounds follow notifications being on; call ones don't.
+            let off = !enabled && matches!(i, 0 | 4);
+            let item = if description.is_empty() { Item::new(title) } else { Item::new(title).description(description) }.disabled(off);
+            if axo_list::switch(ui, item, &mut on) && !off {
                 *slot = on;
                 write(app, crate::sounds::KEYS[i], on.to_string());
                 if on && i == 0 {
@@ -1304,6 +1319,7 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             }
         }
     });
+    }
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
         account_switch(app, ui, s, AccountSetting::ReactionNotifications, Item::new("Reaction notifications").description("Notify when someone reacts to your message"));
@@ -1313,6 +1329,15 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
         if axo_list::item(ui, Item::new("Reset notification settings"), End::Click).clicked() {
+            app.settings.ask = Some(Ask::ResetNotifications);
+        }
+    });
+}
+
+/// Desktop's Reset notification settings: this device's back to default.
+fn reset_notifications(app: &mut App) {
+    {
+        {
             app.sound = crate::sounds::Prefs::default();
             let d = app.sound;
             for (key, on) in crate::sounds::KEYS.iter().zip([d.notification, d.in_chat, d.ringtone, d.call_notify, d.attention]) {
@@ -1324,7 +1349,7 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             app.settings.stale = true;
             app.toast("Notification settings reset.");
         }
-    });
+    }
 }
 
 fn while_muted(app: &mut App, ui: &mut Ui, s: &Snapshot) {
@@ -1535,7 +1560,7 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
 fn data_usage(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     let mut auto = s.auto_download.clone();
     let mut changed = false;
-    axo_list::list(ui, Some("Media auto-download"), None, |ui| {
+    axo_list::list(ui, Some("Media auto-download"), Some("Voice messages and stickers are always automatically downloaded."), |ui| {
         for (label, on) in [("Photos", &mut auto.photos), ("Videos", &mut auto.videos), ("Audio", &mut auto.audio), ("Documents", &mut auto.documents)] {
             changed |= axo_list::switch(ui, Item::new(label), on);
         }
@@ -1563,6 +1588,14 @@ fn ask(app: &mut App, ctx: &egui::Context) {
         Ask::DeleteData => match dialog::confirm(ctx, id, "Delete all data?", "Delete all data and messages from this version of Signal Desktop? Your Signal account and data on your phone or other devices will not be deleted.", "Delete data", Variant::StrongDestructive) {
             Some(Choice::Action) => {
                 app.send(Command::Unlink);
+                true
+            }
+            Some(Choice::Cancel) => true,
+            None => false,
+        },
+        Ask::ResetNotifications => match dialog::confirm(ctx, id, "Reset notification settings?", "Notification settings on this device will go back to their defaults.", "Reset", Variant::StrongDestructive) {
+            Some(Choice::Action) => {
+                reset_notifications(app);
                 true
             }
             Some(Choice::Cancel) => true,
