@@ -1226,7 +1226,13 @@ fn media_editor(app: &mut App, ui: &Ui, chat: &mut ChatView) {
     }
     let Some(result) = editor.show(ui.ctx(), &app.fun.packs) else { return };
     let index = editor.index;
+    let caption = editor.caption.take();
     chat.media_editor = None;
+    if result.is_some()
+        && let Some(caption) = caption
+    {
+        chat.composer = caption;
+    }
     if let (Some(png), Some(staged)) = (result, chat.staged.get_mut(index)) {
         let stem = std::path::Path::new(&staged.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "photo".into());
         *staged = Staged::new(png, format!("{stem}.png"));
@@ -1396,7 +1402,10 @@ fn staged_list(ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_s
         chat.staged.remove(i);
     } else if let Some(i) = edit {
         match crate::media_editor::Editor::open(i, &chat.staged[i].bytes) {
-            Some(editor) => chat.media_editor = Some(editor),
+            Some(mut editor) => {
+                editor.caption = Some(chat.composer.clone());
+                chat.media_editor = Some(editor);
+            }
             None => tracing::warn!("couldn't open a staged photo to edit"),
         }
     }

@@ -398,6 +398,9 @@ fn screenshots_composer() {
     {
         let chat = harness.state_mut().chat.as_mut().unwrap();
         chat.media_editor = crate::media_editor::Editor::open(0, &chat.staged[0].bytes);
+        if let Some(e) = chat.media_editor.as_mut() {
+            e.caption = Some(String::new());
+        }
     }
     wait(&mut harness, "editor", |_| true);
     save(&mut harness, "media-editor");

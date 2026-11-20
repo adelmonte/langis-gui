@@ -103,6 +103,10 @@ pub struct Editor {
     sticker_picker: bool,
     /// The sticker last touched, with its remove button.
     sticker_selected: Option<usize>,
+    /// Desktop's caption field ("Message") beside Save, when the caller
+    /// gives one (the composer's draft); read it back after Done.
+    pub caption: Option<String>,
+    caption_focused: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -174,6 +178,8 @@ impl Editor {
             grab: None,
             sticker_picker: false,
             sticker_selected: None,
+            caption: None,
+            caption_focused: false,
         })
     }
 
@@ -202,7 +208,7 @@ impl Editor {
     /// Desktop's MediaEditor keys: Ctrl+Z, Ctrl+Shift+Z, Ctrl+D (draw),
     /// Ctrl+T (text), Ctrl+C (crop), and Delete for what's selected.
     fn keys(&mut self, ctx: &egui::Context) {
-        let typing = self.typing.is_some() && ctx.memory(|m| m.focused().is_some());
+        let typing = (self.typing.is_some() && ctx.memory(|m| m.focused().is_some())) || self.caption_focused;
         let (cmd, shift) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
         let pressed = |k: egui::Key| ctx.input(|i| i.key_pressed(k));
         if cmd && pressed(egui::Key::Z) {
@@ -659,8 +665,20 @@ impl Editor {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, tr("Done"), true).clicked() {
+                    let done = if self.caption.is_some() { tr("Save") } else { tr("Done") };
+                    if widgets::pill_button(ui, done, true).clicked() {
                         result = Some(Some(self.bake()));
+                    }
+                    // `MediaEditor__tools--input`: the message to send with
+                    // it; Enter saves.
+                    if self.typing.is_none()
+                        && let Some(caption) = self.caption.as_mut()
+                    {
+                        let field = ui.add(egui::TextEdit::singleline(caption).hint_text(RichText::new(tr("Message")).color(Color32::from_gray(160))).text_color(Color32::WHITE).background_color(Color32::from_gray(45)).desired_width(200.));
+                        self.caption_focused = field.has_focus();
+                        if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            result = Some(Some(self.bake()));
+                        }
                     }
                     // White on the editor's dark bar, whatever the theme.
                     if ui.add(egui::Button::new(RichText::new(tr("Cancel")).color(Color32::WHITE).font(theme::medium(14.))).fill(Color32::from_gray(60)).corner_radius(CornerRadius::same(16))).clicked() {
