@@ -404,8 +404,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         pinned_bar(app, ui, &palette, &mut chat);
     }
     crate::collisions::bar(app, ui, &palette, &conversation);
+    // The official Signal chat has no composer (Desktop's
+    // isSignalConversation).
+    let signal = conversation.id.as_direct() == Some(langis_store::SIGNAL_ACI);
     if chat.selected.is_some() {
         select_bar(app, ui, &palette, &mut chat);
+    } else if signal {
     } else if !crate::panes::message_request_bar(app, ui, &palette, &conversation) {
         crate::composer::show(app, ui, &palette, &mut chat, &conversation);
     }
@@ -764,6 +768,11 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                         if c.system_contact && c.kind == ConversationKind::Direct {
                             widgets::in_contacts_icon(ui);
                         }
+                        // Desktop's OfficialChatInlineBadge.
+                        if c.id.as_direct() == Some(langis_store::SIGNAL_ACI) {
+                            let (at, _) = ui.allocate_exact_size(Vec2::splat(16.), Sense::hover());
+                            theme::paint_symbol(ui.painter(), "check-circle-fill", at.center(), 15., palette.badge);
+                        }
                     });
                     if c.expire_timer > 0 {
                         ui.add_space(-4.);
@@ -784,7 +793,13 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                     if widgets::axo_icon_button(ui, "search", tr("Search in chat")).clicked() {
                         app.find_requested = true;
                     }
-                    if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
+                    // The Signal chat: no calls; a bell mutes it for good.
+                    if c.id.as_direct() == Some(langis_store::SIGNAL_ACI) {
+                        if widgets::axo_icon_button(ui, if c.muted { "bell-slash" } else { "bell" }, if c.muted { tr("Unmute") } else { tr("Mute") }).clicked() {
+                            let until = if c.muted { 0 } else { i64::MAX };
+                            app.send(Command::SetChat { conversation: c.id.clone(), change: langis_core::ChatChange::MutedUntil(until) });
+                        }
+                    } else if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
                         let group = c.kind == ConversationKind::Group;
                         let in_other = app.call.as_ref().is_some_and(|call| call.conversation != c.id);
                         let going = group && app.panes.active_calls.get(&c.id).is_some_and(|u| !u.is_empty());
@@ -1313,6 +1328,20 @@ fn chat_intro(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 if note {
                     ui.add_space(8.);
                     ui.label(RichText::new(tr("You can add notes for yourself in this chat. If your account has any linked devices, new notes will be synced.")).font(theme::regular(14.)).color(palette.text));
+                    return;
+                }
+                // Desktop's hero for the Signal chat: Official chat, and why.
+                if c.id.as_direct() == Some(langis_store::SIGNAL_ACI) {
+                    ui.add_space(8.);
+                    ui.horizontal(|ui| {
+                        let text = ui.painter().layout_no_wrap(tr("Official chat").into(), theme::medium(13.), palette.text_secondary);
+                        ui.add_space(((ui.available_width() - text.size().x - 20.) / 2.).max(0.));
+                        let (at, _) = ui.allocate_exact_size(Vec2::splat(16.), Sense::hover());
+                        theme::paint_symbol(ui.painter(), "check-circle-fill", at.center(), 14., palette.badge);
+                        ui.label(RichText::new(tr("Official chat")).font(theme::medium(13.)).color(palette.text_secondary));
+                    });
+                    ui.add_space(8.);
+                    ui.label(RichText::new(tr("This is the official and only chat from Signal")).font(theme::regular(14.)).color(palette.text));
                     return;
                 }
                 // Desktop shows the warning when the name isn't one you gave
@@ -3336,6 +3365,16 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
     let id = c.id.clone();
     let group = c.kind == ConversationKind::Group;
     crate::menu::dropdown(ui, more, egui::Id::unique("chat-header-menu"), |m| {
+        // The Signal chat's menu: Archive and Delete only.
+        if c.id.as_direct() == Some(langis_store::SIGNAL_ACI) {
+            if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { tr("Unarchive") } else { tr("Archive") }) {
+                app.set_archived(id.clone(), !c.archived);
+            }
+            if m.item(Some("trash"), tr("Delete")) {
+                app.panes.delete_chat = Some((id.clone(), false));
+            }
+            return;
+        }
         // Desktop's menu for a message request: answer it, nothing else.
         if !c.accepted && c.kind != ConversationKind::NoteToSelf {
             if c.blocked {
