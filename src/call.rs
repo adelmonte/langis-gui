@@ -31,6 +31,8 @@ pub struct CallView {
     /// (Desktop's `GroupCallOverflowArea` and paginated grid).
     grid_page: usize,
     overflow_from: usize,
+    /// The layout before someone presented, to go back to.
+    before_presenting: Option<Layout>,
     /// Since when we've been talking with our hand up (Desktop's lower hand
     /// suggestion).
     talking_since: Option<std::time::Instant>,
@@ -43,7 +45,7 @@ pub struct CallView {
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0, self_large: false, last_moved: None, talking_since: None }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0, self_large: false, last_moved: None, talking_since: None, before_presenting: None }
     }
 }
 
@@ -196,6 +198,20 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.painter().rect_filled(full, 0, palette.calling);
         let stage = Rect::from_min_max(full.min + Vec2::new(16., 64.), full.max - Vec2::new(16., 112.));
 
+        // Desktop switches to the presentation view when someone presents,
+        // and back to the view before once they stop.
+        let presenting = call.participants.iter().any(|p| p.presenting);
+        match (presenting, app.call_view.before_presenting) {
+            (true, None) => {
+                app.call_view.before_presenting = Some(app.call_view.layout);
+                app.call_view.layout = Layout::Speaker;
+            }
+            (false, Some(before)) => {
+                app.call_view.layout = before;
+                app.call_view.before_presenting = None;
+            }
+            _ => {}
+        }
         if call.group {
             group_grid(app, ui, &ctx, &call, &video, stage);
         } else {

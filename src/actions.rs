@@ -800,47 +800,52 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 out.push(Do::Close);
             }
         }
+        // Desktop's PinnedMessagesPanel: the pinned messages as bubbles, a
+        // click going to one, and Unpin all messages (asked first).
         Dialog::Pinned { messages } => {
-            let modal = egui::Modal::new(egui::Id::unique("pinned-messages")).frame(frame).show(ui.ctx(), |ui| {
-                ui.set_width(420.);
-                ui.label(RichText::new(tr("Pinned messages")).font(theme::semibold(18.)));
-                ui.add_space(12.);
-                egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
-                    for m in messages.iter() {
-                        let who = match &m.author {
-                            None => tr("You").to_owned(),
-                            Some(a) => app.name(a),
-                        };
-                        let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { langis_store::hide_spoilers(&m.body, &m.styles) };
-                        let response = egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(who).font(theme::semibold(13.)));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new(crate::format::short_timestamp(m.sent_at)).font(theme::regular(12.)).color(palette.text_secondary));
-                                });
-                            });
-                            let mut job = egui::text::LayoutJob::simple(text, theme::regular(14.), palette.text, ui.available_width());
-                            job.wrap.max_rows = 4;
-                            job.wrap.overflow_character = Some('…');
+            let can_unpin = c.kind != ConversationKind::Group || c.can_edit_info;
+            let back = panel(ui, &palette, tr("Pinned messages"), |ui| {
+                for m in messages.iter() {
+                    let outgoing = m.direction == Direction::Outgoing;
+                    let who = match &m.author {
+                        None => tr("You").to_owned(),
+                        Some(a) => app.name(a),
+                    };
+                    let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { langis_store::hide_spoilers(&m.body, &m.styles) };
+                    ui.with_layout(egui::Layout::top_down(if outgoing { egui::Align::Max } else { egui::Align::Min }), |ui| {
+                        let fill = if outgoing { palette.accent } else { palette.bubble_in };
+                        let ink = if outgoing { Color32::WHITE } else { palette.text };
+                        let bubble = egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                            ui.set_max_width(360.);
+                            if !outgoing {
+                                ui.label(RichText::new(&who).font(theme::semibold(13.)).color(ink));
+                            }
+                            let mut job = egui::text::LayoutJob::simple(text, theme::regular(14.), ink, 336.);
+                            job.wrap.max_rows = 6;
+                            job.wrap.overflow_character = Some('\u{2026}');
                             ui.label(job);
+                            ui.label(RichText::new(crate::format::short_timestamp(m.sent_at)).font(theme::regular(11.)).color(if outgoing { palette.bubble_out_meta() } else { palette.text_secondary }));
                         });
-                        let r = ui.interact(response.response.rect, ui.scope_id().with(("pinned", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let r = ui.interact(bubble.response.rect, ui.scope_id().with(("pinned", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
                         if r.clicked() {
                             out.push(Do::Close);
                             out.push(Do::Jump(m.id));
                         }
-                        ui.add_space(6.);
-                    }
-                });
-                ui.add_space(12.);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, tr("Done"), true).clicked() {
-                        out.push(Do::Close);
-                    }
-                });
+                    });
+                    ui.add_space(10.);
+                }
+                if can_unpin && !messages.is_empty() {
+                    ui.add_space(10.);
+                    ui.vertical_centered(|ui| {
+                        if widgets::axo_button(ui, tr("Unpin all messages"), widgets::Axo::SubtleSecondary).clicked() {
+                            let commands = messages.iter().map(|m| Command::UnpinMessage { message_id: m.id }).collect();
+                            out.push(Do::Ask(tr("Unpin all messages?").into(), tr("Messages will be unpinned for members of this chat.").into(), tr("Unpin").into(), commands));
+                            out.push(Do::Close);
+                        }
+                    });
+                }
             });
-            if modal.should_close() {
+            if back {
                 out.push(Do::Close);
             }
         }
