@@ -69,6 +69,10 @@ pub struct StoriesView {
     pub info_of: Option<i64>,
     /// "Hide story?" waiting for this story's answer.
     pub confirm_hide: Option<i64>,
+    /// "Delete this story?" waiting for this story's answer.
+    pub confirm_delete: Option<i64>,
+    /// The list's "Hide story?" (or Unhide) for a chat and its name.
+    pub confirm_hide_chat: Option<(ConversationId, String)>,
     /// Chats whose stories are hidden (`stories_hidden`).
     pub hidden: Vec<ConversationId>,
     /// The Hidden stories section, opened.
@@ -422,8 +426,13 @@ fn other_row(app: &mut App, ui: &mut Ui, palette: &Palette, k: &str, stories: &[
         crate::menu::open_at(ui.ctx(), menu, at);
     }
     crate::menu::show(ui.ctx(), menu, |m| {
-        if m.item(Some(if hidden { "eye" } else { "eye-slash" }), if hidden { "Show story" } else { tr("Hide story") }) {
-            app.send(Command::SetChat { conversation: chat.clone(), change: langis_core::ChatChange::HideStory(!hidden) });
+        // Desktop's StoryListItem: hiding asks first; unhiding doesn't.
+        if m.item(Some(if hidden { "eye" } else { "eye-slash" }), if hidden { tr("Unhide story") } else { tr("Hide story") }) {
+            if hidden {
+                app.send(Command::SetChat { conversation: chat.clone(), change: langis_core::ChatChange::HideStory(false) });
+            } else {
+                app.panes.stories.confirm_hide_chat = Some((chat.clone(), name.clone()));
+            }
         }
         if m.item(Some("message"), tr("Go to chat")) {
             app.open(chat.clone());
@@ -583,7 +592,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
         app.panes.stories.viewer = Some(("me".into(), i, Instant::now()));
     }
     if let Some(id) = delete {
-        app.send(Command::DeleteStory { id });
+        app.panes.stories.confirm_delete = Some(id);
     }
 }
 
@@ -814,7 +823,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     // Paused by the button, while replying, or while picking a reaction;
     // the clock (and a video) stand still meanwhile.
     let replying = ui.memory(|m| m.focused() == Some(egui::Id::unique("story-reply-field"))) || !app.panes.stories.reply.is_empty();
-    let held = replying || app.panes.stories.picker.is_some() || app.panes.stories.views_of.is_some() || app.panes.stories.info_of.is_some() || app.panes.stories.confirm_hide.is_some();
+    let held = replying || app.panes.stories.picker.is_some() || app.panes.stories.views_of.is_some() || app.panes.stories.info_of.is_some() || app.panes.stories.confirm_hide.is_some() || app.panes.stories.confirm_delete.is_some();
     let paused = app.panes.stories.paused.is_some() || held;
     let elapsed = match app.panes.stories.paused {
         Some(at) => at.duration_since(since),
@@ -883,12 +892,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     }
     match menu_choice {
         Some("info") => app.panes.stories.info_of = Some(story.id),
-        Some("delete") => {
-            app.send(Command::DeleteStory { id: story.id });
-            app.panes.stories.viewer = None;
-            app.panes.stories.player = None;
-            return;
-        }
+        Some("delete") => app.panes.stories.confirm_delete = Some(story.id),
         Some("hide") => app.panes.stories.confirm_hide = Some(story.id),
         Some("chat") => {
             let chat = story.group.clone().or_else(|| story.author.as_ref().map(|a| ConversationId::direct(a)));
@@ -940,7 +944,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     if next_hit.clicked() || (keys.1 && !replying) || (finished && !paused) {
         go = Some(1);
     }
-    if close_hit.clicked() || (keys.2 && app.panes.stories.picker.is_none() && app.panes.stories.views_of.is_none() && app.panes.stories.info_of.is_none() && app.panes.stories.confirm_hide.is_none()) {
+    if close_hit.clicked() || (keys.2 && app.panes.stories.picker.is_none() && app.panes.stories.views_of.is_none() && app.panes.stories.info_of.is_none() && app.panes.stories.confirm_hide.is_none() && app.panes.stories.confirm_delete.is_none()) {
         app.panes.stories.viewer = None;
         app.panes.stories.player = None;
         app.panes.stories.paused = None;
@@ -1260,8 +1264,41 @@ fn reply_row(app: &mut App, ui: &mut Ui, palette: &Palette, story: i64, r: &lang
     }
 }
 
+/// Desktop's "Delete this story?" and the list's "Hide story?".
+fn story_confirms(app: &mut App, ui: &mut Ui) {
+    use crate::dialog::{Choice, Variant, confirm};
+    if let Some(id) = app.panes.stories.confirm_delete {
+        let ended = app.panes.stories.list.iter().find(|s| s.id == id).and_then(|s| s.group.as_ref()).and_then(|g| app.conversation(g)).is_some_and(|g| g.ended);
+        let body = if ended { tr("Delete this story? It will only be deleted for you because the group has ended.") } else { tr("Delete this story? It will also be deleted for everyone who received it.") };
+        match confirm(ui.ctx(), egui::Id::unique("delete-story"), "", body, tr("Delete"), Variant::StrongDestructive) {
+            Some(Choice::Action) => {
+                app.panes.stories.confirm_delete = None;
+                app.send(Command::DeleteStory { id });
+                if app.panes.stories.viewer.is_some() {
+                    app.panes.stories.viewer = None;
+                    app.panes.stories.player = None;
+                }
+            }
+            Some(Choice::Cancel) => app.panes.stories.confirm_delete = None,
+            None => {}
+        }
+    }
+    if let Some((chat, name)) = app.panes.stories.confirm_hide_chat.clone() {
+        let body = crate::i18n::tf("icu:StoryListItem__hide-modal--body", &format!("Hide story? New story updates from {name} won\u{2019}t appear at the top of the stories list anymore."), &[("name", crate::i18n::Arg::from(&name))]);
+        match confirm(ui.ctx(), egui::Id::unique("hide-story-list"), "", &body, tr("Hide"), Variant::StrongPrimary) {
+            Some(Choice::Action) => {
+                app.panes.stories.confirm_hide_chat = None;
+                app.send(Command::SetChat { conversation: chat, change: langis_core::ChatChange::HideStory(true) });
+            }
+            Some(Choice::Cancel) => app.panes.stories.confirm_hide_chat = None,
+            None => {}
+        }
+    }
+}
+
 /// The composer and privacy dialogs.
 pub fn overlays(app: &mut App, ui: &mut Ui) {
+    story_confirms(app, ui);
     composer(app, ui);
     privacy(app, ui);
     list_editor(app, ui);
@@ -1715,7 +1752,8 @@ fn privacy(app: &mut App, ui: &mut Ui) {
                 ui.label(format!("{} ({})", l.name, l.members.len()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button(tr("Delete")).clicked() {
-                        app.send(Command::DeleteStoryList { id: l.id.clone() });
+                        let body = crate::i18n::tf("icu:StoriesSettings__delete-list--confirm", &format!("Are you sure you want to delete \u{201c}{}\u{201d}? Updates shared to this story will also be deleted.", l.name), &[("name", crate::i18n::Arg::from(&l.name))]);
+                        crate::panes::ask(app, "", body, tr("Delete"), true, vec![Command::DeleteStoryList { id: l.id.clone() }]);
                     }
                     if ui.small_button(tr("Edit")).clicked() {
                         app.panes.stories.editing = Some(l.clone());

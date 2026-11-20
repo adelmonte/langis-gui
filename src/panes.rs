@@ -97,6 +97,9 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// A confirmation that sends its commands on yes (Desktop's many
+    /// "…?" dialogs before an action).
+    pub pending_confirm: Option<PendingConfirm>,
     /// Desktop's ContactSpoofingReviewDialog for this chat.
     pub collision_review: Option<ConversationId>,
     /// Chats whose same-name warning was closed.
@@ -450,6 +453,7 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     size_limit_dialog(app, ui);
     avatar_lightbox(app, ui);
     crate::collisions::review_dialog(app, ui);
+    pending_confirm(app, ui);
 }
 
 /// Desktop's `AvatarLightbox`: the photo large over a dark window; a click
@@ -1312,6 +1316,41 @@ pub fn round_check(ui: &Ui, palette: &Palette, center: Pos2, on: bool) {
     }
 }
 
+#[derive(Clone)]
+pub struct PendingConfirm {
+    pub title: String,
+    pub body: String,
+    pub action: String,
+    pub destructive: bool,
+    pub commands: Vec<Command>,
+    /// A lobby to open after (leaving one call for another).
+    pub then_lobby: Option<(ConversationId, bool)>,
+}
+
+/// Asks before sending `commands`.
+pub fn ask(app: &mut App, title: impl Into<String>, body: impl Into<String>, action: impl Into<String>, destructive: bool, commands: Vec<Command>) {
+    app.panes.pending_confirm = Some(PendingConfirm { title: title.into(), body: body.into(), action: action.into(), destructive, commands, then_lobby: None });
+}
+
+fn pending_confirm(app: &mut App, ui: &Ui) {
+    let Some(p) = app.panes.pending_confirm.clone() else { return };
+    let variant = if p.destructive { crate::dialog::Variant::StrongDestructive } else { crate::dialog::Variant::StrongPrimary };
+    match crate::dialog::confirm(ui.ctx(), egui::Id::unique("pending-confirm"), &p.title, &p.body, &p.action, variant) {
+        Some(crate::dialog::Choice::Action) => {
+            app.panes.pending_confirm = None;
+            for c in p.commands {
+                app.send(c);
+            }
+            if let Some((conversation, video)) = p.then_lobby {
+                app.call = None;
+                open_lobby(app, conversation, video);
+            }
+        }
+        Some(crate::dialog::Choice::Cancel) => app.panes.pending_confirm = None,
+        None => {}
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum SizeLimit {
     Recommended(usize),
@@ -1975,7 +2014,15 @@ pub fn open_lobby(app: &mut App, conversation: ConversationId, video: bool) {
         if call.conversation == conversation {
             app.call_view.pip = false;
         } else {
-            app.toast("You are already in a call");
+            // Desktop's ConfirmLeaveCallModal.
+            app.panes.pending_confirm = Some(PendingConfirm {
+                title: tr("Leave the current call?").into(),
+                body: tr("You must leave the current call before starting or joining a new call.").into(),
+                action: tr("Leave call").into(),
+                destructive: true,
+                commands: vec![Command::HangUp],
+                then_lobby: Some((conversation, video)),
+            });
         }
         return;
     }

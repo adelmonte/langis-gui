@@ -93,7 +93,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     if let Some(which) = confirm {
         // `ContactModal`'s confirmations, over it.
         let (title, body, action) = match which {
-            Confirm::Admin if is_admin => (crate::i18n::tf("icu:ContactModal--rm-admin-info", &format!("Remove {name} as group admin?"), &[("contact", crate::i18n::Arg::from(&name))]), String::new(), tr("Remove as admin")),
+            Confirm::Admin if is_admin => {
+                // Desktop: with admin-only labels, losing admin loses the label.
+                let labelled = group.as_ref().is_some_and(|g| g.group_state.labels_admins_only && g.member_labels.contains_key(&aci));
+                let body = if labelled { tr("This will also clear their member label.").to_owned() } else { String::new() };
+                (crate::i18n::tf("icu:ContactModal--rm-admin-info", &format!("Remove {name} as group admin?"), &[("contact", crate::i18n::Arg::from(&name))]), body, tr("Remove as admin"))
+            }
             Confirm::Admin => (String::new(), crate::i18n::tf("icu:ContactModal--make-admin-info", &format!("{name} will be able to edit this group and its members."), &[("contact", crate::i18n::Arg::from(&name))]), tr("Make admin")),
             Confirm::Remove => (String::new(), format!("Remove \"{name}\" from the group?"), tr("Remove from group")),
         };
@@ -267,8 +272,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
             return;
         }
-        Do::MuteInCall(demux_id) => app.send(Command::RemoteMute { demux_id }),
-        Do::RemoveFromCall(demux_id) => app.send(Command::RemoveFromCall { demux_id }),
+        Do::MuteInCall(demux_id) => {
+            let body = crate::i18n::tf("icu:ContactModal--confirm-mute-body", &format!("Are you sure you want to mute {name}?"), &[("contact", crate::i18n::Arg::from(&name))]);
+            app.panes.contact = None;
+            crate::panes::ask(app, "", body, tr("Mute"), false, vec![Command::RemoteMute { demux_id }]);
+            return;
+        }
+        Do::RemoveFromCall(demux_id) => {
+            let body = crate::i18n::tf("icu:CallingAdhocCallInfo__RemoveClientDialogBody", &format!("Remove {name} from the call?"), &[("name", crate::i18n::Arg::from(&name))]);
+            app.panes.contact = None;
+            crate::panes::ask(app, "", body, tr("Remove"), true, vec![Command::RemoveFromCall { demux_id }]);
+            return;
+        }
         Do::Confirm(which) => {
             if let Some(c) = app.panes.contact.as_mut() {
                 c.confirm = Some(which);

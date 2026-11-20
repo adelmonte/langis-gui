@@ -157,7 +157,9 @@ pub fn review_dialog(app: &mut App, ui: &mut Ui) {
                     for sid in set {
                         person(app, ui, &palette, &sid);
                         if admin && ui.add(egui::Button::new(RichText::new(tr("Remove from group")).color(palette.destructive).font(theme::medium(13.))).frame(false)).clicked() {
-                            app.send(Command::RemoveFromGroup { conversation: c.id.clone(), service_id: sid.clone() });
+                            let who = app.name(&sid);
+                            let body = crate::i18n::tf("icu:RemoveGroupMemberConfirmation__description", &format!("Remove \u{201c}{who}\u{201d} from the group?"), &[("name", crate::i18n::Arg::from(&who))]);
+                            crate::panes::ask(app, "", body, crate::i18n::tr("Remove"), true, vec![Command::RemoveFromGroup { conversation: c.id.clone(), service_id: sid.clone() }]);
                         }
                     }
                 }

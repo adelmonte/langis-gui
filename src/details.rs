@@ -3,7 +3,7 @@
 //! requests, the disappearing timer, mute, block, safety numbers, the
 //! nickname, and leaving or deleting.
 
-use egui::{CornerRadius, RichText, Ui};
+use egui::{Rect, Sense, Vec2, CornerRadius, RichText, Ui};
 use langis_core::group_admin::{LinkChange, Permission};
 use langis_core::{ChatChange, Command, SafetyNumber};
 use langis_store::{ContactNickname, Conversation, ConversationId, ConversationKind};
@@ -892,105 +892,114 @@ fn share_link_dialogs(app: &mut App, ui: &mut Ui, url: &str, c: &Conversation) {
     }
 }
 
+/// Desktop's `PendingInvites`: tabs for Requests and Invites; a request
+/// with Approve and Deny (asked first), invites ours one by one and others'
+/// by who sent them, each revoked after asking.
 fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
+    use crate::i18n::{Arg, tf};
     let admin = c.admins.contains(&app.aci);
     let state = c.group_state.clone();
-    ui.label(RichText::new("Requests").font(theme::semibold(14.)));
-    ui.add_space(6.);
-    section(ui, palette, |ui| {
-        if state.requests.is_empty() {
-            body(ui, palette, "No pending requests.");
-        }
-        for r in &state.requests {
-            let name = app.name(&r.aci);
-            ui.horizontal(|ui| {
-                crate::panes::contact_row(ui, palette, &name, None, 2, None);
-            });
-            if admin {
-                ui.horizontal(|ui| {
-                    ui.add_space(56.);
-                    // Desktop asks before either (`PendingRequests` confirmations).
-                    if widgets::pill_button(ui, "Approve", true).clicked()
-                        && let Some(d) = app.panes.details.as_mut()
-                    {
-                        d.answer_request = Some((r.aci.clone(), true));
-                    }
-                    if widgets::pill_button(ui, "Deny", false).clicked()
-                        && let Some(d) = app.panes.details.as_mut()
-                    {
-                        d.answer_request = Some((r.aci.clone(), false));
-                    }
-                });
+    let tab_id = egui::Id::unique(("requests-tab", c.id.0.as_str()));
+    let mut tab: usize = ui.ctx().data(|d| d.get_temp(tab_id)).unwrap_or(if state.requests.is_empty() && !state.invites.is_empty() { 1 } else { 0 });
+    ui.horizontal(|ui| {
+        let half = ui.available_width() / 2.;
+        let labels = [
+            tf("icu:PendingInvites--tab-requests", &format!("Requests ({})", state.requests.len()), &[("count", Arg::from(state.requests.len()))]),
+            tf("icu:PendingInvites--tab-invites", &format!("Invites ({})", state.invites.len()), &[("count", Arg::from(state.invites.len()))]),
+        ];
+        for (i, label) in labels.iter().enumerate() {
+            let (r, hit) = ui.allocate_exact_size(Vec2::new(half - 4., 36.), Sense::click());
+            let on = tab == i;
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, label, theme::semibold(14.), if on { palette.text } else { palette.text_secondary });
+            if on {
+                ui.painter().hline(r.x_range().shrink(half / 4.), r.bottom() - 1., egui::Stroke::new(2., palette.text));
+            }
+            if hit.clicked() {
+                tab = i;
             }
         }
     });
-    if let Some((aci, approve)) = app.panes.details.as_ref().and_then(|d| d.answer_request.clone()) {
-        use crate::dialog::{Answer, Variant};
-        let name = app.name(&aci);
-        let (title, action, variant) = if approve {
-            (format!("Add \u{201c}{name}\u{201d} to the group?"), "Add to group", Variant::StrongPrimary)
-        } else {
-            (format!("Deny the request from \u{201c}{name}\u{201d}?"), "Deny request", Variant::StrongDestructive)
-        };
-        let body_text = if approve { "" } else { "They won't be able to ask to join with the group link again." };
-        match crate::dialog::show(ui.ctx(), egui::Id::unique("answer-join-request"), &title, body_text, Some(tr("Cancel")), &[(action, variant)]) {
-            Some(Answer::Action(_)) => {
-                app.send(Command::AnswerJoinRequest { conversation: c.id.clone(), member: aci, approve });
-                if let Some(d) = app.panes.details.as_mut() {
-                    d.answer_request = None;
+    ui.ctx().data_mut(|d| d.insert_temp(tab_id, tab));
+    ui.add_space(10.);
+    // An icon button for a row's end.
+    let icon = |ui: &mut Ui, rect: Rect, symbol: &str, tip: &str| -> bool {
+        let hit = ui.interact(rect, ui.scope_id().with((symbol, rect.min.x as i32, rect.min.y as i32)), Sense::click());
+        ui.painter().circle_filled(rect.center(), 15., if hit.hovered() { palette.fill_pressed } else { palette.fill });
+        theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., palette.text);
+        hit.on_hover_text(tip).clicked()
+    };
+    if tab == 0 {
+        section(ui, palette, |ui| {
+            for r in &state.requests {
+                let name = app.name(&r.aci);
+                let row = crate::panes::contact_row(ui, palette, &name, None, 2, None);
+                if admin {
+                    let deny = Rect::from_center_size(egui::pos2(row.rect.right() - 22., row.rect.center().y), Vec2::splat(30.));
+                    let approve = deny.translate(Vec2::new(-38., 0.));
+                    if icon(ui, approve, "check", tr("Approve Request")) {
+                        let title = tf("icu:PendingRequests--approve-for", &format!("Approve request from \u{201c}{name}\u{201d}?"), &[("name", Arg::from(&name))]);
+                        crate::panes::ask(app, "", title, tr("Approve Request"), false, vec![Command::AnswerJoinRequest { conversation: c.id.clone(), member: r.aci.clone(), approve: true }]);
+                    }
+                    if icon(ui, deny, "x", tr("Deny Request")) {
+                        let title = if state.link.is_some() {
+                            tf("icu:PendingRequests--deny-for--with-link", &format!("Deny request from \u{201c}{name}\u{201d}? They will not be able to request to join via the group link again."), &[("name", Arg::from(&name))])
+                        } else {
+                            tf("icu:PendingRequests--deny-for", &format!("Deny request from \u{201c}{name}\u{201d}?"), &[("name", Arg::from(&name))])
+                        };
+                        crate::panes::ask(app, "", title, tr("Deny Request"), true, vec![Command::AnswerJoinRequest { conversation: c.id.clone(), member: r.aci.clone(), approve: false }]);
+                    }
                 }
             }
-            Some(Answer::Cancel) => {
-                if let Some(d) = app.panes.details.as_mut() {
-                    d.answer_request = None;
-                }
-            }
-            None => {}
-        }
+        });
+        let info = tf("icu:PendingRequests--info", &format!("People on this list are attempting to join \u{201c}{}\u{201d} via the group link.", c.title), &[("name", Arg::from(&c.title))]);
+        body(ui, palette, &info);
+        return;
     }
-    // Desktop's `PendingInvites`: ours one by one, others' by who invited.
     let (ours, theirs): (Vec<_>, Vec<_>) = state.invites.iter().partition(|i| i.by == app.aci);
-    ui.label(RichText::new(tr("Invited by you")).font(theme::semibold(14.)));
-    ui.add_space(6.);
-    section(ui, palette, |ui| {
-        if ours.is_empty() {
-            body(ui, palette, "No one invited by you.");
-        }
-        for invite in &ours {
-            let name = app.name(&invite.service_id);
-            let response = crate::panes::contact_row(ui, palette, &name, None, 5, None);
-            crate::menu::context(ui, &response, egui::Id::unique("invite-menu").with(&invite.service_id), |m| {
-                if m.item(Some("x-circle"), "Revoke invite") {
-                    app.send(Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: vec![invite.service_id.clone()] });
+    if !ours.is_empty() {
+        ui.label(RichText::new(tr("Invited by you")).font(theme::semibold(14.)));
+        ui.add_space(6.);
+        section(ui, palette, |ui| {
+            for invite in &ours {
+                let name = app.name(&invite.service_id);
+                let row = crate::panes::contact_row(ui, palette, &name, None, 5, None);
+                let x = Rect::from_center_size(egui::pos2(row.rect.right() - 22., row.rect.center().y), Vec2::splat(30.));
+                if icon(ui, x, "x", tr("Revoke group invite")) {
+                    let title = tf("icu:PendingInvites--revoke-for", &format!("Revoke group invite for \u{201c}{name}\u{201d}?"), &[("name", Arg::from(&name))]);
+                    crate::panes::ask(app, "", title, tr("Revoke"), true, vec![Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: vec![invite.service_id.clone()] }]);
                 }
-            });
-        }
-    });
-    ui.label(RichText::new("Invited by other members").font(theme::semibold(14.)));
-    ui.add_space(6.);
-    section(ui, palette, |ui| {
-        if theirs.is_empty() {
-            body(ui, palette, "No one invited by others.");
-        }
-        let mut inviters: Vec<&str> = theirs.iter().map(|i| i.by.as_str()).collect();
-        inviters.sort_unstable();
-        inviters.dedup();
-        for by in inviters {
-            let invitees: Vec<String> = theirs.iter().filter(|i| i.by == by).map(|i| i.service_id.clone()).collect();
-            let who = app.name(by);
-            let count = if invitees.len() == 1 { "1 invite".to_owned() } else { format!("{} invites", invitees.len()) };
-            let response = crate::panes::contact_row(ui, palette, &who, Some(&count), 5, None);
-            if admin {
-                crate::menu::context(ui, &response, egui::Id::unique("invites-by-menu").with(by), |m| {
-                    let label = if invitees.len() == 1 { "Revoke invite".to_owned() } else { format!("Revoke {} invites", invitees.len()) };
-                    if m.item(Some("x-circle"), &label) {
-                        app.send(Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: invitees.clone() });
-                    }
-                });
             }
-        }
-    });
-    body(ui, palette, "Details of people invited to this group aren't shown until they join. Invitees will only see messages after they join the group.");
+        });
+    }
+    if !theirs.is_empty() {
+        ui.label(RichText::new(tr("Invited by others")).font(theme::semibold(14.)));
+        ui.add_space(6.);
+        section(ui, palette, |ui| {
+            let mut inviters: Vec<&str> = theirs.iter().map(|i| i.by.as_str()).collect();
+            inviters.sort_unstable();
+            inviters.dedup();
+            for by in inviters {
+                let invitees: Vec<String> = theirs.iter().filter(|i| i.by == by).map(|i| i.service_id.clone()).collect();
+                let who = app.name(by);
+                let count = tf("icu:PendingInvites--invited-count", &format!("Invited {}", invitees.len()), &[("number", Arg::from(invitees.len()))]);
+                let row = crate::panes::contact_row(ui, palette, &who, Some(&count), 5, None);
+                if admin {
+                    let x = Rect::from_center_size(egui::pos2(row.rect.right() - 22., row.rect.center().y), Vec2::splat(30.));
+                    if icon(ui, x, "x", tr("Revoke group invite")) {
+                        let n = invitees.len();
+                        let english = if n == 1 { format!("Revoke 1 invite sent by \u{201c}{who}\u{201d}?") } else { format!("Revoke {n} invites sent by \u{201c}{who}\u{201d}?") };
+                        let title = tf("icu:PendingInvites--revoke-from", &english, &[("number", Arg::from(n)), ("name", Arg::from(&who))]);
+                        crate::panes::ask(app, "", title, tr("Revoke"), true, vec![Command::RevokeGroupInvites { conversation: c.id.clone(), invitees: invitees.clone() }]);
+                    }
+                }
+            }
+        });
+    }
+    if state.invites.is_empty() {
+        body(ui, palette, tr("No pending invites"));
+        ui.add_space(8.);
+    }
+    body(ui, palette, tr("Details about people invited to this group aren\u{2019}t shown until they join. Invitees will only see messages after they join the group."));
 }
 
 fn permissions(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) {
@@ -1080,7 +1089,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         let mut answer = None;
         let closed = modal(ui, "nickname", 380., |ui| {
             title(ui, tr("Nickname"));
-            body(ui, palette, "Nicknames and notes are stored with Signal and end-to-end encrypted. They are only visible to you.");
+            body(ui, palette, tr("Nicknames & notes are stored with Signal and end-to-end encrypted. They are only visible to you."));
             ui.add_space(8.);
             widgets::text_field(ui, &mut nick.given, tr("First name"), false);
             ui.add_space(6.);
@@ -1092,7 +1101,14 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         let leave = crate::panes::discard_guard(ui.ctx(), "nickname", &nick, answer == Some(1) || (closed && answer.is_none()), matches!(answer, Some(0 | 2)));
         match answer {
             Some(0) => app.send(Command::SetNickname { conversation: c.id.clone(), nickname: nick }),
-            Some(2) => app.send(Command::SetNickname { conversation: c.id.clone(), nickname: ContactNickname::default() }),
+            Some(2) => crate::panes::ask(
+                app,
+                tr("Delete nickname?"),
+                tr("This will permanently delete this nickname and note."),
+                tr("Delete"),
+                true,
+                vec![Command::SetNickname { conversation: c.id.clone(), nickname: ContactNickname::default() }],
+            ),
             _ if leave => {}
             _ => d.nickname = Some(nick),
         }
