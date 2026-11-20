@@ -131,9 +131,13 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
         let ringing = call.incoming && call.status == CallStatus::Ringing;
         if ringing {
             if pressed(ctx, ALT_SHIFT, Key::V) {
-                app.send(Command::AcceptCall { video: true });
+                if crate::permissions::allowed(app, crate::permissions::Need::Answer(true)) {
+                    app.send(Command::AcceptCall { video: true });
+                }
             } else if pressed(ctx, ALT_SHIFT, Key::A) {
-                app.send(Command::AcceptCall { video: false });
+                if crate::permissions::allowed(app, crate::permissions::Need::Answer(false)) {
+                    app.send(Command::AcceptCall { video: false });
+                }
             } else if pressed(ctx, ALT_SHIFT, Key::D) {
                 app.send(Command::DeclineCall);
             }
@@ -151,8 +155,10 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
                 }
                 if pressed(ctx, Modifiers::SHIFT, Key::V) {
                     let on = !app.call_view.video_on.unwrap_or(call.video);
-                    app.call_view.video_on = Some(on);
-                    app.send(Command::SetCallVideo(on));
+                    if !on || crate::permissions::allowed(app, crate::permissions::Need::Camera) {
+                        app.call_view.video_on = Some(on);
+                        app.send(Command::SetCallVideo(on));
+                    }
                 }
                 // Desktop's Shift+P: the self-view large or small.
                 if pressed(ctx, Modifiers::SHIFT, Key::P) {

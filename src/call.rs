@@ -155,15 +155,15 @@ pub fn incoming_bar(app: &mut App, ui: &mut Ui) {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 24.;
                             if call.video {
-                                if round_button(ui, Icon::VideoFillLight, palette.green, tr("Answer call")).clicked() {
+                                if round_button(ui, Icon::VideoFillLight, palette.green, tr("Answer call")).clicked() && crate::permissions::allowed(app, crate::permissions::Need::Answer(true)) {
                                     app.call_view.video_on = Some(true);
                                     app.send(Command::AcceptCall { video: true });
                                 }
-                                if round_button(ui, Icon::VideoSlashFillLight, theme::rgb(0x878787), tr("Answer call without video")).clicked() {
+                                if round_button(ui, Icon::VideoSlashFillLight, theme::rgb(0x878787), tr("Answer call without video")).clicked() && crate::permissions::allowed(app, crate::permissions::Need::Answer(false)) {
                                     app.call_view.video_on = Some(false);
                                     app.send(Command::AcceptCall { video: false });
                                 }
-                            } else if round_button(ui, Icon::PhoneFill, palette.green, tr("Answer call")).clicked() {
+                            } else if round_button(ui, Icon::PhoneFill, palette.green, tr("Answer call")).clicked() && crate::permissions::allowed(app, crate::permissions::Need::Answer(false)) {
                                 app.call_view.video_on = Some(false);
                                 app.send(Command::AcceptCall { video: false });
                             }
@@ -716,7 +716,7 @@ pub fn pip(app: &mut App, ctx: &egui::Context) {
             }
         }
     });
-    if toggle_video {
+    if toggle_video && (video_on || crate::permissions::allowed(app, crate::permissions::Need::Camera)) {
         app.call_view.video_on = Some(!video_on);
         app.send(Command::SetCallVideo(!video_on));
     }
@@ -945,7 +945,7 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
     }
 
     match clicked {
-        Some("video") => {
+        Some("video") if video_on || crate::permissions::allowed(app, crate::permissions::Need::Camera) => {
             app.call_view.video_on = Some(!video_on);
             app.send(Command::SetCallVideo(!video_on));
         }

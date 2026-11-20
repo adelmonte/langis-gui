@@ -640,6 +640,17 @@ fn general(app: &mut App, ui: &mut Ui) {
             }
         }
     });
+    // Desktop's Permissions.
+    axo_list::gap(ui);
+    axo_list::list(ui, Some(tr("Permissions")), None, |ui| {
+        let (mut mic, mut camera) = app.media_perms;
+        if axo_list::switch(ui, Item::new(tr("Allow access to the microphone")), &mut mic) {
+            crate::permissions::set_mic(app, mic);
+        }
+        if axo_list::switch(ui, Item::new(tr("Allow access to the camera")), &mut camera) {
+            crate::permissions::set_camera(app, camera);
+        }
+    });
     // Desktop's Help menu (Debug Log, About), here in Settings.
     axo_list::gap(ui);
     axo_list::list(ui, Some(tr("Help")), None, |ui| {

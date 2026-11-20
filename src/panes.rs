@@ -120,6 +120,8 @@ pub struct Panes {
     pub pending_confirm: Option<PendingConfirm>,
     /// Desktop's ContactSpoofingReviewDialog for this chat.
     pub collision_review: Option<ConversationId>,
+    /// Desktop's `PermissionsPopup`, asking for what's needed.
+    pub permission_ask: Option<crate::permissions::Need>,
     /// Desktop's `SignalConnectionsModal`.
     pub connections_modal: bool,
     /// Chats whose same-name warning was closed.
@@ -491,6 +493,7 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     size_limit_dialog(app, ui);
     avatar_lightbox(app, ui);
     crate::collisions::review_dialog(app, ui);
+    crate::permissions::popup(app, ui.ctx());
     pending_confirm(app, ui);
     admins_dialog(app, ui);
     accepted_options(app, ui);
@@ -1990,7 +1993,12 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     let full = lobby.max_devices.is_some_and(|max| users.len() as u32 >= max);
     // The camera runs for the preview while it's on (langis's SetCallVideo
     // works before a call, for the lobby).
-    if video != preview {
+    if video && !preview && !crate::permissions::allowed(app, crate::permissions::Need::Camera) {
+        // Asked first; the camera stays off meanwhile.
+        if let Some(l) = app.panes.lobby.as_mut() {
+            l.video = false;
+        }
+    } else if video != preview {
         app.send(Command::SetCallVideo(video));
         if let Some(l) = app.panes.lobby.as_mut() {
             l.preview = video;
@@ -2197,6 +2205,9 @@ pub fn open_lobby(app: &mut App, conversation: ConversationId, video: bool) {
                 then_lobby: Some((conversation, video)),
             });
         }
+        return;
+    }
+    if !crate::permissions::allowed(app, crate::permissions::Need::Call(conversation.clone(), video)) {
         return;
     }
     if conversation.is_group() || conversation.as_call_link().is_some() {

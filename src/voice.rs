@@ -180,6 +180,9 @@ fn pump(from: &mut impl std::io::Read, mut to: ChildStdin, levels: &Mutex<Vec<f3
 }
 
 pub fn start(app: &mut App, chat: &mut ChatView) {
+    if !crate::permissions::allowed(app, crate::permissions::Need::VoiceMessage) {
+        return;
+    }
     match Recording::start() {
         Ok(recording) => chat.recording = Some(recording),
         Err(error) => app.toast(error),

@@ -130,6 +130,8 @@ pub struct App {
     /// system tray, Start minimized to tray).
     pub tray: Option<crate::tray::TrayIcon>,
     pub tray_prefs: (bool, bool),
+    /// Desktop's media permissions: microphone, camera.
+    pub media_perms: (bool, bool),
     /// The count and visibility the tray last showed, and whether the
     /// window's shown (hidden to the tray).
     tray_shown: (u32, bool),
@@ -276,6 +278,7 @@ impl App {
             title_shown: String::new(),
             tray: None,
             tray_prefs: (false, false),
+            media_perms: (args.demo, args.demo),
             tray_shown: (u32::MAX, true),
             window_shown: true,
             quitting: false,
@@ -618,12 +621,16 @@ impl App {
                     let tray = get(db.setting(crate::settings::SETTING_TRAY).await.ok().flatten()).unwrap_or(false);
                     let hide_menu_bar = get(db.setting(crate::menu_bar::SETTING_HIDE_MENU_BAR).await.ok().flatten()).unwrap_or(false);
                     let tray_start = get(db.setting(crate::settings::SETTING_TRAY_START).await.ok().flatten()).unwrap_or(false);
+                    let mic = get(db.setting(crate::permissions::SETTING_MIC).await.ok().flatten()).unwrap_or(false);
+                    let camera = get(db.setting(crate::permissions::SETTING_CAMERA).await.ok().flatten()).unwrap_or(false);
                     let badge_muted = get(db.setting(crate::settings::SETTING_BADGE_MUTED).await.ok().flatten()).unwrap_or(true);
                     let words: Vec<String> = db.setting(crate::spell::SETTING_SPELL_WORDS).await.ok().flatten().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
                     Some(Loaded::Apply(Box::new(move |app: &mut App| {
                         app.input = InputPrefs { auto_convert, formatting, skin_tone, spell };
                         app.badge_prefs = BadgePrefs { chats: badge_chats, muted: badge_muted };
                         app.tray_prefs = (tray, tray_start);
+                        // The demo has no real devices to guard.
+                        app.media_perms = (mic || app.demo, camera || app.demo);
                         app.hide_menu_bar = hide_menu_bar;
                         let ctx = app.ctx.clone();
                         app.set_tray(&ctx, tray);
