@@ -462,8 +462,35 @@ fn call_toasts(app: &mut App, ui: &Ui, area: Rect) {
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
 }
 
+/// While we present: Desktop's `CallingScreenSharingController`, "You're
+/// presenting to everyone." and Stop sharing, at the call's top center.
+/// Returns how much room it takes.
+fn presenting_bar(app: &mut App, ui: &Ui, area: Rect) -> f32 {
+    if !app.call.as_ref().is_some_and(|c| c.sharing) {
+        return 0.;
+    }
+    let white = egui::Color32::WHITE;
+    let text = ui.painter().layout_no_wrap("You're presenting to everyone.".into(), theme::regular(13.), white);
+    let button = ui.painter().layout_no_wrap("Stop sharing".into(), theme::semibold(13.), white);
+    let width = 16. + 16. + 8. + text.size().x + 16. + button.size().x + 24. + 12.;
+    let rect = Rect::from_center_size(Pos2::new(area.center().x, area.top() + 20. + 22.), Vec2::new(width, 44.));
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("presenting-bar")));
+    painter.rect_filled(rect, CornerRadius::same(10), theme::rgb(0x2e2e2e));
+    crate::icons::Icon::ShareScreenFillLight.paint(ui, Rect::from_center_size(Pos2::new(rect.left() + 24., rect.center().y), Vec2::splat(16.)), 16., white);
+    painter.galley(Pos2::new(rect.left() + 40., rect.center().y - text.size().y / 2.), text, white);
+    let stop = Rect::from_min_size(Pos2::new(rect.right() - 12. - button.size().x - 24., rect.center().y - 14.), Vec2::new(button.size().x + 24., 28.));
+    let r = ui.interact(stop, ui.scope_id().with("stop-sharing"), Sense::click());
+    painter.rect_filled(stop, CornerRadius::same(14), if r.hovered() { theme::rgb(0xd32f2f) } else { theme::rgb(0xf44336) });
+    painter.galley(stop.center() - button.size() / 2., button, white);
+    if r.clicked() {
+        app.send(Command::StopSharing);
+    }
+    52.
+}
+
 pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
-    call_toasts(app, ui, area);
+    let taken = presenting_bar(app, ui, area);
+    call_toasts(app, ui, Rect::from_min_max(area.min + Vec2::new(0., taken), area.max));
     let Some(call) = app.call.clone() else { return };
     if !call.group {
         return;
