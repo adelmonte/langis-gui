@@ -511,6 +511,9 @@ fn screenshots_fun() {
     let mut harness = demo_harness();
     open_chat(&mut harness, langis_store::ConversationKind::Direct);
     harness.state_mut().chat.as_mut().unwrap().emoji_open = true;
+    harness.state_mut().fun.tab = crate::fun::Tab::Emoji;
+    wait(&mut harness, "emoji", |_| true);
+    save(&mut harness, "fun-emoji");
     harness.state_mut().fun.tab = crate::fun::Tab::Stickers;
     wait(&mut harness, "stickers", |app| !app.fun.packs.is_empty());
     save(&mut harness, "fun-stickers");

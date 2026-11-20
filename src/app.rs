@@ -384,6 +384,12 @@ impl App {
 
     /// Takes in what came from the backend since the last frame.
     pub fn poll(&mut self) {
+        // A default skin tone chosen in an emoji picker, saved as Settings'.
+        if let Some(tone) = crate::emoji_picker::take_tone_change() {
+            self.input.skin_tone = tone;
+            let i = tone.map(|t| langis_emoji::SkinTone::ALL.iter().position(|x| *x == t).unwrap_or(0) + 1).unwrap_or(0);
+            crate::settings::write(self, crate::settings::SETTING_SKIN_TONE, i.to_string());
+        }
         if let Some(rx) = &self.started
             && let Ok(started) = rx.try_recv()
         {

@@ -54,6 +54,10 @@ pub struct Fun {
     pub recent_stickers: Vec<(Vec<u8>, u32)>,
     /// Showing the sticker Recents.
     sticker_recents: bool,
+    /// "Search stickers".
+    sticker_query: String,
+    /// A sticker taken out of Recents from its menu, to save.
+    forget_recent: Option<(Vec<u8>, u32)>,
     /// GIFs sent lately, newest first (Desktop's Recents), kept in the
     /// `ui.recent_gifs` setting.
     pub recent_gifs: Vec<(Gif, PathBuf)>,
@@ -129,22 +133,21 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
     }
     let mut picked = None;
     let mut send = None;
-    let size = Vec2::new(36. * 9. + 24., 452.);
+    // Desktop's FunPicker: 352 by 524, radius 8, the tabs 48px tall.
+    let size = Vec2::new(crate::emoji_picker::WIDTH, 524.);
     let area = egui::Area::new(egui::Id::unique("fun-picker"))
         .order(egui::Order::Foreground)
         .fixed_pos(Pos2::new(anchor.x, (anchor.y - size.y - 8.).max(8.)))
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(palette.popover)
-                .corner_radius(CornerRadius::same(12))
-                .stroke(Stroke::new(1., palette.border))
-                .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(50) })
-                .inner_margin(12)
+                .corner_radius(CornerRadius::same(8))
+                .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(if palette.dark { 90 } else { 50 }) })
+                .inner_margin(egui::Margin { left: 16, right: 16, top: 0, bottom: 12 })
                 .show(ui, |ui| {
-                    ui.set_width(size.x - 24.);
-                    ui.set_height(size.y - 24.);
+                    ui.set_width(size.x - 32.);
+                    ui.set_height(size.y - 12.);
                     tabs(ui, &palette, &mut fun.tab);
-                    ui.add_space(8.);
                     match fun.tab {
                         Tab::Emoji => picked = chat.emoji.body(ui, &app.recent_emoji),
                         Tab::Stickers => send = stickers(app, ui, &palette, &mut fun),
@@ -154,8 +157,17 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
         });
     let outside = ctx.input(|i| i.pointer.any_pressed())
         && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p) && !Rect::from_center_size(anchor, Vec2::splat(64.)).contains(p));
+    // A hold that ended without a click leaves nothing behind.
+    if ctx.input(|i| !i.pointer.any_down() && !i.pointer.any_released()) {
+        ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("fun-held")));
+    }
     let manager = fun.manager_open;
+    let forget = fun.forget_recent.take();
     app.fun = fun;
+    if let Some((pack, sticker)) = forget {
+        app.fun.recent_stickers.retain(|(p, s)| !(*p == pack && *s == sticker));
+        save_recent_stickers(app);
+    }
     if outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) || manager {
         chat.emoji_open = false;
     }
@@ -206,6 +218,11 @@ fn remember_sticker(app: &mut App, pack: &[u8], sticker: u32) {
     list.retain(|(p, s)| !(p == pack && *s == sticker));
     list.insert(0, (pack.to_vec(), sticker));
     list.truncate(RECENT_STICKERS);
+    save_recent_stickers(app);
+}
+
+fn save_recent_stickers(app: &mut App) {
+    let list = &app.fun.recent_stickers;
     let saved = serde_json::Value::Array(list.iter().map(|(p, s)| serde_json::json!({ "pack": p.iter().map(|b| format!("{b:02x}")).collect::<String>(), "sticker": s })).collect()).to_string();
     app.load(move |db| async move {
         let _ = db.set_setting("ui.recent_stickers", &saved).await;
@@ -252,7 +269,18 @@ fn recent_gifs(ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send> {
                     }
                 }
             }
-            if r.on_hover_text(&gif.title).clicked() {
+            if held(ui, &r) {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("fun-held"), true));
+                let file = path.to_string_lossy().into_owned();
+                let shape = Vec2::new(gif.preview.width.max(1) as f32, gif.preview.height.max(1) as f32);
+                lightbox(ui, |ui, big| {
+                    let fit = Rect::from_center_size(big.center(), shape * (big.width() / shape.x).min(big.height() / shape.y));
+                    if !crate::video::inline(ui, &file, fit, CornerRadius::same(12)) {
+                        ui.painter().rect_filled(fit, CornerRadius::same(12), Color32::from_gray(40));
+                    }
+                });
+            }
+            if r.on_hover_text(&gif.title).clicked() && !ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("fun-held"))).unwrap_or(false) {
                 send = Some(Send::Gif(gif.clone(), path.clone()));
             }
             heights[column] += h + 6.;
@@ -306,22 +334,44 @@ enum Send {
     Gif(Gif, PathBuf),
 }
 
+/// Desktop's `FunTabs`: the three, centered in a 48px row.
 fn tabs(ui: &mut Ui, palette: &Palette, tab: &mut Tab) {
-    ui.horizontal(|ui| {
+    let labels = [(Tab::Emoji, "Emoji"), (Tab::Stickers, "Stickers"), (Tab::Gifs, "GIFs")];
+    let widths: Vec<f32> = labels.iter().map(|(_, l)| ui.painter().layout_no_wrap((*l).to_owned(), theme::medium(13.), palette.text).size().x + 24.).collect();
+    let inner: f32 = widths.iter().sum::<f32>() + 4. * (labels.len() - 1) as f32;
+    ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 48.), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_height(48.);
+        ui.add_space(((ui.available_width() - inner) / 2.).max(0.));
         ui.spacing_mut().item_spacing.x = 4.;
-        for (t, label) in [(Tab::Emoji, "Emoji"), (Tab::Stickers, "Stickers"), (Tab::Gifs, "GIFs")] {
+        for (t, label) in labels {
             let galley = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(13.), palette.text);
-            let (rect, r) = ui.allocate_exact_size(Vec2::new(galley.size().x + 24., 30.), Sense::click());
+            let (rect, r) = ui.allocate_exact_size(Vec2::new(galley.size().x + 24., 28.), Sense::click());
             let on = *tab == t;
             if on || r.hovered() {
-                ui.painter().rect_filled(rect, CornerRadius::same(15), if on { palette.fill_pressed } else { palette.fill });
+                ui.painter().rect_filled(rect, CornerRadius::same(14), if on { palette.fill_pressed } else { palette.fill });
             }
-            ui.painter().galley(rect.center() - galley.size() / 2., galley, palette.text);
+            ui.painter().galley(rect.center() - galley.size() / 2., galley, if on { palette.text } else { palette.text_secondary });
             if r.clicked() {
                 *tab = t;
             }
         }
     });
+}
+
+/// Desktop's `FunLightbox`: pressing and holding a sticker or GIF shows
+/// it large until let go (and then it isn't sent). True while it shows.
+fn held(ui: &Ui, r: &egui::Response) -> bool {
+    r.is_pointer_button_down_on() && ui.input(|i| i.pointer.press_start_time().is_some_and(|t| i.time - t > 0.4))
+}
+
+fn lightbox(ui: &Ui, paint: impl FnOnce(&Ui, Rect)) {
+    let screen = ui.ctx().content_rect();
+    egui::Area::new(egui::Id::unique("fun-lightbox")).order(egui::Order::Tooltip).fixed_pos(screen.min).interactable(false).show(ui.ctx(), |ui| {
+        ui.painter().rect_filled(screen, 0, Color32::from_black_alpha(160));
+        let side = (screen.width().min(screen.height()) * 0.5).min(360.);
+        paint(ui, Rect::from_center_size(screen.center(), Vec2::splat(side)));
+    });
+    ui.ctx().request_repaint();
 }
 
 /// A sticker's image in `rect`.
@@ -340,7 +390,12 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
     if fun.pack.is_none() && fun.favorites.is_empty() && !fun.chose_pack {
         fun.pack = fun.packs.first().map(|p| p.id.clone());
     }
+    // Desktop's "Search stickers": by the emoji they stand for.
+    widgets::text_field(ui, &mut fun.sticker_query, "Search stickers", false);
+    ui.add_space(6.);
+    let query = fun.sticker_query.trim().to_owned();
     // The packs along the top: favorites, each installed pack, then "+".
+    if query.is_empty() {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.;
         // Desktop's Recents first, when there are any.
@@ -360,7 +415,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
         if favorites_on || r.hovered() {
             ui.painter().rect_filled(rect, CornerRadius::same(8), if favorites_on { palette.fill_pressed } else { palette.fill });
         }
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, "★", theme::regular(18.), palette.text);
+        theme::paint_symbol(ui.painter(), if favorites_on { "star-fill" } else { "star" }, rect.center(), 18., palette.text);
         if r.on_hover_text("Favorites").clicked() {
             fun.pack = None;
             fun.sticker_recents = false;
@@ -390,7 +445,19 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
         }
     });
     ui.add_space(6.);
+    }
     let shown: Vec<(Arc<StickerPackView>, StickerView)> = match &fun.pack {
+        _ if !query.is_empty() => {
+            let options = langis_emoji::SearchOptions { limit: 60, ..Default::default() };
+            let mut wanted: Vec<&str> = langis_emoji::search(&query, &options).into_iter().map(|m| m.emoji.glyph).collect();
+            wanted.push(query.as_str());
+            let strip = |e: &str| e.chars().filter(|c| !matches!(c, '\u{fe0f}' | '\u{fe0e}')).collect::<String>();
+            let wanted: Vec<String> = wanted.into_iter().map(strip).collect();
+            fun.packs
+                .iter()
+                .flat_map(|p| p.stickers.iter().filter(|s| s.emoji.as_deref().is_some_and(|e| wanted.contains(&strip(e)))).map(|s| (p.clone(), s.clone())))
+                .collect()
+        }
         // Recents: those still in an installed pack.
         _ if fun.sticker_recents => fun
             .recent_stickers
@@ -413,6 +480,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
             .collect(),
     };
     let title = match &fun.pack {
+        _ if !query.is_empty() => "Search results".to_owned(),
         _ if fun.sticker_recents => "Recents".to_owned(),
         Some(id) => fun.packs.iter().find(|p| &p.id == id).map(|p| p.title.clone()).unwrap_or_default(),
         None => "Favorites".to_owned(),
@@ -421,7 +489,13 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
     if shown.is_empty() {
         ui.add_space(40.);
         ui.vertical_centered(|ui| {
-            let text = if fun.pack.is_none() { "Stickers you favorite show up here." } else { "No stickers in this pack yet." };
+            let text = if !query.is_empty() {
+                "No results"
+            } else if fun.pack.is_none() {
+                "Stickers you favorite show up here."
+            } else {
+                "No stickers in this pack yet."
+            };
             ui.label(RichText::new(text).color(palette.text_secondary));
         });
         return None;
@@ -442,12 +516,33 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                     if favorite {
                         ui.painter().text(rect.right_top() + Vec2::new(-8., 6.), Align2::RIGHT_TOP, "★", theme::regular(13.), palette.badge);
                     }
-                    let tip = format!("{}  (right-click to {} favorites)", sticker.emoji.clone().unwrap_or_default(), if favorite { "remove from" } else { "add to" });
-                    let r = r.on_hover_text(tip);
-                    if r.secondary_clicked() {
-                        app.send(Command::SetStickerFavorite { pack_id: pack.id.clone(), pack_key: pack.key.clone(), sticker_id: sticker.id, favorite: !favorite });
+                    let r = r.on_hover_text(sticker.emoji.clone().unwrap_or_default());
+                    // Its menu: favorite it or not, its pack, out of Recents.
+                    let menu = egui::Id::unique(("sticker-menu", &pack.id, sticker.id));
+                    if r.secondary_clicked()
+                        && let Some(at) = r.interact_pointer_pos()
+                    {
+                        crate::menu::open_at(ui.ctx(), menu, at);
                     }
-                    if r.clicked() {
+                    crate::menu::show(ui.ctx(), menu, |m| {
+                        if m.item(Some(if favorite { "star-slash" } else { "star" }), if favorite { "Remove from favorites" } else { "Add to favorites" }) {
+                            app.send(Command::SetStickerFavorite { pack_id: pack.id.clone(), pack_key: pack.key.clone(), sticker_id: sticker.id, favorite: !favorite });
+                        }
+                        if !pack.title.is_empty() && m.item(Some("stickerpack"), "View sticker pack") {
+                            fun.sticker_query.clear();
+                            fun.pack = Some(pack.id.clone());
+                            fun.sticker_recents = false;
+                            fun.chose_pack = true;
+                        }
+                        if fun.sticker_recents && m.item(Some("x-circle"), "Remove from recents") {
+                            fun.forget_recent = Some((pack.id.clone(), sticker.id));
+                        }
+                    });
+                    if held(ui, &r) {
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("fun-held"), true));
+                        lightbox(ui, |ui, big| sticker_image(ui, &sticker.path, big));
+                    }
+                    if r.clicked() && !ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("fun-held"))).unwrap_or(false) {
                         send = Some(Send::Sticker(pack.clone(), sticker.clone()));
                     }
                 }
@@ -459,7 +554,7 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
 
 fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send> {
     let mut send = None;
-    let field = widgets::text_field(ui, &mut fun.gif_query, "Search GIPHY", false);
+    let field = widgets::text_field(ui, &mut fun.gif_query, "Search GIFs", false);
     if field.changed() {
         fun.gif_typed = Some(Instant::now());
     }
@@ -474,27 +569,55 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
         ui.ctx().request_repaint_after(GIF_DELAY);
     }
     ui.add_space(6.);
-    // Desktop's sections: Recents, Trending, then its categories, which
-    // are searches.
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(4., 4.);
-        let chip = |ui: &mut Ui, label: &str, on: bool| {
-            let fill = if on { palette.fill_pressed } else { palette.fill };
-            ui.add(egui::Button::new(RichText::new(label).font(theme::regular(12.))).fill(fill).corner_radius(CornerRadius::same(12))).clicked()
-        };
-        if !fun.recent_gifs.is_empty() && chip(ui, "Recents", fun.gif_recents) {
-            fun.gif_recents = true;
+    // Desktop's GIF sub-nav: Recents, Trending, then its categories (each
+    // a search), as icons.
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.;
+        let mut items: Vec<(&str, Option<&str>, &str, bool)> = Vec::new();
+        if !fun.recent_gifs.is_empty() {
+            items.push(("Recents", Some("recent"), "", fun.gif_recents));
         }
-        if chip(ui, "Trending", !fun.gif_recents && wanted.is_empty()) {
-            fun.gif_recents = false;
-            fun.gif_query.clear();
-            fun.gif_typed = None;
-        }
+        items.push(("Trending", Some("trending"), "", !fun.gif_recents && wanted.is_empty()));
         for (label, term) in GIF_CATEGORIES {
-            if chip(ui, label, !fun.gif_recents && wanted == term) {
-                fun.gif_recents = false;
-                fun.gif_query = term.to_owned();
-                fun.gif_typed = None;
+            let symbol = match term {
+                "love" => Some("heart"),
+                "thumbs up" => Some("thumbsup"),
+                "excited" => Some("face-excited"),
+                "sad" => Some("face-sad"),
+                "angry" => Some("face-angry"),
+                _ => None,
+            };
+            items.push((label, symbol, term, !fun.gif_recents && wanted == term));
+        }
+        let w = ui.available_width() / items.len() as f32;
+        for (label, symbol, term, on) in items {
+            let (rect, r) = ui.allocate_exact_size(Vec2::new(w, 32.), Sense::click());
+            let cell = Rect::from_center_size(rect.center(), Vec2::splat(30.));
+            if on || r.hovered() {
+                ui.painter().rect_filled(cell, CornerRadius::same(8), if on { palette.fill_pressed } else { palette.fill });
+            }
+            let color = if on { palette.text } else { palette.text_secondary };
+            match symbol {
+                Some(symbol) => theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., color),
+                None => {
+                    let glyph = if term == "celebrate" { "🎉" } else { "😮" };
+                    ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, theme::emoji(16.), palette.text);
+                }
+            }
+            if r.on_hover_text(label).clicked() {
+                match label {
+                    "Recents" => fun.gif_recents = true,
+                    "Trending" => {
+                        fun.gif_recents = false;
+                        fun.gif_query.clear();
+                        fun.gif_typed = None;
+                    }
+                    _ => {
+                        fun.gif_recents = false;
+                        fun.gif_query = term.to_owned();
+                        fun.gif_typed = None;
+                    }
+                }
             }
         }
     });
@@ -558,7 +681,18 @@ fn gifs(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<Send
             if r.hovered() {
                 ui.painter().rect_stroke(rect, CornerRadius::same(8), Stroke::new(2., palette.badge), egui::StrokeKind::Inside);
             }
-            if r.on_hover_text(&gif.title).clicked() {
+            if held(ui, &r) {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("fun-held"), true));
+                let file = path.to_string_lossy().into_owned();
+                let shape = Vec2::new(gif.preview.width.max(1) as f32, gif.preview.height.max(1) as f32);
+                lightbox(ui, |ui, big| {
+                    let fit = Rect::from_center_size(big.center(), shape * (big.width() / shape.x).min(big.height() / shape.y));
+                    if !crate::video::inline(ui, &file, fit, CornerRadius::same(12)) {
+                        ui.painter().rect_filled(fit, CornerRadius::same(12), Color32::from_gray(40));
+                    }
+                });
+            }
+            if r.on_hover_text(&gif.title).clicked() && !ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("fun-held"))).unwrap_or(false) {
                 send = Some(Send::Gif(gif.clone(), path.clone()));
             }
             heights[column] += h + 6.;
