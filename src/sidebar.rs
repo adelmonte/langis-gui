@@ -41,7 +41,8 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
             // Desktop hides the Stories tab while stories are off.
             if !app.panes.stories.disabled {
                 let unseen = crate::stories_unread(app);
-                let stories = tab_item(ui, &palette, if app.tab == Tab::Stories { Icon::StoriesFill } else { Icon::Stories }, app.tab == Tab::Stories, unseen);
+                let failed = app.panes.stories.list.iter().any(|s| s.author.is_none() && !s.failed.is_empty());
+                let stories = tab_item_error(ui, &palette, if app.tab == Tab::Stories { Icon::StoriesFill } else { Icon::Stories }, app.tab == Tab::Stories, unseen, failed);
                 if stories.on_hover_text(tr("Stories")).clicked() {
                     app.tab = Tab::Stories;
                 }
@@ -117,6 +118,11 @@ fn badge(ui: &Ui, palette: &Palette, rect: Rect, count: u32) {
 
 /// One nav tab: a 20px icon in a rounded 60x40 button.
 fn tab_item(ui: &mut Ui, palette: &Palette, icon: Icon, selected: bool, badge: u32) -> egui::Response {
+    tab_item_error(ui, palette, icon, selected, badge, false)
+}
+
+/// A nav tab with Desktop's error badge ("!") in place of the count.
+fn tab_item_error(ui: &mut Ui, palette: &Palette, icon: Icon, selected: bool, badge: u32, error: bool) -> egui::Response {
     let (outer, response) = ui.allocate_exact_size(Vec2::new(80., 44.), Sense::click());
     let rect = Rect::from_center_size(outer.center(), Vec2::new(60., 40.));
     if selected || response.hovered() {
@@ -124,7 +130,13 @@ fn tab_item(ui: &mut Ui, palette: &Palette, icon: Icon, selected: bool, badge: u
         ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
     }
     icon.paint(ui, rect, 20., palette.text);
-    self::badge(ui, palette, rect, badge);
+    if error {
+        let at = Rect::from_min_size(Pos2::new(rect.center().x, rect.center().y - 14.), Vec2::new(16., 16.));
+        ui.painter().rect_filled(at, CornerRadius::same(8), palette.destructive);
+        ui.painter().text(at.center(), egui::Align2::CENTER_CENTER, "!", theme::semibold(11.), egui::Color32::WHITE);
+    } else {
+        self::badge(ui, palette, rect, badge);
+    }
     response
 }
 

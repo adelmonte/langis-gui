@@ -602,10 +602,26 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                     ui.painter().rect_filled(row, CornerRadius::same(12), palette.fill);
                 }
                 story_thumb(ui, s, Rect::from_min_size(row.min + Vec2::new(10., 6.), Vec2::new(40., 72.)));
-                let views = if app.panes.stories.receipts { crate::i18n::tf("icu:MyStories__views", &format!("{} views", s.views.len()), &[("views", crate::i18n::Arg::from(&s.views.len()))]) } else { tr("Views off").to_owned() };
-                ui.painter().text(Pos2::new(row.left() + 64., row.top() + 22.), egui::Align2::LEFT_TOP, views, theme::semibold(14.), palette.text);
-                ui.painter().text(Pos2::new(row.left() + 64., row.top() + 44.), egui::Align2::LEFT_TOP, crate::format::short_timestamp(s.sent_at), theme::regular(12.), palette.text_secondary);
-                if r.clicked() {
+                // Desktop's send state: failed or partly, a click retries
+                // (once); otherwise views and time.
+                let retried_id = egui::Id::unique(("story-retried", s.id));
+                let retried = ui.ctx().data(|d| d.get_temp::<bool>(retried_id).unwrap_or(false));
+                let failed = (!s.failed.is_empty()).then(|| if s.failed.len() >= s.recipients.len().max(1) { tr("Send failed") } else { tr("Partially sent") });
+                if let Some(state) = failed {
+                    theme::paint_symbol(ui.painter(), "error", Pos2::new(row.left() + 72., row.top() + 31.), 16., palette.destructive);
+                    ui.painter().text(Pos2::new(row.left() + 84., row.top() + 22.), egui::Align2::LEFT_TOP, state, theme::semibold(14.), palette.destructive);
+                    if !retried {
+                        ui.painter().text(Pos2::new(row.left() + 64., row.top() + 44.), egui::Align2::LEFT_TOP, tr("Click to retry"), theme::regular(12.), palette.text_secondary);
+                    }
+                } else {
+                    let views = if app.panes.stories.receipts { crate::i18n::tf("icu:MyStories__views", &format!("{} views", s.views.len()), &[("views", crate::i18n::Arg::from(&s.views.len()))]) } else { tr("Views off").to_owned() };
+                    ui.painter().text(Pos2::new(row.left() + 64., row.top() + 22.), egui::Align2::LEFT_TOP, views, theme::semibold(14.), palette.text);
+                    ui.painter().text(Pos2::new(row.left() + 64., row.top() + 44.), egui::Align2::LEFT_TOP, crate::format::short_timestamp(s.sent_at), theme::regular(12.), palette.text_secondary);
+                }
+                if r.clicked() && failed.is_some() && !retried {
+                    ui.ctx().data_mut(|d| d.insert_temp(retried_id, true));
+                    app.send(Command::RetryStory { id: s.id });
+                } else if r.clicked() {
                     view = Some(i);
                 }
                 let menu = egui::Id::unique(("my-story-menu", s.id, section.as_str()));
@@ -1095,7 +1111,14 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     let mut open_picker = false;
     ui.scope_builder(egui::UiBuilder::new().max_rect(below), |ui| {
         ui.horizontal(|ui| {
-            if mine {
+            if mine && !story.failed.is_empty() && !ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique(("story-retried", story.id))).unwrap_or(false)) {
+                // Desktop's StoryViewer__actions__failed.
+                let text = if story.failed.len() >= story.recipients.len().max(1) { tr("Send failed. Click to retry") } else { tr("Partially sent. Click to retry") };
+                if ui.add(egui::Button::new(RichText::new(text).color(Color32::WHITE)).fill(Color32::from_rgba_unmultiplied(0xd0, 0x1c, 0x1c, 200)).corner_radius(CornerRadius::same(14))).clicked() {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(("story-retried", story.id)), true));
+                    app.send(Command::RetryStory { id: story.id });
+                }
+            } else if mine {
                 let views = story.views.len();
                 let receipts = app.panes.stories.receipts;
                 let text = if receipts { format!("{views} views · {} replies", story.replies.len()) } else { format!("Views off · {} replies", story.replies.len()) };
