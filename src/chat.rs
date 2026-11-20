@@ -1255,8 +1255,15 @@ fn message(
     });
 
     // Metadata: time, "Edited", status.
+    // Desktop's MessageMetadata: a send that didn't fully go says so in
+    // place of the time.
     let time = crate::format::message_time(m.sent_at);
-    let meta_text = if m.edited { format!("Edited  {time}") } else { time };
+    let status_in_meta = status_line(m);
+    let meta_text = match status_in_meta {
+        Some((text, _)) => text.to_owned(),
+        None if m.edited => format!("Edited  {time}"),
+        None => time,
+    };
     let meta = ui.painter().layout_no_wrap(meta_text, theme::regular(11.), Color32::PLACEHOLDER);
     let timer = expiry_left(m);
     if timer.is_some() {
@@ -1269,7 +1276,7 @@ fn message(
     let pinned = ctx.pinned.contains(&m.id);
     let pin_w = if pinned { 14. } else { 0. };
     let meta_w = meta.size().x + status_w + pin_w;
-    let show_meta = !collapsed_below || m.status == DeliveryStatus::Failed || next.is_some_and(|n| n.status != m.status);
+    let show_meta = !collapsed_below || status_in_meta.is_some() || next.is_some_and(|n| n.status != m.status);
 
     // Sticker: large, no bubble.
     if let Some(s) = sticker {
@@ -1415,9 +1422,7 @@ fn message(
 
     let reactions = !m.reactions.is_empty();
     let reactions_h = if reactions { 18. } else { 0. };
-    let status_line = status_line(m);
-    let failed_h = if status_line.is_some() { 18. } else { 0. };
-    let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, bubble_h + reactions_h + failed_h), Sense::hover());
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ctx.width, bubble_h + reactions_h), Sense::hover());
     let x = if outgoing { row.right() - side - bubble_w } else { row.left() + lead + avatar_col };
     let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(bubble_w, bubble_h));
     let response = ui.interact(bubble, ui.scope_id().with(("bubble", m.id)), Sense::click());
@@ -1659,8 +1664,20 @@ fn message(
         }
         let meta_x = meta_x + pin_w;
         let meta_end = meta_x + meta.size().x;
+        // The status in the time's place is a button when it leads somewhere.
+        if let Some((_, Some(then))) = &status_in_meta
+            && !ctx.selecting
+        {
+            let r = ui.interact(Rect::from_min_size(Pos2::new(meta_x, meta_y), meta.size() + Vec2::new(0., 2.)), ui.scope_id().with(("status", m.id)), Sense::click());
+            let tip = if matches!(then, Action::Retry(_)) { "Click to resend" } else { "Details" };
+            if r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+                actions.push(match then {
+                    Action::Retry(id) => Action::Retry(*id),
+                    _ => Action::Info(m.id),
+                });
+            }
+        } else if m.edited && !ctx.selecting {
         // "Edited" opens the edit history (Desktop's `MessageMetadata__edited`).
-        if m.edited && !ctx.selecting {
             let r = ui.interact(Rect::from_min_size(Pos2::new(meta_x, meta_y), meta.size() + Vec2::new(0., 2.)), ui.scope_id().with(("edited", m.id)), Sense::click());
             if r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Edit history").clicked() {
                 actions.push(Action::EditHistory(m.id));
@@ -1683,17 +1700,13 @@ fn message(
     if reactions {
         reaction_pills(ui, ctx, m, bubble, outgoing, actions);
     }
-    if let Some((text, then)) = status_line {
-        let at = Pos2::new(bubble.right(), bubble.bottom() + reactions_h + 2.);
-        let color = if m.status == DeliveryStatus::Paused { palette.text_secondary } else { palette.destructive };
-        let label = ui.painter().layout_no_wrap(text.into(), theme::regular(12.), color);
-        let rect = Rect::from_min_size(Pos2::new(at.x - label.size().x, at.y), label.size());
-        ui.painter().galley(rect.min, label, color);
-        let response = ui.interact(rect, ui.scope_id().with(("retry", m.id)), Sense::click());
-        if let Some(then) = then
-            && response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
-        {
-            actions.push(then);
+    // Desktop's `module-message__error`: a red error icon beside an
+    // outgoing bubble that failed or only partly went.
+    if outgoing && matches!(m.status, DeliveryStatus::Failed | DeliveryStatus::PartialSent) {
+        let at = Rect::from_center_size(Pos2::new(bubble.left() - 8. - 12., bubble.bottom() - 14.), Vec2::splat(24.));
+        Icon::ErrorCircleCompact.paint(ui, at, 20., palette.destructive);
+        if !ctx.selecting && ui.interact(at, ui.scope_id().with(("error-icon", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            actions.push(Action::Info(m.id));
         }
     }
     if show_avatar && !collapsed_below {
@@ -2544,7 +2557,7 @@ fn status_line(m: &Message) -> Option<(&'static str, Option<Action>)> {
     match m.status {
         DeliveryStatus::Failed if m.deleted => Some(("Delete failed, click for details", Some(Action::Info(m.id)))),
         DeliveryStatus::Failed if m.edited => Some(("Edit failed, click for details", Some(Action::Info(m.id)))),
-        DeliveryStatus::Failed => Some(("Send failed. Click to retry.", Some(Action::Retry(m.id)))),
+        DeliveryStatus::Failed => Some(("Send failed", Some(Action::Retry(m.id)))),
         DeliveryStatus::PartialSent if m.deleted => Some(("Partially deleted, click for details", Some(Action::Info(m.id)))),
         DeliveryStatus::PartialSent => Some(("Partially sent, click for details", Some(Action::Info(m.id)))),
         DeliveryStatus::Paused => Some(("Send paused", None)),
