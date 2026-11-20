@@ -677,6 +677,11 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
 }
 
 
+/// Where a story's failed download is remembered (`StoryDownloadFailed`).
+pub fn failed_id(id: i64) -> egui::Id {
+    egui::Id::unique(("story-failed", id))
+}
+
 /// A story, its caption at most three lines unless `expanded`; returns the
 /// link card, and the caption's rect when it was cut short (Desktop's Read
 /// more).
@@ -697,9 +702,24 @@ fn paint_story_caption(ui: &Ui, s: &Story, rect: Rect, expanded: bool) -> (Optio
                     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Video story", theme::medium(16.), Color32::WHITE);
                     let _ = path;
                 }
-                None => {
-                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Downloading…", theme::regular(14.), Color32::from_white_alpha(200));
+                // Desktop's `StoryImage`: a spinner, or why it can't show.
+                None if ui.ctx().data(|d| d.get_temp::<bool>(failed_id(s.id)).unwrap_or(false)) => {
+                    let text = match &s.author {
+                        None => tr("Can\u{2019}t download story. You will need to share it again.").to_owned(),
+                        Some(_) => {
+                            let name = s.author_name.clone().unwrap_or_default();
+                            crate::i18n::tf("icu:StoryImage__error2", &format!("Can\u{2019}t download story. {name} will need to share it again."), &[("name", crate::i18n::Arg::from(&name))])
+                        }
+                    };
+                    let job = egui::text::LayoutJob::simple(text, theme::regular(14.), Color32::WHITE, (rect.width() - 64.).max(80.));
+                    let mut job = job;
+                    job.halign = egui::Align::Center;
+                    let g = ui.fonts_mut(|f| f.layout_job(job));
+                    theme::paint_symbol(ui.painter(), "error", Pos2::new(rect.center().x, rect.center().y - g.size().y / 2. - 20.), 24., Color32::WHITE);
+                    ui.painter().galley(Pos2::new(rect.center().x, rect.center().y - g.size().y / 2.), g, Color32::WHITE);
                 }
+                None => crate::widgets::paint_spinner(ui, rect.center(), 24., Color32::WHITE),
+                
             }
             let mut cut = None;
             if !caption.is_empty() {
@@ -877,7 +897,10 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     {
         let key = egui::Id::unique(("story-fetch", story.id));
         if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
-            ui.ctx().data_mut(|d| d.insert_temp(key, true));
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(key, true);
+                d.remove::<bool>(failed_id(story.id));
+            });
             app.send(Command::FetchStory { id: story.id });
         }
     }
@@ -1025,13 +1048,19 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
             None => app.panes.stories.paused = Some(Instant::now()),
         }
     }
+    let mute = Rect::from_center_size(Pos2::new(pause.left() - 18., pause.center().y), Vec2::splat(28.));
+    let r = ui.interact(mute, ui.scope_id().with("story-mute"), Sense::click());
     if let Some(player) = app.panes.stories.player.as_mut() {
-        let mute = Rect::from_center_size(Pos2::new(pause.left() - 18., pause.center().y), Vec2::splat(28.));
-        let r = ui.interact(mute, ui.scope_id().with("story-mute"), Sense::click());
         theme::paint_symbol(ui.painter(), if player.muted { "speaker-slash" } else { "speaker" }, mute.center(), 18., Color32::WHITE);
         if r.on_hover_text(if player.muted { tr("Unmute") } else { tr("Mute") }).clicked() {
             let muted = !player.muted;
             player.set_muted(muted);
+        }
+    } else {
+        // Desktop keeps the button on stories without sound, and says so.
+        theme::paint_symbol(ui.painter(), "speaker-slash", mute.center(), 18., Color32::WHITE);
+        if r.on_hover_text(tr("Unmute")).clicked() {
+            app.toast(tr("This story has no sound"));
         }
     }
     // Close, and the arrows either side.

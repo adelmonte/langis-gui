@@ -194,6 +194,9 @@ pub fn on_event(app: &mut App, event: Event) {
     match event {
         Event::Megaphones(list) => app.panes.megaphones = list,
         Event::StoriesChanged | Event::StorySettingsChanged => crate::stories::load(app),
+        Event::StoryDownloadFailed { id } => {
+            app.ctx.data_mut(|d| d.insert_temp(crate::stories::failed_id(id), true));
+        }
         Event::ChatFoldersChanged => load_folders(app),
         Event::ChatColorsChanged => crate::chat_colors::load(app),
         Event::CallLinksChanged => load_calls(app),
