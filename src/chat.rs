@@ -504,6 +504,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             Action::Notice(button) => match button {
                 NoticeButton::Call { video } => crate::panes::open_lobby(app, id.clone(), video),
                 NoticeButton::Join => crate::panes::open_lobby(app, id.clone(), true),
+                NoticeButton::Return => app.call_view.pip = false,
                 NoticeButton::Safety(who) => crate::details::open_safety(app, ConversationId::direct(&who)),
                 NoticeButton::Go { author, sent_at } => {
                     let conversation = id.clone();
@@ -2774,6 +2775,8 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
 pub enum NoticeButton {
     Call { video: bool },
     Join,
+    /// Back to the call we're in (Desktop's "Return to call").
+    Return,
     Safety(String),
     Go { author: Option<String>, sent_at: i64 },
     Explain(&'static str, &'static str),
@@ -2783,6 +2786,10 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
     use langis_store::{CallOutcome, Notice};
     match notice {
         Notice::Call { incoming, video, outcome, .. } if !ctx.group => {
+            // In this chat's call now: back to it.
+            if ctx.app.call.as_ref().is_some_and(|c| c.conversation == *ctx.chat_id) {
+                return Some(("Return to call", NoticeButton::Return));
+            }
             let label = if *incoming && *outcome == CallOutcome::Missed { "Call back" } else { "Call again" };
             Some((label, NoticeButton::Call { video: *video }))
         }
@@ -2791,7 +2798,11 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
             let going = ctx.app.panes.active_calls.get(ctx.chat_id).is_some_and(|u| !u.is_empty());
             let latest = ctx.app.chat.as_ref().is_none_or(|c| !c.messages.iter().any(|o| o.sent_at > m.sent_at && matches!(o.notice, Some(Notice::GroupCall { .. }))));
             let ours = ctx.app.call.as_ref().is_some_and(|c| c.conversation == *ctx.chat_id);
-            (going && latest && !ours).then_some(("Join", NoticeButton::Join))
+            match (going && latest, ours) {
+                (true, false) => Some(("Join", NoticeButton::Join)),
+                (_, true) if latest => Some(("Return to call", NoticeButton::Return)),
+                _ => None,
+            }
         }
         Notice::SafetyNumberChanged { who } => Some(("View safety number", NoticeButton::Safety(who.clone()))),
         Notice::PollEnded { by, sent_at, .. } => Some(("View poll", NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
