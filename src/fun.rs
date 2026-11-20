@@ -817,7 +817,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         // Desktop's StickerManager tabs.
         ui.horizontal(|ui| {
             let half = ui.available_width() / 2.;
-            for (i, label) in ["Available", tr("Installed")].iter().enumerate() {
+            for (i, label) in [tr("All"), tr("My Stickers")].iter().enumerate() {
                 let (r, hit) = ui.allocate_exact_size(Vec2::new(half - 4., 32.), Sense::click());
                 let on = tab == i;
                 ui.painter().text(r.center(), Align2::CENTER_CENTER, *label, theme::semibold(14.), if on { palette.text } else { palette.text_secondary });
@@ -830,18 +830,25 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
             }
         });
         ui.add_space(4.);
-        let sections: Vec<(&str, &Vec<StickerPackSummary>, &str)> = if tab == 1 {
-            vec![(tr("My Stickers"), &manager.installed, tr("No sticker packs, add stickers to send to your friends."))]
+        // Desktop's sections: (title, packs, shown when empty, description).
+        let sections: Vec<(&str, &Vec<StickerPackSummary>, &str, &str)> = if tab == 1 {
+            vec![(tr("My Stickers"), &manager.installed, tr("No sticker packs, add stickers to send to your friends."), "")]
         } else {
-            vec![(tr("Signal Artist Series"), &manager.blessed, ""), ("Stickers you received", &manager.received, "Stickers from incoming messages will appear here")]
+            vec![
+                (tr("Signal Artist Series"), &manager.blessed, tr("No Signal Artist stickers available"), ""),
+                (tr("Shared With You"), &manager.received, "", tr("When you receive a sticker from someone, the sticker pack will appear here.")),
+            ]
         };
         egui::ScrollArea::vertical().max_height(460.).min_scrolled_height(300.).auto_shrink([false, true]).show(ui, |ui| {
-            for (title, packs, empty) in sections {
+            for (title, packs, empty, description) in sections {
                 if packs.is_empty() && empty.is_empty() {
                     continue;
                 }
                 ui.add_space(10.);
                 ui.label(RichText::new(title).font(theme::semibold(14.)));
+                if !description.is_empty() {
+                    ui.label(RichText::new(description).font(theme::regular(12.)).color(palette.text_secondary));
+                }
                 if packs.is_empty() {
                     ui.label(RichText::new(empty).font(theme::regular(13.)).color(palette.text_secondary));
                 }
