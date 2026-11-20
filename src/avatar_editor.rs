@@ -25,12 +25,13 @@ pub struct AvatarEditor {
     /// Editing text: the letters and the color.
     text: Option<(String, usize)>,
     initials: String,
+    name: String,
 }
 
 impl AvatarEditor {
     pub fn new(current: Option<String>, name: &str) -> Self {
         let initials: String = name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect::<String>().to_uppercase();
-        Self { picked: None, current, removed: false, text: None, initials }
+        Self { picked: None, current, removed: false, text: None, initials, name: name.to_owned() }
     }
 
     /// The modal. Some(change) on Save, Some(Keep) on Cancel.
@@ -88,7 +89,7 @@ impl AvatarEditor {
                     (None, Some(path)) if !self.removed => {
                         egui::Image::new(format!("file://{path}")).corner_radius(CornerRadius::same(48)).paint_at(ui, rect);
                     }
-                    _ => widgets::paint_avatar(ui, rect, &widgets::AvatarSpec::person(&self.initials, 0)),
+                    _ => widgets::paint_avatar(ui, rect, &widgets::AvatarSpec::person(&self.name, 0)),
                 }
             });
             ui.add_space(12.);

@@ -239,9 +239,17 @@ fn screenshots_panes() {
     wait(&mut harness, "color editor", |_| true);
     save(&mut harness, "custom-color-editor");
     harness.state_mut().color_editor = None;
+    harness.state_mut().settings.page = Page::Profile;
     crate::profile::open(harness.state_mut());
     wait(&mut harness, "profile", |app| app.panes.profile.as_ref().is_some_and(|p| p.loaded));
     save(&mut harness, "profile");
+    harness.state_mut().settings.page = Page::ProfileAbout;
+    wait(&mut harness, "profile about", |_| true);
+    save(&mut harness, "profile-about");
+    harness.state_mut().settings.page = Page::Profile;
+    harness.state_mut().panes.profile.as_mut().unwrap().avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(None, "Riley Park"));
+    wait(&mut harness, "avatar editor", |_| true);
+    save(&mut harness, "avatar-editor");
     harness.state_mut().panes.profile = None;
     harness.state_mut().tab = Tab::Chats;
 
