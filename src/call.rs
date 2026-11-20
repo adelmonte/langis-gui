@@ -31,6 +31,9 @@ pub struct CallView {
     /// (Desktop's `GroupCallOverflowArea` and paginated grid).
     grid_page: usize,
     overflow_from: usize,
+    /// Since when we've been talking with our hand up (Desktop's lower hand
+    /// suggestion).
+    talking_since: Option<std::time::Instant>,
     /// Desktop's expanded self-view (its Maximize preview, Shift+P).
     pub self_large: bool,
     /// When the pointer last moved over the call: its controls fade out
@@ -40,7 +43,7 @@ pub struct CallView {
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0, self_large: false, last_moved: None }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0, self_large: false, last_moved: None, talking_since: None }
     }
 }
 
@@ -281,6 +284,28 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             header(app, ui, full);
         }
         crate::calls_tab::in_call_extras(app, ui, full);
+        // Desktop's "Lower your hand?" once we talk for a while with it up.
+        let ours_up = call.local_demux_id.is_some_and(|d| call.raised_hands.contains(&d));
+        if ours_up && app.call_view.audio_on && video.levels.local() > 0.05 {
+            app.call_view.talking_since.get_or_insert_with(std::time::Instant::now);
+        } else if !ours_up {
+            app.call_view.talking_since = None;
+        }
+        if ours_up && app.call_view.talking_since.is_some_and(|t| t.elapsed() > std::time::Duration::from_secs(3)) {
+            let text = ui.painter().layout_no_wrap(tr("Lower your hand?").to_owned(), theme::regular(13.), Color32::WHITE);
+            let w = text.size().x + 24. + 70.;
+            let r = Rect::from_center_size(Pos2::new(full.center().x, full.bottom() - 150.), Vec2::new(w, 36.));
+            ui.painter().rect_filled(r, CornerRadius::same(8), Color32::from_black_alpha(190));
+            ui.painter().galley(Pos2::new(r.left() + 12., r.center().y - text.size().y / 2.), text, Color32::WHITE);
+            let b = Rect::from_min_max(Pos2::new(r.right() - 66., r.top() + 4.), r.max - Vec2::new(6., 4.));
+            let hit = ui.interact(b, ui.scope_id().with("lower-hand"), Sense::click());
+            ui.painter().rect_filled(b, CornerRadius::same(14), Color32::from_white_alpha(if hit.hovered() { 60 } else { 35 }));
+            ui.painter().text(b.center(), Align2::CENTER_CENTER, tr("Lower"), theme::semibold(13.), Color32::WHITE);
+            if hit.clicked() {
+                app.send(langis_core::Command::RaiseHand(false));
+                app.call_view.talking_since = None;
+            }
+        }
     });
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
 }
@@ -790,6 +815,9 @@ fn header(app: &mut App, ui: &mut Ui, area: Rect) -> f32 {
             }
         });
         if let Some(layout) = chosen {
+            if layout != app.call_view.layout {
+                app.panes.call_toasts.push((tr("View updated").into(), std::time::Instant::now()));
+            }
             app.call_view.layout = layout;
         }
     }
