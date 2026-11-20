@@ -540,6 +540,35 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
             });
             ui.add_space(12.);
             body(ui, palette, "Anyone with this link can join the call. Share it only with people you trust.");
+            // Desktop's `CallHistoryGroupPanelSection` for the link: its calls.
+            let calls: Vec<(i64, &str)> = app
+                .panes
+                .adhoc
+                .iter()
+                .filter(|c| c.room_id == room)
+                .map(|c| (c.at, match c.status { AdhocCallStatus::Joined => "Joined", _ => "Call link" }))
+                .collect();
+            if !calls.is_empty() {
+                ui.add_space(16.);
+                egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(12)).inner_margin(14).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let mut day = None;
+                    for (at, what) in calls {
+                        let label = crate::format::day_label(at);
+                        if day.as_ref() != Some(&label) {
+                            ui.label(RichText::new(&label).font(theme::semibold(13.)));
+                            ui.add_space(4.);
+                            day = Some(label);
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(crate::format::message_time(at)).font(theme::regular(13.)).color(palette.text_secondary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(RichText::new(what).font(theme::regular(13.)));
+                            });
+                        });
+                    }
+                });
+            }
         });
     });
     // Desktop's `DeleteLinkModal`.
