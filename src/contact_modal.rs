@@ -26,6 +26,8 @@ pub struct Contact {
     pub about_open: bool,
     /// Add to a group: the groups' search, while picking.
     pub add_to_group: Option<String>,
+    /// Desktop's `GroupMemberLabelInfoModal`, from the label's pill.
+    pub label_info: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -45,6 +47,7 @@ pub fn confirm_member(app: &mut App, group: ConversationId, aci: String, admin: 
         about: None,
         about_open: false,
         add_to_group: None,
+        label_info: false,
     });
 }
 
@@ -52,7 +55,7 @@ pub fn open(app: &mut App, group: Option<ConversationId>, aci: String) {
     if aci == app.aci {
         return;
     }
-    app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, confirm_only: false, about: None, about_open: false, add_to_group: None });
+    app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, confirm_only: false, about: None, about_open: false, add_to_group: None, label_info: false });
     app.load(move |db| async move {
         let details = langis_core::contact_details(&db, &aci).await;
         Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
@@ -77,6 +80,7 @@ enum Do {
     Confirm(Confirm),
     /// A row that only says something ("{name} is blocked").
     Nothing,
+    LabelInfo,
 }
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
@@ -118,6 +122,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 c.confirm = None;
             }
         }
+        return;
+    }
+
+    if app.panes.contact.as_ref().is_some_and(|c| c.label_info) {
+        label_info(app, ctx, &palette, group.as_ref());
         return;
     }
 
@@ -203,6 +212,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 let pill = Rect::from_center_size(row.center(), galley.size() + Vec2::new(12., 2.));
                 ui.painter().rect_filled(pill, CornerRadius::same(9), color.gamma_multiply(0.15));
                 ui.painter().galley(pill.center() - galley.size() / 2., galley, color);
+                // Desktop: the label explains member labels.
+                if ui.interact(pill, ui.scope_id().with("label-pill"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    todo = Some(Do::LabelInfo);
+                }
                 ui.add_space(4.);
             }
 
@@ -330,6 +343,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.open(direct);
         }
         Do::Call(video) => crate::panes::open_lobby(app, direct, video),
+        Do::LabelInfo => {
+            if let Some(c) = app.panes.contact.as_mut() {
+                c.label_info = true;
+            }
+        }
         Do::Nickname => {
             app.open(direct.clone());
             crate::details::open_nickname(app, direct);
@@ -468,5 +486,38 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         app.toast(format!("Adding {name} to the group"));
     } else if !cancel && let Some(c) = app.panes.contact.as_mut() {
         c.add_to_group = Some(query);
+    }
+}
+
+/// Desktop's `GroupMemberLabelInfoModal`: what member labels are, and Set a
+/// label (or Edit your label) when we may set ours.
+fn label_info(app: &mut App, ctx: &egui::Context, palette: &Palette, group: Option<&langis_store::Conversation>) {
+    let can = group.is_some_and(|g| g.can_label && !g.left && !g.ended);
+    let has = group.is_some_and(|g| g.member_labels.contains_key(&app.aci));
+    let set = if has { tr("Edit your label") } else { tr("Set a label") };
+    let mut answer = None;
+    let ui = &egui::Ui::new(ctx.clone(), egui::Id::unique("label-info"), egui::UiBuilder::new());
+    let closed = crate::panes::modal(ui, "member-label-info", 320., |ui| {
+        ui.vertical_centered(|ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(32.), Sense::hover());
+            theme::paint_symbol(ui.painter(), "label", r.center(), 32., palette.text);
+            ui.add_space(10.);
+            ui.label(egui::RichText::new(tr("Member labels")).font(theme::semibold(16.)));
+            ui.add_space(6.);
+            ui.label(egui::RichText::new(tr("Use a member label to describe yourself or your role in this group. Member labels are only visible within this group.")).font(theme::regular(14.)).color(palette.text_secondary));
+        });
+        let labels: Vec<&str> = if can { vec![tr("OK"), set] } else { vec![tr("OK")] };
+        answer = crate::panes::buttons(ui, &labels);
+    });
+    if answer == Some(1)
+        && let Some(g) = group
+    {
+        let id = g.id.clone();
+        app.panes.contact = None;
+        crate::details::open_label_editor(app, id);
+    } else if answer.is_some() || closed {
+        if let Some(c) = app.panes.contact.as_mut() {
+            c.label_info = false;
+        }
     }
 }

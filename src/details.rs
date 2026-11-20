@@ -124,6 +124,16 @@ pub fn open_nickname(app: &mut App, id: ConversationId) {
     }
 }
 
+/// The member label editor, from `GroupMemberLabelInfoModal`.
+pub fn open_label_editor(app: &mut App, id: ConversationId) {
+    let mine = app.conversation(&id).and_then(|c| c.member_labels.get(&app.aci).cloned());
+    open(app, id);
+    if let Some(d) = app.panes.details.as_mut() {
+        d.label = Some(mine.as_ref().map(|l| l.text.clone()).unwrap_or_default());
+        d.label_emoji = mine.and_then(|l| l.emoji).unwrap_or_default();
+    }
+}
+
 /// Desktop's All media, from the header menu.
 pub fn open_media(app: &mut App, id: ConversationId) {
     open(app, id);
