@@ -97,6 +97,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// The full emoji picker for a call reaction.
+    pub call_emoji: Option<crate::emoji_picker::Picker>,
     /// A confirmation that sends its commands on yes (Desktop's many
     /// "…?" dialogs before an action).
     pub pending_confirm: Option<PendingConfirm>,
@@ -194,6 +196,11 @@ pub fn on_event(app: &mut App, event: Event) {
         }
         Event::GroupPeek { conversation, users, max_devices } => {
             if let Some(lobby) = app.panes.lobby.as_mut().filter(|l| l.conversation == conversation) {
+                // Desktop starts muted in a big call, and says so.
+                if lobby.users.is_empty() && users.len() >= 8 && lobby.audio {
+                    lobby.audio = false;
+                    app.panes.call_toasts.push((tr("Microphone muted due to the size of the call").into(), Instant::now()));
+                }
                 lobby.users = users.clone();
                 lobby.max_devices = max_devices;
             }
@@ -203,17 +210,26 @@ pub fn on_event(app: &mut App, event: Event) {
             let now = Instant::now();
             app.panes.call_reactions.extend(list.into_iter().map(|r| (r, now)));
         }
+        // Desktop's call toasts for a remote mute, in its words.
         Event::CallMuted { by, target } => {
-            let by = app.name(&by);
-            match target {
-                None => {
-                    app.call_view.audio_on = false;
-                    app.toast(format!("{by} muted you"));
+            use crate::i18n::{Arg, tf};
+            let ours = by == app.aci;
+            let name = app.name(&by);
+            if target.is_none() {
+                app.call_view.audio_on = false;
+            }
+            let text = match target {
+                None if ours => tr("You muted yourself from another device.").to_owned(),
+                None => tf("icu:CallControls__MutedBySomeoneToast", &format!("{name} muted you."), &[("otherName", Arg::from(&name))]),
+                Some(target) if ours => {
+                    let other = app.name(&target);
+                    tf("icu:CallControls__YouMutedSomeoneToast", &format!("You muted {other}."), &[("otherName", Arg::from(&other))])
                 }
-                Some(target) => {
-                    let target = app.name(&target);
-                    app.toast(format!("{by} muted {target}"));
-                }
+                // Desktop only tells us about ourselves and what we did.
+                Some(_) => String::new(),
+            };
+            if !text.is_empty() {
+                app.panes.call_toasts.push((text, Instant::now()));
             }
         }
         Event::RecipientFound { query, result } => {
@@ -1909,7 +1925,12 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
             3 => crate::i18n::tf("icu:ConversationHero--group-members-three", &format!("{}, {}, and {}", others[0], others[1], others[2]), &[("member1", crate::i18n::Arg::from(&others[0])), ("member2", crate::i18n::Arg::from(&others[1])), ("member3", crate::i18n::Arg::from(&others[2]))]),
             n => format!("{}, {}, and {} others", others[0], others[1], n - 2),
         };
-        let who = if group {
+        // One of ours already in it (Desktop's another-device line).
+        let ours_there = users.iter().any(|u| *u == app.aci);
+        let users: Vec<String> = users.iter().filter(|u| **u != app.aci).cloned().collect();
+        let who = if group && ours_there && users.is_empty() {
+            tr("One of your other devices is in this call").to_owned()
+        } else if group {
             match users.len() {
                 0 if ringable && !listed.is_empty() => if ring { crate::i18n::tf("icu:calling__pre-call-info--will-ring-1", &format!("Signal will ring {listed}"), &[("person", crate::i18n::Arg::from(&listed))]) } else { crate::i18n::tf("icu:calling__pre-call-info--will-notify-1", &format!("{listed} will be notified"), &[("person", crate::i18n::Arg::from(&listed))]) },
                 0 => tr("No one else is here").to_owned(),
@@ -1925,6 +1946,13 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         ui.painter().text(Pos2::new(screen.center().x, y), egui::Align2::CENTER_TOP, &title_text, theme::semibold(20.), white);
         y += 30.;
         ui.painter().text(Pos2::new(screen.center().x, y), egui::Align2::CENTER_TOP, &who, theme::regular(14.), egui::Color32::from_white_alpha(200));
+        // A call link's notice: who joins sees us.
+        if conversation.as_call_link().is_some() {
+            let sharing = app.settings.snapshot.as_ref().is_some_and(|s| s.phone_sharing);
+            let notice = if sharing { tr("Anyone who joins this call via the link will see your name, photo, and phone number.") } else { tr("Anyone who joins this call via the link will see your name and photo.") };
+            ui.painter().text(Pos2::new(screen.center().x, y + 22.), egui::Align2::CENTER_TOP, notice, theme::regular(12.), egui::Color32::from_white_alpha(160));
+            y += 20.;
+        }
         y += 40.;
         // Controls: camera, microphone, then the join button.
         let label = ui.painter().layout_no_wrap(join_label.to_owned(), theme::semibold(14.), white);

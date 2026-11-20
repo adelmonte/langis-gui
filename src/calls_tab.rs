@@ -280,6 +280,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.horizontal(|ui| {
                     ui.add_space(27.);
                     ui.label(RichText::new(tr("Filtered by missed")).font(theme::semibold(13.)).color(palette.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(16.);
+                        if crate::widgets::axo_button(ui, tr("Clear filter"), crate::widgets::Axo::SubtleSecondary).clicked() {
+                            app.panes.calls_missed_only = false;
+                        }
+                    });
                 });
                 ui.add_space(4.);
             }
@@ -430,9 +436,13 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
     }
     let x = avatar.right() + 12.;
     let painter = ui.painter_at(rect);
-    painter.text(Pos2::new(x, rect.top() + 12.), egui::Align2::LEFT_TOP, &row.title, theme::semibold(14.), palette.text);
-    // A group whose call goes on now: Desktop's `ItemCallInfo--Active`.
-    let active = row.conversation.as_group().is_some()
+    let title = painter.text(Pos2::new(x, rect.top() + 12.), egui::Align2::LEFT_TOP, &row.title, theme::semibold(14.), palette.text);
+    // Desktop's bell-slash after a muted chat's name.
+    if app.conversation(&row.conversation).is_some_and(|c| c.muted) {
+        theme::paint_symbol(&painter, "bell-slash", Pos2::new(title.right() + 10., title.center().y), 14., palette.text_secondary);
+    }
+    // A group's or link's call going on now: Desktop's `ItemCallInfo--Active`.
+    let active = (row.conversation.as_group().is_some() || row.conversation.as_call_link().is_some())
         && app.panes.active_calls.get(&row.conversation).is_some_and(|u| !u.is_empty())
         && app.call.as_ref().is_none_or(|c| c.conversation != row.conversation);
     let color = if row.missed && !active { palette.destructive } else { palette.text_secondary };
@@ -758,17 +768,34 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
         egui::Area::new(egui::Id::unique("call-reactions")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             egui::Frame::new().fill(egui::Color32::from_gray(40)).corner_radius(CornerRadius::same(20)).inner_margin(8).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    for emoji in ["❤️", "👍", "👎", "😂", "😮", "😢"] {
+                    // The account's preferred reactions, then More for any.
+                    for emoji in app.reactions.clone() {
                         let mut job = egui::text::LayoutJob::default();
-                        crate::chat::append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::regular(24.), color: white, ..Default::default() });
+                        crate::chat::append_with_emoji(&mut job, &emoji, egui::TextFormat { font_id: theme::regular(24.), color: white, ..Default::default() });
                         if ui.add(egui::Button::new(job).frame(false)).clicked() {
-                            app.send(Command::CallReact { emoji: emoji.to_owned() });
+                            app.send(Command::CallReact { emoji: emoji.clone() });
                             app.panes.reactions_open = false;
                         }
+                    }
+                    if ui.add(egui::Button::new(RichText::new("+").font(theme::semibold(22.)).color(white)).frame(false)).on_hover_text(tr("More reactions")).clicked() {
+                        app.panes.call_emoji = Some(Default::default());
+                        app.panes.reactions_open = false;
                     }
                 });
             });
         });
+    }
+    // The full emoji picker, from More.
+    if let Some(mut picker) = app.panes.call_emoji.take() {
+        let mut open = true;
+        let recent = app.recent_emoji.clone();
+        let anchor = Pos2::new(area.center().x - crate::emoji_picker::WIDTH / 2., area.bottom() - 100.);
+        if let Some(emoji) = picker.show(ui.ctx(), anchor, &mut open, &recent) {
+            app.use_emoji(emoji);
+            app.send(Command::CallReact { emoji: emoji.to_owned() });
+        } else if open {
+            app.panes.call_emoji = Some(picker);
+        }
     }
     // Desktop's `CallingParticipantsList`: 320x440 on gray-80, radius 10,
     // "In this call · N people" and its close X, then a row per person
