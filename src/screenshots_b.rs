@@ -54,6 +54,14 @@ fn screenshots_panes() {
     harness.state_mut().panes.calls_loaded = false;
     wait(&mut harness, "call history", |app| !app.panes.calls.is_empty() || !app.panes.adhoc.is_empty());
     save(&mut harness, "calls-tab");
+    // A call's details.
+    let first = harness.state().panes.calls.iter().find(|m| m.conversation_id.as_call_link().is_none()).map(|m| (m.conversation_id.clone(), m.sent_at));
+    if let Some((conversation, at)) = first {
+        harness.state_mut().panes.call_details = Some((conversation, vec![("Incoming voice call".into(), at, false), ("Missed voice call".into(), at - 3_600_000, true)]));
+        wait(&mut harness, "call details", |_| true);
+        save(&mut harness, "call-details");
+        harness.state_mut().panes.call_details = None;
+    }
     harness.state().send(Command::CreateCallLink);
     wait(&mut harness, "a call link", |app| app.panes.link_details.as_ref().is_some_and(|r| app.panes.links.iter().any(|l| &l.room_id == r)));
     save(&mut harness, "call-link");

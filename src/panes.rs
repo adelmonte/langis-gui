@@ -46,6 +46,9 @@ pub struct Panes {
     /// Desktop's `CallingToastManager` toasts over the call: text, since.
     pub call_toasts: Vec<(String, Instant)>,
     pub participants_open: bool,
+    /// The Calls tab's selected call group (Desktop's call details): the
+    /// chat and the calls in it, newest first.
+    pub call_details: Option<(langis_store::ConversationId, Vec<(String, i64, bool)>)>,
     /// Desktop's `CallingRaisedHandsList`, opened from its toast.
     pub raised_open: bool,
     /// Desktop's pending participants bubble: expanded to the whole list.

@@ -15,11 +15,15 @@ use crate::widgets;
 struct Row {
     conversation: ConversationId,
     title: String,
-    /// What happened: "Incoming voice call", "Missed video call"…
-    detail: String,
+    /// Desktop's short status (`CallsList__ItemCallInfo--*`): Missed,
+    /// Declined, Call link, Outgoing or Incoming.
+    status: &'static str,
     missed: bool,
     video: bool,
     at: i64,
+    /// The calls grouped in this row (Desktop's call history group), newest
+    /// first: what each was, when, and whether missed.
+    group: Vec<(String, i64, bool)>,
 }
 
 fn rows(app: &App) -> Vec<Row> {
@@ -51,7 +55,8 @@ fn rows(app: &App) -> Vec<Row> {
             }
             _ => continue,
         };
-        out.push(Row { conversation: m.conversation_id.clone(), title, detail, missed, video, at: m.sent_at });
+        let status = status_of(&detail);
+        out.push(Row { conversation: m.conversation_id.clone(), title, status, missed, video, at: m.sent_at, group: vec![(detail, m.sent_at, missed)] });
     }
     for call in &app.panes.adhoc {
         let Some(link) = app.panes.links.iter().find(|l| l.room_id == call.room_id) else { continue };
@@ -63,14 +68,43 @@ fn rows(app: &App) -> Vec<Row> {
         out.push(Row {
             conversation: ConversationId::call_link(&link.room_id),
             title: link_title(&link.name),
-            detail: detail.into(),
+            status: "Call link",
             missed: false,
             video: true,
             at: call.at,
+            group: vec![(detail.into(), call.at, false)],
         });
     }
     out.sort_by_key(|r| std::cmp::Reverse(r.at));
-    out
+    // Desktop's call history groups: neighbours from the same chat, of the
+    // same kind and outcome, on the same day, are one row with a count.
+    let mut grouped: Vec<Row> = Vec::new();
+    for row in out {
+        match grouped.last_mut() {
+            Some(last)
+                if last.conversation == row.conversation
+                    && last.status == row.status
+                    && last.video == row.video
+                    && crate::format::same_day(last.at, row.at) =>
+            {
+                last.group.extend(row.group);
+            }
+            _ => grouped.push(row),
+        }
+    }
+    grouped
+}
+
+fn status_of(detail: &str) -> &'static str {
+    if detail.starts_with("Missed") {
+        "Missed"
+    } else if detail.starts_with("Declined") {
+        "Declined"
+    } else if detail.starts_with("Incoming") {
+        "Incoming"
+    } else {
+        "Outgoing"
+    }
 }
 
 fn link_title(name: &str) -> String {
@@ -208,14 +242,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 crate::sidebar::header_start(app, ui);
                 ui.label(RichText::new("Calls").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(14.);
-                    let more = widgets::icon_button(ui, Icon::More, 20., "More actions");
+                    ui.add_space(16.);
+                    ui.spacing_mut().item_spacing.x = 8.;
+                    let more = widgets::axo_icon_button_sm(ui, "more", "More actions", false);
                     crate::menu::dropdown(ui, &more, egui::Id::unique("calls-more"), |m| {
                         if m.item(Some("trash"), "Clear call history") {
                             app.panes.clear_calls = true;
                         }
                     });
-                    if widgets::icon_button(ui, Icon::PhonePlus, 20., "New Call").clicked() {
+                    if widgets::axo_icon_button_sm(ui, "phone-plus", "New Call", false).clicked() {
                         app.panes.new_call = Some(String::new());
                     }
                 });
@@ -223,7 +258,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.add_space(6.);
             ui.horizontal(|ui| {
                 ui.add_space(16.);
-                ui.add(egui::TextEdit::singleline(&mut app.panes.call_search).hint_text("Search").desired_width(ui.available_width() - 16. - 36.));
+                let hint = if app.panes.calls_missed_only { "Search missed calls" } else { "Search" };
+                ui.add(egui::TextEdit::singleline(&mut app.panes.call_search).hint_text(hint).desired_width(ui.available_width() - 16. - 36.));
                 // Desktop's missed-calls filter.
                 let (rect, r) = ui.allocate_exact_size(Vec2::splat(28.), Sense::click());
                 let on = app.panes.calls_missed_only;
@@ -238,6 +274,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             });
             ui.add_space(8.);
+            if app.panes.calls_missed_only {
+                // `CallsList__FilteredByMissedHeader`.
+                ui.horizontal(|ui| {
+                    ui.add_space(27.);
+                    ui.label(RichText::new("Filtered by missed").font(theme::semibold(13.)).color(palette.text_secondary));
+                });
+                ui.add_space(4.);
+            }
             // "Create a call link", as Desktop's first row.
             let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.), Sense::click());
             let inner = rect.shrink2(Vec2::new(10., 2.));
@@ -258,16 +302,29 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 if list.is_empty() {
                     ui.add_space(24.);
-                    ui.vertical_centered(|ui| body(ui, &palette, if !query.is_empty() { "No results" } else if missed_only { "No missed calls" } else { "No recent calls" }));
+                    ui.vertical_centered(|ui| {
+                        // Desktop's `CallsList__EmptyState--*`.
+                        let q = app.panes.call_search.trim();
+                        if !q.is_empty() {
+                            body(ui, &palette, &if missed_only { format!("No results for \u{201c}{q}\u{201d} in missed calls") } else { format!("No results for \u{201c}{q}\u{201d}") });
+                        } else if missed_only {
+                            body(ui, &palette, "No missed calls");
+                        } else {
+                            ui.label(RichText::new("No calls").font(theme::semibold(16.)).color(palette.text_secondary));
+                            body(ui, &palette, "Recent calls will appear here.");
+                        }
+                    });
                 }
                 for (i, row) in list.iter().enumerate() {
                     if call_row(app, ui, &palette, row, i) {
                         if let Some(room) = row.conversation.as_call_link() {
                             app.panes.link_name = app.panes.links.iter().find(|l| l.room_id == room).map(|l| l.name.clone()).unwrap_or_default();
                             app.panes.link_details = Some(room.to_owned());
+                            app.panes.call_details = None;
                         } else {
+                            // Desktop's call details: the chat and this group's calls.
                             app.panes.link_details = None;
-                            app.open(row.conversation.clone());
+                            app.panes.call_details = Some((row.conversation.clone(), row.group.clone()));
                         }
                     }
                 }
@@ -275,14 +332,74 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         });
     egui::CentralPanel::no_frame().show(ui, |ui| {
         ui.painter().rect_filled(ui.max_rect(), 0, palette.background);
-        match app.panes.link_details.clone() {
-            Some(room) => link_details(app, ui, &palette, &room),
-            None => {
+        match (app.panes.link_details.clone(), app.panes.call_details.clone()) {
+            (Some(room), _) => link_details(app, ui, &palette, &room),
+            (None, Some((conversation, calls))) => call_details(app, ui, &palette, &conversation, &calls),
+            (None, None) => {
+                // `CallsTab__EmptyStateText--with-icon-2`.
                 ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("Click on a call to see details, or start a new call").font(theme::regular(14.)).color(palette.text_secondary));
+                    let mut job = egui::text::LayoutJob::default();
+                    let f = egui::TextFormat { font_id: theme::regular(14.), color: palette.text_secondary, ..Default::default() };
+                    job.append("Click ", 0., f.clone());
+                    job.append("\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}", 0., f.clone());
+                    job.append(" to start a new voice or video call.", 0., f);
+                    let r = ui.label(job);
+                    let x = r.rect.left() + ui.painter().layout_no_wrap("Click ".into(), theme::regular(14.), palette.text_secondary).size().x;
+                    Icon::PhonePlus.paint(ui, Rect::from_min_size(Pos2::new(x + 2., r.rect.center().y - 9.), Vec2::splat(18.)), 18., palette.text_secondary);
                 });
             }
         }
+    });
+}
+
+/// Desktop's call details for a chat's call group: the chat with its
+/// Message, Voice and Video buttons, then the calls, each with its time.
+fn call_details(app: &mut App, ui: &mut Ui, palette: &Palette, conversation: &ConversationId, calls: &[(String, i64, bool)]) {
+    let Some(c) = app.conversation(conversation).cloned() else { return };
+    ui.vertical_centered(|ui| {
+        ui.add_space(40.);
+        widgets::avatar(ui, &widgets::AvatarSpec::of(&c), 80.);
+        ui.add_space(12.);
+        ui.label(RichText::new(&c.title).font(theme::semibold(20.)));
+        ui.add_space(16.);
+        ui.horizontal(|ui| {
+            let group = c.kind == langis_store::ConversationKind::Group;
+            let n = if group { 2. } else { 3. };
+            ui.add_space(((ui.available_width() - n * 88.) / 2.).max(0.));
+            let tile = |ui: &mut Ui, symbol: &str, label: &str| {
+                let (rect, r) = ui.allocate_exact_size(Vec2::new(80., 56.), Sense::click());
+                ui.painter().rect_filled(rect, CornerRadius::same(10), if r.hovered() { palette.fill_pressed } else { palette.fill });
+                theme::paint_symbol(ui.painter(), symbol, Pos2::new(rect.center().x, rect.top() + 20.), 18., palette.text);
+                ui.painter().text(Pos2::new(rect.center().x, rect.bottom() - 10.), egui::Align2::CENTER_BOTTOM, label, theme::regular(12.), palette.text);
+                r.clicked()
+            };
+            if tile(ui, "message", "Message") {
+                app.open(c.id.clone());
+            }
+            if !group && tile(ui, "phone", "Voice") {
+                crate::panes::open_lobby(app, c.id.clone(), false);
+            }
+            if tile(ui, "videocamera", "Video") {
+                crate::panes::open_lobby(app, c.id.clone(), true);
+            }
+        });
+        ui.add_space(20.);
+        let width = 360f32.min(ui.available_width() - 32.);
+        egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+            ui.set_width(width);
+            if let Some((_, at, _)) = calls.first() {
+                ui.label(RichText::new(crate::format::day_label(*at)).font(theme::semibold(13.)));
+                ui.add_space(8.);
+            }
+            for (what, at, missed) in calls {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(crate::format::message_time(*at)).font(theme::regular(13.)).color(palette.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(what).font(theme::regular(13.)).color(if *missed { palette.destructive } else { palette.text }));
+                    });
+                });
+            }
+        });
     });
 }
 
@@ -297,16 +414,17 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
     let width = ui.available_width();
     let (outer, response) = ui.allocate_exact_size(Vec2::new(width, 64.), Sense::click());
     let rect = Rect::from_min_max(outer.min + Vec2::new(10., 2.), outer.max - Vec2::new(10., 2.));
-    let selected = row.conversation.as_call_link().is_some_and(|r| app.panes.link_details.as_deref() == Some(r));
+    let selected = row.conversation.as_call_link().is_some_and(|r| app.panes.link_details.as_deref() == Some(r))
+        || app.panes.call_details.as_ref().is_some_and(|(c, g)| *c == row.conversation && g.first().map(|x| x.1) == row.group.first().map(|x| x.1));
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(12), if selected { palette.fill_pressed } else { palette.fill });
     }
-    let avatar = Rect::from_min_size(rect.min + Vec2::new(14., 8.), Vec2::splat(40.));
+    let avatar = Rect::from_min_size(rect.min + Vec2::new(14., 10.), Vec2::splat(36.));
     match app.conversation(&row.conversation) {
         Some(c) => widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c)),
         None => {
-            ui.painter().circle_filled(avatar.center(), 20., palette.fill_secondary);
-            Icon::Link.paint(ui, avatar, 20., palette.text);
+            ui.painter().circle_filled(avatar.center(), 18., palette.fill_secondary);
+            Icon::Link.paint(ui, avatar, 18., palette.text);
         }
     }
     let x = avatar.right() + 12.;
@@ -317,7 +435,11 @@ fn call_row(app: &mut App, ui: &mut Ui, palette: &Palette, row: &Row, i: usize) 
         && app.panes.active_calls.get(&row.conversation).is_some_and(|u| !u.is_empty())
         && app.call.as_ref().is_none_or(|c| c.conversation != row.conversation);
     let color = if row.missed && !active { palette.destructive } else { palette.text_secondary };
-    let detail = if active { "Active call".to_owned() } else { format!("{} · {}", row.detail, crate::format::short_timestamp(row.at)) };
+    // Desktop's subtitle: "(n) " for a group, the status, then the time or
+    // Active.
+    let count = if row.group.len() > 1 { format!("({}) ", row.group.len()) } else { String::new() };
+    let when = if active { "Active".to_owned() } else { crate::format::short_timestamp(row.at) };
+    let detail = format!("{count}{} \u{b7} {when}", row.status);
     painter.text(Pos2::new(x, rect.top() + 32.), egui::Align2::LEFT_TOP, detail, theme::regular(12.), color);
     if active {
         let label = ui.painter().layout_no_wrap("Join".into(), theme::semibold(13.), egui::Color32::WHITE);
