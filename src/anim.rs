@@ -39,52 +39,71 @@ pub fn maybe_animated(path: &str, content_type: Option<&str>) -> bool {
         || lower.ends_with(".apng")
 }
 
+/// Canvases bigger than this aren't decoded: a few KB of GIF can claim an
+/// 11000x11000 screen, and every composited frame is that big.
+const MAX_CANVAS: u64 = 4096 * 4096;
+/// Frames kept per animation, and their total size once scaled.
+const MAX_FRAMES: usize = 300;
+const MAX_BYTES: usize = 64 << 20;
+
 fn decode(path: &str, side: u32) -> Option<Decoded> {
+    use image::ImageDecoder;
     let bytes = std::fs::read(path).ok()?;
     let format = image::guess_format(&bytes).ok()?;
     let cursor = std::io::Cursor::new(&bytes);
-    let frames: Vec<image::Frame> = match format {
-        image::ImageFormat::Gif => image::codecs::gif::GifDecoder::new(cursor).ok()?.into_frames().collect_frames().ok()?,
-        image::ImageFormat::WebP => {
-            let decoder = image::codecs::webp::WebPDecoder::new(cursor).ok()?;
-            if !decoder.has_animation() {
+    let small = |(w, h): (u32, u32)| (w as u64) * (h as u64) <= MAX_CANVAS;
+    let frames: image::Frames<'_> = match format {
+        image::ImageFormat::Gif => {
+            let decoder = image::codecs::gif::GifDecoder::new(cursor).ok()?;
+            if !small(decoder.dimensions()) {
                 return None;
             }
-            decoder.into_frames().collect_frames().ok()?
+            decoder.into_frames()
+        }
+        image::ImageFormat::WebP => {
+            let decoder = image::codecs::webp::WebPDecoder::new(cursor).ok()?;
+            if !decoder.has_animation() || !small(decoder.dimensions()) {
+                return None;
+            }
+            decoder.into_frames()
         }
         image::ImageFormat::Png => {
             let decoder = image::codecs::png::PngDecoder::new(cursor).ok()?;
-            if !decoder.is_apng().ok()? {
+            if !decoder.is_apng().ok()? || !small(decoder.dimensions()) {
                 return None;
             }
-            decoder.apng().ok()?.into_frames().collect_frames().ok()?
+            decoder.apng().ok()?.into_frames()
         }
         _ => return None,
     };
-    if frames.len() < 2 {
+    // Frame by frame, each scaled as it comes, so only one full-size
+    // frame is ever held.
+    let mut out = Vec::new();
+    let mut total = 0usize;
+    for f in frames.take(MAX_FRAMES) {
+        let f = f.ok()?;
+        let (num, den) = f.delay().numer_denom_ms();
+        // Browsers draw 0 and 10ms delays as 100ms.
+        let ms = if den == 0 { 100 } else { num / den };
+        let delay = Duration::from_millis(if ms <= 10 { 100 } else { ms as u64 });
+        let buffer = f.into_buffer();
+        let (w, h) = buffer.dimensions();
+        let scale = (side as f32 / w.max(h) as f32).min(1.);
+        let buffer = if scale < 1. {
+            image::imageops::resize(&buffer, ((w as f32 * scale) as u32).max(1), ((h as f32 * scale) as u32).max(1), image::imageops::FilterType::Triangle)
+        } else {
+            buffer
+        };
+        total += buffer.as_raw().len();
+        if total > MAX_BYTES {
+            break;
+        }
+        out.push((egui::ColorImage::from_rgba_unmultiplied([buffer.width() as usize, buffer.height() as usize], buffer.as_raw()), delay));
+    }
+    if out.len() < 2 {
         return None;
     }
-    let frames = frames
-        .into_iter()
-        .take(300)
-        .map(|f| {
-            let (num, den) = f.delay().numer_denom_ms();
-            // Browsers draw 0 and 10ms delays as 100ms.
-            let ms = if den == 0 { 100 } else { num / den };
-            let delay = Duration::from_millis(if ms <= 10 { 100 } else { ms as u64 });
-            let buffer = f.into_buffer();
-            let (w, h) = buffer.dimensions();
-            let scale = (side as f32 / w.max(h) as f32).min(1.);
-            let buffer = if scale < 1. {
-                image::imageops::resize(&buffer, ((w as f32 * scale) as u32).max(1), ((h as f32 * scale) as u32).max(1), image::imageops::FilterType::Triangle)
-            } else {
-                buffer
-            };
-            let image = egui::ColorImage::from_rgba_unmultiplied([buffer.width() as usize, buffer.height() as usize], buffer.as_raw());
-            (image, delay)
-        })
-        .collect();
-    Some(Decoded { frames })
+    Some(Decoded { frames: out })
 }
 
 /// Draws the animation at `path` in `rect` (fitted, its shape kept), and
