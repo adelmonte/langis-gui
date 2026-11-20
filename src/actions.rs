@@ -857,26 +857,51 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 ui.label(RichText::new("Edit history").font(theme::semibold(18.)));
                 ui.add_space(12.);
                 egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
-                    // The current text, then the older versions.
-                    let current = langis_store::hide_spoilers(&m.body, &m.styles);
-                    let mut versions: Vec<(String, i64)> = vec![(current.clone(), m.sent_at)];
+                    // The current version, then the older ones, each with
+                    // its formatting and mentions (spoilers hidden), and the
+                    // message's attachments on the current one.
+                    let mut versions: Vec<Message> = vec![m.clone()];
                     if let Some(details) = details {
-                        let mut older: Vec<_> = details.edits.iter().map(|e| (langis_store::hide_spoilers(&e.body, &e.styles), e.sent_at)).collect();
-                        older.sort_by(|a, b| b.1.cmp(&a.1));
-                        let current_at = versions[0].1;
-                        versions.extend(older.into_iter().filter(|(body, at)| !(body == &current && *at == current_at)));
+                        let mut older: Vec<&langis_store::EditRevision> = details.edits.iter().collect();
+                        older.sort_by(|a, b| b.sent_at.cmp(&a.sent_at));
+                        for e in older {
+                            if e.body == m.body && e.sent_at == m.sent_at {
+                                continue;
+                            }
+                            let mut v = m.clone();
+                            v.body = e.body.clone();
+                            v.styles = e.styles.clone();
+                            v.mentions = e.mentions.clone();
+                            v.sent_at = e.sent_at;
+                            v.attachments.clear();
+                            versions.push(v);
+                        }
                     } else {
                         ui.spinner();
                     }
                     let outgoing = m.direction == Direction::Outgoing;
-                    for (body, at) in versions {
+                    for v in versions {
                         ui.with_layout(egui::Layout::top_down(if outgoing { egui::Align::Max } else { egui::Align::Min }), |ui| {
-                            let fill = if outgoing { palette.accent } else { palette.bubble_in };
-                            let color = if outgoing { egui::Color32::WHITE } else { palette.text };
+                            let fill = if outgoing { palette.badge } else { palette.bubble_in };
+                            let color = if outgoing { palette.bubble_out_text() } else { palette.text };
+                            let meta = if outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
                             egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
                                 ui.set_max_width(300.);
-                                ui.label(RichText::new(body).font(theme::regular(14.)).color(color));
-                                ui.label(RichText::new(crate::format::message_time(at)).font(theme::regular(11.)).color(color.gamma_multiply(0.8)));
+                                if let Some(a) = v.attachments.iter().find(|a| !a.sticker && a.content_type.starts_with("image/")) {
+                                    if let Some(path) = a.local_path.as_deref().or(a.thumbnail_path.as_deref()) {
+                                        let (at, _) = ui.allocate_exact_size(Vec2::new(276., 180.), Sense::hover());
+                                        crate::chat::cover_image(ui, path, at, CornerRadius::same(12));
+                                    }
+                                } else if let Some(a) = v.attachments.first() {
+                                    ui.label(RichText::new(langis_store::attachment_preview(a)).font(theme::semibold(13.)).color(color));
+                                }
+                                if !v.body.is_empty() {
+                                    let rich = crate::chat::rich_text(&v, &|sid| app.name(sid), color, color, false, 14., usize::MAX);
+                                    let mut job = rich.job;
+                                    job.wrap.max_width = 276.;
+                                    ui.label(job);
+                                }
+                                ui.label(RichText::new(crate::format::message_time(v.sent_at)).font(theme::regular(11.)).color(meta));
                             });
                         });
                         ui.add_space(8.);
