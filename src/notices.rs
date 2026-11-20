@@ -125,7 +125,14 @@ fn group_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -> Str
     match change {
         GroupNotice::Title { title } if title.is_empty() => crate::i18n::tf("icu:GroupV2--title--remove--other", &format!("{} removed the group name.", actor()), &[("memberName", crate::i18n::Arg::from(&actor()))]),
         GroupNotice::Title { title } => format!("{} changed the group name to \"{title}\".", actor()),
-        GroupNotice::Description => crate::i18n::tf("icu:GroupV2--description--change--other", &format!("{} changed the group description.", actor()), &[("memberName", crate::i18n::Arg::from(&actor()))]),
+        GroupNotice::Description { description: Some(d) } if d.is_empty() => match by {
+            None => tr("You removed the group description.").into(),
+            Some(_) => crate::i18n::tf("icu:GroupV2--description--remove--other", &format!("{} removed the group description.", actor()), &[("memberName", crate::i18n::Arg::from(&actor()))]),
+        },
+        GroupNotice::Description { .. } => match by {
+            None => tr("You changed the group description.").into(),
+            Some(_) => crate::i18n::tf("icu:GroupV2--description--change--other", &format!("{} changed the group description.", actor()), &[("memberName", crate::i18n::Arg::from(&actor()))]),
+        },
         GroupNotice::Avatar => crate::i18n::tf("icu:GroupV2--avatar--change--other", &format!("{} changed the group avatar.", actor()), &[("memberName", crate::i18n::Arg::from(&actor()))]),
         GroupNotice::Added { member: None } if by.is_none() => tr("You joined the group.").into(),
         GroupNotice::Added { member: None } => crate::i18n::tf("icu:GroupV2--member-add--you--other", &format!("{} added you to the group.", actor()), &[("memberName", crate::i18n::Arg::from(&actor()))]),
@@ -307,7 +314,7 @@ pub fn notice_icon(notice: &Notice) -> (Option<&'static str>, bool) {
         Notice::Timer { .. } => "timer-compact",
         Notice::Pinned { .. } | Notice::PollEnded { .. } => return (None, false),
         Notice::Group { by, change } => match change {
-            GroupNotice::Title { .. } | GroupNotice::Description => "edit-compact",
+            GroupNotice::Title { .. } | GroupNotice::Description { .. } => "edit-compact",
             GroupNotice::Avatar => "photo-square-compact",
             GroupNotice::Added { .. } | GroupNotice::JoinedByLink { .. } | GroupNotice::AcceptedInvite { .. } | GroupNotice::Invited { .. } | GroupNotice::InvitedMany { .. } => "person-plus-compact",
             GroupNotice::Removed { member } if member.as_deref() == by.as_deref() || (member.is_none() && by.is_none()) => "leave-compact",

@@ -3117,6 +3117,10 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
             (missed || recent).then_some((tr("Call back"), NoticeButton::Call { video: true }))
         }
         Notice::SafetyNumberChanged { who } => Some((tr("View Safety Number"), NoticeButton::Safety(who.clone()))),
+        // Desktop's GroupV2Change "View": the description as changed.
+        Notice::Group { change: langis_store::GroupNotice::Description { description: Some(d) }, .. } if !d.is_empty() => {
+            Some((tr("View"), NoticeButton::Explain(tr("Group description").into(), d.clone(), false)))
+        }
         Notice::PollEnded { by, sent_at, .. } => Some((tr("View poll"), NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
         Notice::Pinned { author, sent_at, .. } => Some((tr("Go to message"), NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),
         // Desktop's MessageRequestResponseNotification: once accepted, a way
