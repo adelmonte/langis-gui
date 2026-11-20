@@ -518,14 +518,20 @@ impl App {
                     if self.sound.ringtone {
                         crate::sounds::start_ring();
                     }
-                    if self.sound.call_notify && !self.focused
+                    if self.sound.call_notify && self.notify.0 && !self.focused
                         && let Some(u) = update.as_ref()
                     {
                         // Desktop's incoming call notification plays TriTone.
                         if self.sound.notification {
                             crate::sounds::once(crate::sounds::Sound::TriTone);
                         }
-                        let who = self.conversation(&u.conversation).map(|c| c.title.clone()).unwrap_or_else(|| "Someone".into());
+                        // Desktop's `callingNotification`: no name when the
+                        // content setting hides it.
+                        let who = if self.notify.1 == "none" {
+                            "langis".to_owned()
+                        } else {
+                            self.conversation(&u.conversation).map(|c| c.title.clone()).unwrap_or_else(|| "Someone".into())
+                        };
                         let body = if u.video { "Incoming video call" } else { "Incoming voice call" };
                         let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into() });
                     }
@@ -668,7 +674,7 @@ impl App {
             }
             Loaded::Notify { title, body } => {
                 std::thread::spawn(move || {
-                    let shown = notify_rust::Notification::new().appname("langis").summary(&title).body(&body).show();
+                    let shown = notify_rust::Notification::new().appname("langis").summary(&title).body(&escape_markup(&body)).show();
                     if let Err(error) = shown {
                         tracing::warn!(%error, "couldn't show a notification");
                     }
@@ -827,7 +833,8 @@ impl App {
             } else if message.body.is_empty() {
                 message.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_else(|| "New message".into())
             } else {
-                message.body.clone()
+                // Spoilers stay hidden, as Desktop's notification text does.
+                langis_store::hide_spoilers(&message.body, &message.styles)
             };
             if group && content == "all" && let Some(author) = &message.author_name {
                 body = format!("{author}: {body}");
@@ -1158,4 +1165,10 @@ const ALREADY_RUNNING: &str = "langis-gui is already running for this account. S
 fn in_use(dir: &std::path::Path) -> bool {
     let Ok(file) = std::fs::File::open(dir.join("langis.lock")) else { return false };
     matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+}
+
+/// Notification servers that render body markup would draw a sender's
+/// `<a href>` or `<img>`; escaped, it shows as typed.
+fn escape_markup(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
