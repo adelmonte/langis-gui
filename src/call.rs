@@ -31,11 +31,16 @@ pub struct CallView {
     /// (Desktop's `GroupCallOverflowArea` and paginated grid).
     grid_page: usize,
     overflow_from: usize,
+    /// Desktop's expanded self-view (its Maximize preview, Shift+P).
+    pub self_large: bool,
+    /// When the pointer last moved over the call: its controls fade out
+    /// five seconds after (Desktop's CallScreen).
+    last_moved: Option<std::time::Instant>,
 }
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0 }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0, self_large: false, last_moved: None }
     }
 }
 
@@ -205,18 +210,76 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
         }
-        // Our camera, or what we present, in the corner.
-        if (video_on || call.sharing)
-            && let Some((texture, size)) = app.call_view.texture(&ctx, "local", &video.local)
-        {
-            let w = 200.;
-            let h = w * size.y / size.x.max(1.);
-            let rect = Rect::from_min_size(Pos2::new(stage.right() - w - 8., stage.bottom() - h - 8.), Vec2::new(w, h));
-            egui::Image::new(&texture).corner_radius(CornerRadius::same(10)).paint_at(ui, rect);
+        // Desktop's self-view: always there, our camera (or what we
+        // present), else our avatar with the camera-off mark; large when
+        // expanded, the whole stage when we're alone in a group call.
+        let alone = call.group && call.participants.is_empty();
+        let frame = (video_on || call.sharing).then(|| app.call_view.texture(&ctx, "local", &video.local)).flatten();
+        let ratio = frame.as_ref().map(|(_, s)| s.y / s.x.max(1.)).unwrap_or(9. / 16.);
+        let rect = if alone {
+            stage
+        } else {
+            let w = if app.call_view.self_large { 360. } else { 200. };
+            Rect::from_min_size(Pos2::new(stage.right() - w - 8., stage.bottom() - w * ratio - 8.), Vec2::new(w, w * ratio))
+        };
+        match &frame {
+            Some((texture, size)) if alone => {
+                egui::Image::new(texture).corner_radius(CornerRadius::same(12)).paint_at(ui, fit_in(*size, rect));
+            }
+            Some((texture, _)) => {
+                egui::Image::new(texture).corner_radius(CornerRadius::same(10)).paint_at(ui, rect);
+            }
+            None => {
+                ui.painter().rect_filled(rect, CornerRadius::same(10), Color32::from_gray(40));
+                let side = (rect.height() * 0.45).min(96.);
+                let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
+                widgets::paint_avatar(ui, Rect::from_center_size(rect.center() - Vec2::new(0., if alone { 16. } else { 0. }), Vec2::splat(side)), &spec);
+                if alone {
+                    ui.painter().text(rect.center() + Vec2::new(0., side / 2. + 8.), Align2::CENTER_TOP, tr("Your camera is off"), theme::regular(14.), Color32::from_white_alpha(200));
+                } else {
+                    theme::paint_symbol(ui.painter(), "videocamera-slash-fill", rect.right_top() + Vec2::new(-16., 16.), 16., Color32::WHITE);
+                }
+            }
+        }
+        if !app.call_view.audio_on {
+            theme::paint_symbol(ui.painter(), "mic-slash-fill", rect.left_bottom() + Vec2::new(16., -16.), 16., Color32::WHITE);
+        }
+        // The expand button, on hover.
+        if !alone && ui.rect_contains_pointer(rect) {
+            let b = Rect::from_center_size(rect.right_bottom() - Vec2::new(18., 18.), Vec2::splat(28.));
+            let hit = ui.interact(b, ui.scope_id().with("self-view-size"), Sense::click());
+            ui.painter().circle_filled(b.center(), 14., Color32::from_black_alpha(140));
+            theme::paint_symbol(ui.painter(), if app.call_view.self_large { "arrow-square-down" } else { "fullscreen" }, b.center(), 16., Color32::WHITE);
+            if hit.on_hover_text(if app.call_view.self_large { tr("Minimize preview") } else { tr("Maximize preview") }).clicked() {
+                app.call_view.self_large = !app.call_view.self_large;
+            }
+        }
+        // Desktop's persistent toasts: who's presenting, or reconnecting.
+        let presenter = call.participants.iter().find(|p| p.presenting).map(|p| app.name(&p.aci));
+        let reconnecting = matches!(call.status, langis_core::CallStatus::Connecting) && call.participants.iter().any(|_| true);
+        let persistent = if reconnecting {
+            Some(tr("Reconnecting...").to_owned())
+        } else {
+            presenter.map(|name| crate::i18n::tf("icu:calling__presenting--person-ongoing", &format!("{name} is presenting"), &[("name", crate::i18n::Arg::from(&name))]))
+        };
+        if let Some(text) = persistent {
+            let g = ui.painter().layout_no_wrap(text, theme::regular(13.), Color32::WHITE);
+            let r = Rect::from_center_size(Pos2::new(full.center().x, full.top() + 76.), g.size() + Vec2::new(24., 14.));
+            ui.painter().rect_filled(r, CornerRadius::same(8), Color32::from_black_alpha(170));
+            ui.painter().galley(r.center() - g.size() / 2., g, Color32::WHITE);
         }
 
-        controls(app, ui, &call, conversation.as_ref(), full, video_on);
-        header(app, ui, full);
+        // The controls fade after five seconds without the pointer moving.
+        let moved = ui.input(|i| i.pointer.delta() != Vec2::ZERO || i.pointer.any_pressed() || !i.keys_down.is_empty());
+        if moved || app.call_view.last_moved.is_none() {
+            app.call_view.last_moved = Some(std::time::Instant::now());
+        }
+        let idle = app.call_view.last_moved.is_some_and(|t| t.elapsed() > std::time::Duration::from_secs(5));
+        let busy = app.call_view.settings_open || app.panes.reactions_open;
+        if !idle || busy {
+            controls(app, ui, &call, conversation.as_ref(), full, video_on);
+            header(app, ui, full);
+        }
         crate::calls_tab::in_call_extras(app, ui, full);
     });
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -273,6 +336,47 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
             let side = (rect.size().min_elem() * 0.4).min(96.);
             widgets::paint_avatar(ui, Rect::from_center_size(rect.center(), Vec2::splat(side)), &widgets::AvatarSpec::person(&name, color));
         }
+    }
+    // Desktop's tile for someone blocked: nothing of theirs, a note.
+    let blocked = app.conversation(&langis_store::ConversationId::direct(&p.aci)).is_some_and(|c| c.blocked);
+    if blocked {
+        ui.painter().rect_filled(rect, CornerRadius::same(if small { 8 } else { 12 }), Color32::from_gray(50));
+        if !small {
+            let text = crate::i18n::tf("icu:calling__blocked-participant", &format!("{name} is blocked"), &[("name", crate::i18n::Arg::from(&name))]);
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, theme::regular(13.), Color32::WHITE);
+        }
+    }
+    // Desktop's tile menu (CallingParticipantMenu): right-click.
+    let hit = ui.interact(rect, ui.scope_id().with(("tile", p.demux_id)), Sense::click());
+    let menu = egui::Id::unique(("tile-menu", p.demux_id));
+    if hit.secondary_clicked()
+        && let Some(at) = hit.interact_pointer_pos()
+    {
+        crate::menu::open_at(ui.ctx(), menu, at);
+    }
+    let mut chosen = None;
+    crate::menu::show(ui.ctx(), menu, |m| {
+        if p.audio && m.item(Some("mic-slash"), tr("Mute audio")) {
+            chosen = Some(0);
+        }
+        if m.item(Some("person-circle"), tr("View profile")) {
+            chosen = Some(1);
+        }
+        if m.item(Some("message"), tr("Go to chat")) {
+            chosen = Some(2);
+        }
+    });
+    match chosen {
+        Some(0) => {
+            let body = crate::i18n::tf("icu:ContactModal--confirm-mute-body", &format!("Are you sure you want to mute {name}?"), &[("contact", crate::i18n::Arg::from(&name))]);
+            crate::panes::ask(app, "", body, tr("Mute"), false, vec![langis_core::Command::RemoteMute { demux_id: p.demux_id }]);
+        }
+        Some(1) => crate::contact_modal::open(app, app.call.as_ref().map(|c| c.conversation.clone()), p.aci.clone()),
+        Some(2) => {
+            app.call_view.pip = true;
+            app.open(langis_store::ConversationId::direct(&p.aci));
+        }
+        _ => {}
     }
     // Desktop's speaking indicator: an outline while they're heard.
     if p.audio && video.levels.level(p.demux_id) > 0.04 {

@@ -78,7 +78,7 @@ const GUIDE: &[(&str, &[(&str, &[&str])])] = &[
         &[
             ("Mute and unmute", &["Shift", "M"]),
             ("Turn camera on and off", &["Shift", "V"]),
-            ("Start or stop presenting", &["Shift", "P"]),
+            ("Toggle expanded preview on and off", &["Shift", "P"]),
             ("Raise or lower hand", &["Shift", "H"]),
             ("Accept call with video", &["Alt", "Shift", "V"]),
             ("Accept call without video", &["Alt", "Shift", "A"]),
@@ -152,12 +152,9 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
                     app.call_view.video_on = Some(on);
                     app.send(Command::SetCallVideo(on));
                 }
-                if pressed(ctx, Modifiers::SHIFT, Key::P) && app.share_available == Some(true) {
-                    if call.sharing {
-                        app.send(Command::StopSharing);
-                    } else {
-                        app.send(Command::StartSharing { source: langis_core::PORTAL_SOURCE.into() });
-                    }
+                // Desktop's Shift+P: the self-view large or small.
+                if pressed(ctx, Modifiers::SHIFT, Key::P) {
+                    app.call_view.self_large = !app.call_view.self_large;
                 }
                 if call.group && pressed(ctx, Modifiers::SHIFT, Key::H) {
                     let raised = call.local_demux_id.is_some_and(|d| call.raised_hands.contains(&d));
