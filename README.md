@@ -24,8 +24,7 @@ Checked against Signal Desktop 8.38's source in November 2026. Items
 marked (langis) need backend work first.
 
 - Backups and Notification profiles (langis): each is its own project.
-- No tray icon (egui has none), and no text or preset avatars in the
-  profile editor.
+- No tray icon (egui has none).
 - Per-chat "while muted" exceptions and unread reminders (langis; the
   account-wide ones work).
 - Some notices only come from transferred history so far: joined Signal,
@@ -37,8 +36,8 @@ marked (langis) need backend work first.
 - Signal links from other apps aren't handed over (paste them into New
   chat).
 
-Not yet tried on a real account: calls (the lobby, speaking indicators,
-ringtone), sounds, paste and drag-and-drop, and chat export.
+Calls work on Linux in real use. Not yet tried on a real account: sounds,
+paste and drag-and-drop, and chat export.
 
 ## Install
 
