@@ -1718,7 +1718,14 @@ fn message(
     // nothing comes above it, else 4px under it, and 5px over what follows.
     let preview_first = name_galley.is_none() && m.quote.is_none() && files.is_empty();
     let preview_card = preview.map(|p| PreviewCard::layout(ui, palette, p, bubble_w));
-    let preview_h = preview_card.as_ref().map(|c| c.height + 5. + if preview_first { 0. } else { 4. }).unwrap_or(0.);
+    // Desktop's full-width button under a call link's card (Join call) or
+    // a sticker pack's (View Pack).
+    let link_button = preview.and_then(|p| match langis_core::routes::parse(&p.url) {
+        Some(langis_core::routes::Route::LinkCall(_)) => Some(tr("Join call")),
+        Some(langis_core::routes::Route::AddStickers { .. }) => Some(tr("View Pack")),
+        _ => None,
+    });
+    let preview_h = preview_card.as_ref().map(|c| c.height + 5. + if preview_first { 0. } else { 4. } + if link_button.is_some() { 40. } else { 0. }).unwrap_or(0.);
     let poll_h = poll_view.as_ref().map(|p| p.height).unwrap_or(0.);
     let content_h = content.map(content_height).unwrap_or(0.);
     // Desktop's line under a long message's start, while the rest isn't here.
@@ -1903,6 +1910,17 @@ fn message(
             actions.push(Action::Open(p.url.clone()));
         }
         y += card.height + 5.;
+        if let Some(label) = link_button {
+            let button = Rect::from_min_size(Pos2::new(left, y + 2.), Vec2::new(bubble_w - pad.x * 2., 32.));
+            let b = ui.interact(button, ui.scope_id().with(("link-button", m.id)), Sense::click());
+            let fill = if outgoing { Color32::from_white_alpha(if b.hovered() { 70 } else { 50 }) } else if b.hovered() { palette.fill_pressed } else { palette.fill };
+            ui.painter().rect_filled(button, CornerRadius::same(16), fill);
+            ui.painter().text(button.center(), Align2::CENTER_CENTER, label, theme::semibold(14.), if outgoing { Color32::WHITE } else { palette.text });
+            if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                actions.push(Action::Open(p.url.clone()));
+            }
+            y += 40.;
+        }
     }
     if let (Some(view), Some(poll)) = (poll_view, m.poll.as_ref()) {
         let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., poll_h));
