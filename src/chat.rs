@@ -1141,16 +1141,24 @@ fn message(
     let same = |o: &Message| o.notice.is_none() && o.direction == m.direction && o.author == m.author && (o.sent_at - m.sent_at).abs() < GROUP_GAP_MS && crate::format::same_day(o.sent_at, m.sent_at);
     let collapsed_above = prev.is_some_and(same);
     let collapsed_below = next.is_some_and(same);
-    ui.add_space(if collapsed_above { 2. } else { 10. });
+    // Desktop's 6px margins: 12 between messages, 2 within a group (the
+    // timeline's 6px item spacing counted in).
+    ui.add_space(if collapsed_above { -4. } else { 6. });
 
     let show_avatar = ctx.group && !outgoing;
     let avatar_col = if show_avatar { 36. } else { 0. };
     let side = 16.;
     // Desktop's `translate: 16px + 22px` for incoming bubbles in select mode.
     let lead = side + if ctx.selecting && !outgoing { 38. } else { 0. };
-    let max_bubble = ((ctx.width - side * 2. - avatar_col) * 0.75).clamp(220., 480.);
+    // Desktop's `module-message__container-outer` max width by the
+    // timeline's breakpoint (`getWidthBreakpoint`): half the window when
+    // wide, 370 at medium, else min(306, 100% - 38).
+    let window_w = ui.ctx().content_rect().width();
+    let by_breakpoint = if ctx.width > 606. { window_w * 0.5 } else if ctx.width > 514. { 370. } else { 306f32.min(ctx.width - 38.) };
+    let max_bubble = by_breakpoint.min(ctx.width - side * 2. - avatar_col).max(120.);
     let in_color = if outgoing { palette.bubble_out_text() } else { palette.text };
-    let meta_color = if outgoing { palette.bubble_out_meta() } else { palette.text_secondary };
+    // A deleted message is an outline on the page, so its time is gray.
+    let meta_color = if outgoing && !m.deleted { palette.bubble_out_meta() } else { palette.text_secondary };
 
     let author_name = (!outgoing && ctx.group && !collapsed_above).then(|| {
         m.author.as_deref().map(|a| ctx.app.name(a)).or_else(|| m.author_name.clone()).unwrap_or_else(|| "Unknown".into())
@@ -1182,12 +1190,15 @@ fn message(
                 format!("{name} deleted this message")
             }
         };
-        job.append(&text, 0., egui::TextFormat { font_id: theme::italic(14.), color: in_color, line_height: Some(20.), ..Default::default() });
+        // Desktop's deleted message: plain text in gray-60 / gray-25.
+        let color = if palette.dark { Color32::from_rgb(0xb9, 0xb9, 0xb9) } else { Color32::from_rgb(0x5e, 0x5e, 0x5e) };
+        job.append(&text, 0., egui::TextFormat { font_id: theme::regular(14.), color, line_height: Some(20.), ..Default::default() });
         Some(Rich { job, links: Vec::new(), spoilers: Vec::new() })
     } else if body_text.is_empty() {
         None
     } else {
-        let link_color = if outgoing { Color32::WHITE } else { palette.accent_text };
+        // Desktop's links are the text's own color, underlined.
+        let link_color = in_color;
         let font_size = if jumbo { 32. } else { 14. };
         let limit = ctx.expanded.get(&m.id).copied().unwrap_or(READ_MORE_LENGTH);
         // Desktop's `areLinksEnabled`: no links in a message request not
@@ -1242,7 +1253,7 @@ fn message(
         let size = Vec2::splat(144.);
         let name_galley = author_name.as_ref().map(|n| {
             let color = m.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.text);
-            ui.painter().layout_no_wrap(n.clone(), theme::semibold(13.), color)
+            ui.painter().layout_no_wrap(n.clone(), theme::semibold(12.), color)
         });
         let name_h = name_galley.as_ref().map(|g| g.size().y + 4.).unwrap_or(0.);
         let reactions_h = if m.reactions.is_empty() { 0. } else { 18. };
@@ -1321,7 +1332,7 @@ fn message(
     let meta_inline = show_meta && galley.is_some() && cta.is_none() && last_row_w + meta_w + 8. <= inner_max;
     let name_galley = author_name.as_ref().map(|n| {
         let color = m.author.as_deref().map(|a| theme::name_color(a, palette.dark)).unwrap_or(palette.text);
-        ui.painter().layout_no_wrap(n.clone(), theme::semibold(13.), color)
+        ui.painter().layout_no_wrap(n.clone(), theme::semibold(12.), color)
     });
     let mut content_w = text_w.max(if meta_inline { last_row_w + meta_w + 8. } else if show_meta { meta_w } else { 0. });
     if let Some(n) = &name_galley {
@@ -1393,6 +1404,10 @@ fn message(
         CornerRadius { ne: r, se: r, nw: if collapsed_above { small } else { r }, sw: if collapsed_below { small } else { r } }
     };
     if jumbo {
+    } else if m.deleted {
+        // Desktop's deleted message: an outline only, gray-25 / gray-75.
+        let line = if palette.dark { theme::rgb(0x3b3b3b) } else { theme::rgb(0xb9b9b9) };
+        ui.painter().rect_stroke(bubble, radius, Stroke::new(1., line), StrokeKind::Inside);
     } else if outgoing {
         crate::chat_colors::paint(ui.painter(), bubble, radius, crate::chat_colors::for_chat(ctx.app, ctx.chat_id), ui.ctx().content_rect());
     } else {
@@ -2402,16 +2417,20 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
     if let Some(rest) = more {
         counts.push((String::new(), rest, false));
     }
+    // Desktop's reaction pills (`module-message__reactions__reaction`):
+    // gray-05 / gray-90, gray-25 / gray-60 for ours, a 1px border in the
+    // page color, counts in caption-bold gray-60 / gray-25.
+    let count_color = if palette.dark { theme::rgb(0xb9b9b9) } else { theme::rgb(0x5e5e5e) };
     let mut pills = Vec::new();
     for (emoji, count, mine) in &counts {
         let mut job = egui::text::LayoutJob::default();
         if emoji.is_empty() {
-            job.append(&format!("+{count}"), 0., egui::TextFormat { font_id: theme::semibold(11.), color: palette.text, valign: egui::Align::Center, ..Default::default() });
+            job.append(&format!("+{count}"), 0., egui::TextFormat { font_id: theme::semibold(11.), color: count_color, valign: egui::Align::Center, ..Default::default() });
         } else {
-            append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::emoji(14.), color: palette.text, ..Default::default() });
+            append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::emoji(16.), color: palette.text, ..Default::default() });
         }
         if *count > 1 && !emoji.is_empty() {
-            job.append(&format!(" {count}"), 0., egui::TextFormat { font_id: theme::semibold(11.), color: palette.text, valign: egui::Align::Center, ..Default::default() });
+            job.append(&format!(" {count}"), 0., egui::TextFormat { font_id: theme::semibold(11.), color: count_color, valign: egui::Align::Center, ..Default::default() });
         }
         let g = ui.fonts_mut(|f| f.layout_job(job));
         let w = (g.size().x + 14.).max(28.);
@@ -2422,9 +2441,15 @@ fn reaction_pills(ui: &Ui, ctx: &Ctx<'_>, m: &Message, bubble: Rect, outgoing: b
     let y = bubble.bottom() - 4.;
     for (i, (g, w, mine, emoji)) in pills.into_iter().enumerate() {
         let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, 22.));
-        let fill = if mine { if palette.dark { Color32::from_gray(80) } else { Color32::from_gray(214) } } else if palette.dark { Color32::from_gray(52) } else { Color32::from_gray(240) };
+        let fill = match (mine, palette.dark) {
+            (true, true) => theme::rgb(0x5e5e5e),
+            (true, false) => theme::rgb(0xb9b9b9),
+            (false, true) => theme::rgb(0x1b1b1b),
+            (false, false) => theme::rgb(0xe9e9e9),
+        };
         ui.painter().rect_filled(rect, CornerRadius::same(11), fill);
-        ui.painter().rect_stroke(rect, CornerRadius::same(11), Stroke::new(1.5, palette.background), StrokeKind::Outside);
+        let border = if palette.dark { theme::rgb(0x121212) } else { Color32::WHITE };
+        ui.painter().rect_stroke(rect, CornerRadius::same(11), Stroke::new(1., border), StrokeKind::Outside);
         ui.painter().galley(rect.center() - g.size() / 2., g, palette.text);
         if ui.interact(rect, ui.scope_id().with(("reaction", m.id, i)), Sense::click()).clicked() && mine {
             actions.push(Action::React { message_id: m.id, emoji, remove: true });

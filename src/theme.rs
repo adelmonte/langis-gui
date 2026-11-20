@@ -96,12 +96,14 @@ impl Palette {
     }
 
     /// Text on an outgoing bubble, and its time.
+    /// `.module-message__text--outgoing`: white at 90%.
     pub fn bubble_out_text(&self) -> Color32 {
-        Color32::WHITE
+        Color32::from_white_alpha(230)
     }
 
+    /// label-secondary-oncolor: white at 80% (70% dark).
     pub fn bubble_out_meta(&self) -> Color32 {
-        Color32::from_white_alpha(204)
+        Color32::from_white_alpha(if self.dark { 179 } else { 204 })
     }
 }
 
