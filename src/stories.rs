@@ -259,7 +259,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             if m.item(Some("photo"), "Photo or video") {
                                 pick = Some(true);
                             }
-                            if m.item(Some("text"), "Text story") {
+                            if m.item(Some("text-square"), "Text story") {
                                 pick = Some(false);
                             }
                         });
