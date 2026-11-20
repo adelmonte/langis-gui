@@ -1491,7 +1491,18 @@ fn message(
 ) -> Option<bool> {
     let palette = ctx.palette;
     if let Some(notice) = &m.notice {
-        let text = crate::notices::notice_text(notice, |sid| ctx.app.name(sid));
+        let mut text = crate::notices::notice_text(notice, |sid| ctx.app.name(sid));
+        // Desktop names a group we share with them, when there is one.
+        if let langis_store::Notice::NumberIsTheirs { who, phone } = notice
+            && let Some(group) = ctx.app.conversations.iter().find(|g| g.kind == langis_store::ConversationKind::Group && !g.left && g.members.iter().any(|m| m == who))
+        {
+            let them = ctx.app.name(who);
+            text = tf(
+                "icu:PhoneNumberDiscovery--notification--withSharedGroup",
+                &format!("{phone} belongs to {them}. You're both members of {}.", group.title),
+                &[("phoneNumber", crate::i18n::Arg::from(phone)), ("conversationTitle", crate::i18n::Arg::from(&them)), ("sharedGroup", crate::i18n::Arg::from(&group.title))],
+            );
+        }
         let button = notice_button(ctx, m, notice);
         // Desktop's SystemMessage: a 16px icon before 13px text on 16px
         // lines, at most 400 wide, red for missed and declined calls,
