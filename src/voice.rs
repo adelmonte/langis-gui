@@ -27,6 +27,16 @@ const LEVEL_EVERY: usize = (RATE / 20) as usize;
 
 /// A recording in progress: ffmpeg reading the microphone, and ffmpeg
 /// encoding what it reads.
+/// A finished recording waiting to be sent or thrown away: its file (for
+/// playing it back), its length and its levels.
+pub struct Draft {
+    bytes: Arc<Vec<u8>>,
+    path: PathBuf,
+    duration: f32,
+    levels: Vec<f32>,
+    _dir: tempfile::TempDir,
+}
+
 pub struct Recording {
     capture: Child,
     encoder: Child,
@@ -102,6 +112,17 @@ impl Recording {
     }
 
     /// Stops and returns the encoded file's bytes.
+    /// Stops and keeps the recording as a draft.
+    fn into_draft(self) -> Result<Draft, String> {
+        let duration = self.elapsed().as_secs_f32();
+        let levels = self.levels.lock().unwrap().clone();
+        let dir = tempfile::Builder::new().prefix("langis-gui-voice-").tempdir().map_err(|e| e.to_string())?;
+        let bytes = self.finish()?;
+        let path = dir.path().join("draft.m4a");
+        std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+        Ok(Draft { bytes: Arc::new(bytes), path, duration, levels, _dir: dir })
+    }
+
     fn finish(mut self) -> Result<Vec<u8>, String> {
         let _ = self.capture.kill();
         let _ = self.capture.wait();
@@ -165,6 +186,87 @@ pub fn start(app: &mut App, chat: &mut ChatView) {
 }
 
 /// Stops the recording and sends it, replying if a reply was set.
+/// Desktop's `CompositionRecordingDraft`: delete, play or pause with the
+/// waveform and its time, then send.
+pub fn draft_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_store::Conversation) {
+    let Some(draft) = chat.voice_draft.as_ref() else { return };
+    const DRAFT_ID: i64 = -1;
+    let mut discard = false;
+    let mut go = false;
+    let player = app.audio.active(DRAFT_ID).map(|p| (p.playing(), p.position()));
+    let (playing, position) = player.unwrap_or((false, 0.));
+    ui.horizontal(|ui| {
+        if crate::widgets::icon_button(ui, Icon::Trash, 20., "Discard").clicked() {
+            discard = true;
+        }
+        let width = ui.available_width() - 48.;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 36.), Sense::hover());
+        ui.painter().rect_filled(rect, CornerRadius::same(18), palette.bubble_in);
+        let play = Rect::from_center_size(Pos2::new(rect.left() + 20., rect.center().y), Vec2::splat(28.));
+        let pr = ui.interact(play, ui.scope_id().with("draft-play"), Sense::click());
+        ui.painter().circle_filled(play.center(), 14., palette.fill_pressed);
+        theme::paint_symbol(ui.painter(), if playing { "pause-fill" } else { "play-fill" }, play.center(), 14., palette.text);
+        if pr.on_hover_text(if playing { "Pause" } else { "Play" }).clicked() {
+            let path = draft.path.to_string_lossy().into_owned();
+            app.audio.toggle(DRAFT_ID, &c.id, "You".into(), &path, draft.duration, None);
+        }
+        // The levels in bars, played ones in the text color.
+        let bars = Rect::from_min_max(Pos2::new(play.right() + 10., rect.top() + 8.), Pos2::new(rect.right() - 60., rect.bottom() - 8.));
+        let n = ((bars.width() / 4.) as usize).max(1);
+        let peaks: Vec<f32> = (0..n).map(|i| {
+            let a = i * draft.levels.len() / n;
+            let b = ((i + 1) * draft.levels.len() / n).max(a + 1).min(draft.levels.len());
+            draft.levels.get(a..b).map(|s| s.iter().copied().fold(0., f32::max)).unwrap_or(0.)
+        }).collect();
+        let done_to = if draft.duration > 0. { position / draft.duration } else { 0. };
+        for (i, level) in peaks.iter().enumerate() {
+            let x = bars.left() + i as f32 * 4.;
+            let color = if (i as f32 / n as f32) < done_to { palette.text } else { palette.text_secondary.gamma_multiply(0.6) };
+            ui.painter().rect_filled(Rect::from_center_size(Pos2::new(x + 1., bars.center().y), Vec2::new(2., (level * bars.height()).max(2.))), CornerRadius::same(1), color);
+        }
+        let left = if playing { draft.duration - position } else { draft.duration };
+        let secs = left.max(0.).round() as u32;
+        ui.painter().text(Pos2::new(rect.right() - 16., rect.center().y), egui::Align2::RIGHT_CENTER, format!("{}:{:02}", secs / 60, secs % 60), theme::medium(13.), palette.text_secondary);
+        let (send_rect, r) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
+        ui.painter().circle_filled(send_rect.center(), 16., palette.badge);
+        Icon::SendFill.paint(ui, send_rect, 18., Color32::WHITE);
+        if r.on_hover_text("Send").clicked() {
+            go = true;
+        }
+    });
+    if playing {
+        ui.ctx().request_repaint_after(Duration::from_millis(50));
+    }
+    // Desktop's time-limit question (`voiceRecordingInterruptedMax`).
+    let max_id = egui::Id::unique("voice-max");
+    if ui.ctx().data(|d| d.get_temp::<bool>(max_id)).unwrap_or(false) {
+        use crate::dialog::{Answer, Variant};
+        match crate::dialog::show(ui.ctx(), max_id.with("dialog"), "", "Voice message recording stopped because the maximum time limit was reached.", Some("Discard"), &[("Send anyway", Variant::StrongPrimary)]) {
+            Some(Answer::Action(_)) => {
+                ui.ctx().data_mut(|d| d.remove::<bool>(max_id));
+                go = true;
+            }
+            Some(Answer::Cancel) => {
+                ui.ctx().data_mut(|d| d.remove::<bool>(max_id));
+                discard = true;
+            }
+            None => {}
+        }
+    }
+    if discard || go {
+        if app.audio.active(DRAFT_ID).is_some() {
+            app.audio.stop();
+        }
+        let draft = chat.voice_draft.take();
+        if go && let Some(draft) = draft {
+            let file = langis_core::OutgoingFile { bytes: draft.bytes, file_name: "voice.m4a".into(), voice: true };
+            let command = Command::SendFile { conversation: c.id.clone(), file, caption: String::new(), quote: chat.quote.take(), mentions: Vec::new(), styles: Vec::new() };
+            app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
+            chat.scroll_to_bottom = 10;
+        }
+    }
+}
+
 fn send(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversation) {
     let Some(recording) = chat.recording.take() else { return };
     if recording.elapsed() < Duration::from_millis(500) {
@@ -196,7 +298,24 @@ pub fn recording_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut C
     let elapsed = recording.elapsed();
     let levels = recording.levels.lock().unwrap().clone();
     let mut cancel = false;
-    let mut done = elapsed >= MAX;
+    let mut done = false;
+    // Desktop keeps the recording as a draft when the window loses focus
+    // (`saveDraftRecordingIfNeeded`), and stops at the time limit, asking
+    // whether to send it.
+    if !app.focused || elapsed >= MAX {
+        let max = elapsed >= MAX;
+        match chat.recording.take().map(Recording::into_draft) {
+            Some(Ok(draft)) => {
+                chat.voice_draft = Some(draft);
+                if max {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("voice-max"), true));
+                }
+            }
+            Some(Err(error)) => app.toast(format!("Couldn't keep the voice message: {error}")),
+            None => {}
+        }
+        return;
+    }
     ui.horizontal(|ui| {
         if crate::widgets::icon_button(ui, Icon::Trash, 20., "Cancel").clicked() {
             cancel = true;
@@ -275,5 +394,18 @@ mod tests {
         let mut out = String::new();
         child.stdout.take().unwrap().read_to_string(&mut out).unwrap();
         assert_eq!(out.trim(), "aac");
+    }
+
+    #[test]
+    #[ignore = "needs ffmpeg"]
+    fn keeps_a_draft_to_play_back() {
+        // SAFETY: the test runs alone (it's ignored unless asked for).
+        unsafe { std::env::set_var("LANGIS_GUI_VOICE_INPUT", "lavfi:sine=frequency=440:sample_rate=48000") };
+        let recording = Recording::start().unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        let draft = recording.into_draft().unwrap();
+        assert!(draft.duration >= 1.);
+        assert!(!draft.levels.is_empty());
+        assert_eq!(std::fs::read(&draft.path).unwrap(), *draft.bytes);
     }
 }

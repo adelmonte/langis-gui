@@ -115,6 +115,8 @@ pub struct ChatView {
     pub attach_menu: bool,
     /// A voice message being recorded.
     pub recording: Option<crate::voice::Recording>,
+    /// A voice message recorded but not sent (Desktop's `CompositionRecordingDraft`).
+    pub voice_draft: Option<crate::voice::Draft>,
     /// Search in this chat, while open.
     pub find: Option<crate::search::Find>,
 }
@@ -232,6 +234,7 @@ impl ChatView {
             view_once: false,
             attach_menu: false,
             recording: None,
+            voice_draft: None,
             find: None,
         }
     }

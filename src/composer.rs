@@ -390,6 +390,10 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 crate::voice::recording_bar(app, ui, palette, chat, c);
                 return;
             }
+            if chat.voice_draft.is_some() {
+                crate::voice::draft_bar(app, ui, palette, chat, c);
+                return;
+            }
             edit_escape(ui, chat);
             reply_bar(app, ui, palette, chat);
             take_dropped_and_pasted(app, ui, chat);
