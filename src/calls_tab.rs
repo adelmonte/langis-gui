@@ -498,64 +498,186 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
             });
         });
     }
-    // The participants list (and, for our link, who's waiting).
+    // Desktop's `CallingParticipantsList`: 320x440 on gray-80, radius 10,
+    // "In this call · N people" and its close X, then a row per person
+    // (avatar, name, their presenting, camera and microphone states),
+    // each opening their ContactModal.
     if app.panes.participants_open {
-        egui::Area::new(egui::Id::unique("call-participants")).fixed_pos(Pos2::new(area.right() - 316., area.top() + 64.)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            egui::Frame::new().fill(egui::Color32::from_gray(38)).corner_radius(CornerRadius::same(16)).inner_margin(12).show(ui, |ui| {
-                ui.set_width(280.);
-                ui.label(RichText::new(format!("In this call · {}", call.participants.len() + 1)).font(theme::semibold(14.)).color(white));
-                ui.add_space(6.);
-                ui.label(RichText::new("You").color(white));
-                let admin = call.link.as_ref().is_some_and(|l| l.admin);
-                for p in &call.participants {
-                    ui.horizontal(|ui| {
-                        let mut name = app.name(&p.aci);
-                        if !p.audio {
-                            name.push_str(" (muted)");
+        let mut close = false;
+        let mut open_contact = None;
+        egui::Area::new(egui::Id::unique("call-participants")).fixed_pos(Pos2::new(area.right() - 336., area.top() + 20.)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+            egui::Frame::new().fill(theme::rgb(0x2e2e2e)).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::same(5)).show(ui, |ui| {
+                ui.set_width(310.);
+                ui.set_max_height((area.height() - 107.).min(430.));
+                ui.horizontal(|ui| {
+                    ui.add_space(5.);
+                    let n = call.participants.len() + 1;
+                    let title = if n <= 1 { "No one else is here".to_owned() } else { format!("In this call \u{b7} {n} {}", if n == 1 { "person" } else { "people" }) };
+                    ui.label(RichText::new(title).font(theme::semibold(14.)).color(white));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (x, r) = ui.allocate_exact_size(Vec2::splat(18.), Sense::click());
+                        theme::paint_symbol(ui.painter(), "x", x.center(), 16., white);
+                        if r.on_hover_text("Close").clicked() {
+                            close = true;
                         }
-                        ui.label(RichText::new(name).color(white));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if admin && ui.small_button("Remove").clicked() {
-                                app.send(Command::RemoveFromCall { demux_id: p.demux_id });
+                    });
+                });
+                ui.add_space(6.);
+                egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+                    let my_name = app.me.0.clone();
+                    let row = |ui: &mut Ui, name: &str, aci: &str, photo: Option<&str>, presenting: bool, video: bool, audio: bool, me: bool| -> bool {
+                        let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.), if me { Sense::hover() } else { Sense::click() });
+                        if !me && r.hovered() {
+                            ui.painter().rect_filled(rect, CornerRadius::same(6), theme::rgb(0x6b6b6b));
+                        }
+                        let color = aci.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                        let avatar = Rect::from_min_size(Pos2::new(rect.left() + 10., rect.center().y - 16.), Vec2::splat(32.));
+                        let initials_of = if me { my_name.as_str() } else { name };
+                        widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo, ..widgets::AvatarSpec::person(initials_of, color) });
+                        ui.painter().text(Pos2::new(avatar.right() + 8., rect.center().y), egui::Align2::LEFT_CENTER, name, theme::regular(13.), white);
+                        let mut x = rect.right() - 10. - 8.;
+                        // Desktop's status icons: muted, camera off, presenting.
+                        for (symbol, show) in [("mic-slash-fill", !audio), ("videocamera-slash-fill", !video)] {
+                            if show {
+                                theme::paint_symbol(ui.painter(), symbol, Pos2::new(x, rect.center().y), 16., white);
+                                x -= 32.;
                             }
-                            if p.audio && ui.small_button("Mute").on_hover_text("Ask them to mute").clicked() {
-                                app.send(Command::RemoteMute { demux_id: p.demux_id });
+                        }
+                        if presenting {
+                            crate::icons::Icon::ShareScreenFillLight.paint(ui, Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(16.)), 16., white);
+                        }
+                        r.clicked()
+                    };
+                    let me = (app.me.0.clone(), app.me.1.clone());
+                    let my_video = app.call_view.video_on.unwrap_or(call.video);
+                    row(ui, "You", &app.aci, me.1.as_deref(), call.sharing, my_video, app.call_view.audio_on, true);
+                    for p in &call.participants {
+                        let name = app.name(&p.aci);
+                        let photo = app.conversation(&ConversationId::direct(&p.aci)).and_then(|c| c.avatar_path.clone());
+                        if row(ui, &name, &p.aci, photo.as_deref(), p.presenting, p.video, p.audio, false) {
+                            open_contact = Some(p.aci.clone());
+                        }
+                    }
+                });
+            });
+        });
+        if close {
+            app.panes.participants_open = false;
+        }
+        if let Some(aci) = open_contact {
+            crate::contact_modal::open(app, Some(call.conversation.clone()), aci);
+        }
+    }
+    // Desktop's `CallingPendingParticipants`, for a link we administer: the
+    // first request ("Would like to join...") with approve and deny and
+    // "+N requests", or, expanded, every request with Approve all and
+    // Deny all (each asking first).
+    if let Some(link) = call.link.as_ref().filter(|l| l.admin && !l.pending.is_empty()) {
+        let pending = link.pending.clone();
+        let n = pending.len();
+        let expanded = app.panes.pending_expanded && n > 1;
+        let mut act: Vec<(String, bool)> = Vec::new();
+        let mut toggle = false;
+        egui::Area::new(egui::Id::unique("call-pending")).fixed_pos(Pos2::new(area.left() + 20., area.top() + 20.)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+            egui::Frame::new().fill(theme::rgb(0x2e2e2e)).corner_radius(CornerRadius::same(16)).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+                ui.set_width(320.);
+                let person = |ui: &mut Ui, aci: &str, subtitle: Option<&str>, act: &mut Vec<(String, bool)>| {
+                    ui.horizontal(|ui| {
+                        let name = app.name(aci);
+                        let color = aci.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                        let photo = app.conversation(&ConversationId::direct(aci)).and_then(|c| c.avatar_path.clone());
+                        let (at, _) = ui.allocate_exact_size(Vec2::splat(36.), Sense::hover());
+                        widgets::paint_avatar(ui, at, &widgets::AvatarSpec { photo: photo.as_deref(), ..widgets::AvatarSpec::person(&name, color) });
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.;
+                            ui.label(RichText::new(&name).font(theme::semibold(14.)).color(white));
+                            if let Some(sub) = subtitle {
+                                ui.label(RichText::new(sub).font(theme::regular(13.)).color(egui::Color32::from_white_alpha(180)));
+                            }
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let round = |ui: &mut Ui, symbol: &str, fill: egui::Color32, tip: &str| {
+                                let (r, resp) = ui.allocate_exact_size(Vec2::splat(32.), Sense::click());
+                                ui.painter().circle_filled(r.center(), 16., fill);
+                                theme::paint_symbol(ui.painter(), symbol, r.center(), 18., white);
+                                resp.on_hover_text(tip).clicked()
+                            };
+                            if round(ui, "check", palette.green, "Approve join request") {
+                                act.push((aci.to_owned(), true));
+                            }
+                            if round(ui, "x", palette.destructive, "Deny join request") {
+                                act.push((aci.to_owned(), false));
                             }
                         });
                     });
-                }
-                if let Some(link) = call.link.as_ref().filter(|l| l.admin && !l.pending.is_empty()) {
-                    ui.add_space(8.);
-                    ui.label(RichText::new("Waiting to join").font(theme::semibold(13.)).color(white));
-                    for aci in &link.pending {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(app.name(aci)).color(white));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button("Deny").clicked() {
-                                    app.send(Command::ApproveCallJoin { aci: aci.clone(), approve: false });
-                                }
-                                if ui.small_button("Approve").clicked() {
-                                    app.send(Command::ApproveCallJoin { aci: aci.clone(), approve: true });
-                                }
-                            });
+                };
+                if expanded {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{n} {} to join the call", if n == 1 { "request" } else { "requests" })).font(theme::semibold(14.)).color(white));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let (x, r) = ui.allocate_exact_size(Vec2::splat(18.), Sense::click());
+                            theme::paint_symbol(ui.painter(), "chevron-up", x.center(), 16., white);
+                            if r.clicked() {
+                                toggle = true;
+                            }
                         });
+                    });
+                    ui.add_space(8.);
+                    egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
+                        for aci in &pending {
+                            person(ui, aci, None, &mut act);
+                            ui.add_space(6.);
+                        }
+                    });
+                    ui.add_space(6.);
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new(RichText::new("Deny all").color(white)).fill(theme::rgb(0x4a4a4a)).corner_radius(CornerRadius::same(15))).clicked() {
+                            app.panes.pending_all = Some(false);
+                        }
+                        if ui.add(egui::Button::new(RichText::new("Approve all").color(white)).fill(palette.green).corner_radius(CornerRadius::same(15))).clicked() {
+                            app.panes.pending_all = Some(true);
+                        }
+                    });
+                } else {
+                    person(ui, &pending[0], Some("Would like to join..."), &mut act);
+                    if n > 1 {
+                        ui.add_space(6.);
+                        let more = n - 1;
+                        let r = ui.add(egui::Label::new(RichText::new(format!("+{more} {}", if more == 1 { "request" } else { "requests" })).font(theme::semibold(13.)).color(white)).sense(Sense::click()));
+                        if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            toggle = true;
+                        }
                     }
                 }
             });
         });
-    }
-    // Someone waiting, for a link we administer: a banner even with the list closed.
-    if let Some(link) = call.link.as_ref().filter(|l| l.admin && !l.pending.is_empty() && !app.panes.participants_open) {
-        let text = format!("{} would like to join", app.name(&link.pending[0]));
-        let rect = Rect::from_center_size(Pos2::new(area.center().x, area.top() + 80.), Vec2::new(360., 44.));
-        ui.painter().rect_filled(rect, CornerRadius::same(12), egui::Color32::from_gray(45));
-        ui.painter().text(rect.left_center() + Vec2::new(14., 0.), egui::Align2::LEFT_CENTER, text, theme::medium(13.), white);
-        let approve = Rect::from_min_size(Pos2::new(rect.right() - 84., rect.top() + 8.), Vec2::new(74., 28.));
-        let response = ui.interact(approve, ui.scope_id().with("approve-first"), Sense::click());
-        ui.painter().rect_filled(approve, CornerRadius::same(14), palette.green);
-        ui.painter().text(approve.center(), egui::Align2::CENTER_CENTER, "Approve", theme::medium(12.), white);
-        if response.clicked() {
-            app.send(Command::ApproveCallJoin { aci: link.pending[0].clone(), approve: true });
+        if toggle {
+            app.panes.pending_expanded = !app.panes.pending_expanded;
+        }
+        for (aci, approve) in act {
+            app.send(Command::ApproveCallJoin { aci, approve });
+        }
+        if let Some(approve) = app.panes.pending_all {
+            use crate::dialog::{Answer, Variant};
+            let (title, body) = if approve {
+                (format!("Approve {n} {}?", if n == 1 { "request" } else { "requests" }), format!("{n} {} will be added to the call.", if n == 1 { "person" } else { "people" }))
+            } else {
+                (format!("Deny {n} {}?", if n == 1 { "request" } else { "requests" }), format!("{n} {} will not be added to the call.", if n == 1 { "person" } else { "people" }))
+            };
+            let label = if approve { "Approve all" } else { "Deny all" };
+            match crate::dialog::show(ui.ctx(), egui::Id::unique("pending-all"), &title, &body, Some("Cancel"), &[(label, if approve { Variant::StrongPrimary } else { Variant::StrongDestructive })]) {
+                Some(Answer::Action(_)) => {
+                    app.panes.pending_all = None;
+                    for aci in &pending {
+                        app.send(Command::ApproveCallJoin { aci: aci.clone(), approve });
+                    }
+                    if approve {
+                        app.toast(format!("{n} {} added to the call", if n == 1 { "person" } else { "people" }));
+                    }
+                }
+                Some(Answer::Cancel) => app.panes.pending_all = None,
+                None => {}
+            }
         }
     }
     if call.link.as_ref().is_some_and(|l| l.waiting) {

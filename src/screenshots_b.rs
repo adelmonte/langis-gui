@@ -248,6 +248,16 @@ fn screenshots_panes() {
     harness.state_mut().panes.call_reactions.push((langis_core::CallReaction { aci: first, demux_id: 1, emoji: "👍".into() }, Instant::now()));
     wait(&mut harness, "group call", |_| true);
     save(&mut harness, "call-group-extras");
+    // A call link we run, with people asking to join.
+    let asking: Vec<String> = group.members.iter().skip(1).take(3).cloned().collect();
+    if let Some(call) = harness.state_mut().call.as_mut() {
+        call.link = Some(langis_core::CallLinkCall { admin: true, pending: asking, waiting: false });
+    }
+    harness.state_mut().panes.participants_open = false;
+    harness.state_mut().panes.pending_expanded = true;
+    wait(&mut harness, "pending participants", |_| true);
+    save(&mut harness, "call-pending");
+    harness.state_mut().panes.pending_expanded = false;
     harness.state_mut().call = None;
     harness.state_mut().panes.participants_open = false;
 

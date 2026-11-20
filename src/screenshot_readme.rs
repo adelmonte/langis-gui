@@ -79,7 +79,6 @@ fn rename(app: &mut App) -> Vec<String> {
                 group += 1;
             }
             ConversationKind::NoteToSelf => c.last_message_preview = Some("Clues: rubber mask, glow paint, footprints in the flour".into()),
-            _ => {}
         }
     }
     for (i, sid) in members.iter().enumerate() {

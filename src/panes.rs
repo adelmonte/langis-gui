@@ -44,6 +44,10 @@ pub struct Panes {
     /// Reactions sent in the group call, with when they came.
     pub call_reactions: Vec<(CallReaction, Instant)>,
     pub participants_open: bool,
+    /// Desktop's pending participants bubble: expanded to the whole list.
+    pub pending_expanded: bool,
+    /// "Approve all" or "Deny all" waiting on its confirmation.
+    pub pending_all: Option<bool>,
     pub reactions_open: bool,
 
     // The Stories tab.
