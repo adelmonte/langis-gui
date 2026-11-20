@@ -347,7 +347,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Opens the Debug Log window and assembles the log off the UI thread:
 /// langis's `debug_log::assemble`, with phone numbers, ids and our own
 /// paths redacted, as Desktop's.
-fn open_debug_log(app: &mut App) {
+pub fn open_debug_log(app: &mut App) {
     app.settings.help = Some(Help::DebugLog { log: None, uploading: false, link: None });
     let dir = langis_core::debug_log::log_dir(&app.data_dir);
     let mut sensitive = vec![app.data_dir.clone()];
@@ -596,6 +596,12 @@ fn general(app: &mut App, ui: &mut Ui) {
         let current = entry.as_ref().and_then(|p| std::fs::read_to_string(p).ok());
         let mut at_login = current.is_some();
         let mut minimized = current.as_deref().is_some_and(|t| t.contains("--minimized"));
+        // Desktop's Hide menu bar.
+        let mut hide = app.hide_menu_bar;
+        if axo_list::switch(ui, Item::new(tr("Hide menu bar")), &mut hide) {
+            app.hide_menu_bar = hide;
+            write(app, crate::menu_bar::SETTING_HIDE_MENU_BAR, hide.to_string());
+        }
         // Desktop's system tray rows.
         let (mut tray, mut tray_start) = app.tray_prefs;
         if axo_list::switch(ui, Item::new(tr("Minimize to system tray")), &mut tray) {

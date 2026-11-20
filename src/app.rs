@@ -136,6 +136,9 @@ pub struct App {
     pub window_shown: bool,
     /// Quit from the tray: closing really closes.
     quitting: bool,
+    /// Desktop's Hide menu bar, and a menu of the bar open.
+    pub hide_menu_bar: bool,
+    pub menu_open: bool,
     /// This device was unlinked: Desktop's DialogRelink, until clicked.
     pub unlinked: bool,
     pub history: Option<HistoryProgress>,
@@ -276,6 +279,8 @@ impl App {
             tray_shown: (u32::MAX, true),
             window_shown: true,
             quitting: false,
+            hide_menu_bar: false,
+            menu_open: false,
             unlinked: false,
             history: None,
             tab: Tab::Chats,
@@ -439,6 +444,12 @@ impl App {
             self.title_shown = title;
         }
         self.tray_frame(ctx, count);
+    }
+
+    /// Quits for real (the menu's or the tray's Quit).
+    pub fn quit(&mut self, ctx: &egui::Context) {
+        self.quitting = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
     /// Turns the tray icon on or off for the setting.
@@ -605,6 +616,7 @@ impl App {
                     let spell = get(db.setting(crate::spell::SETTING_SPELL_CHECK).await.ok().flatten()).unwrap_or(true);
                     let badge_chats = get(db.setting(crate::settings::SETTING_BADGE_CHATS).await.ok().flatten()).unwrap_or(false);
                     let tray = get(db.setting(crate::settings::SETTING_TRAY).await.ok().flatten()).unwrap_or(false);
+                    let hide_menu_bar = get(db.setting(crate::menu_bar::SETTING_HIDE_MENU_BAR).await.ok().flatten()).unwrap_or(false);
                     let tray_start = get(db.setting(crate::settings::SETTING_TRAY_START).await.ok().flatten()).unwrap_or(false);
                     let badge_muted = get(db.setting(crate::settings::SETTING_BADGE_MUTED).await.ok().flatten()).unwrap_or(true);
                     let words: Vec<String> = db.setting(crate::spell::SETTING_SPELL_WORDS).await.ok().flatten().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
@@ -612,6 +624,7 @@ impl App {
                         app.input = InputPrefs { auto_convert, formatting, skin_tone, spell };
                         app.badge_prefs = BadgePrefs { chats: badge_chats, muted: badge_muted };
                         app.tray_prefs = (tray, tray_start);
+                        app.hide_menu_bar = hide_menu_bar;
                         let ctx = app.ctx.clone();
                         app.set_tray(&ctx, tray);
                         // Desktop's Start minimized to tray.

@@ -33,6 +33,7 @@ mod i18n_locales;
 mod icons;
 mod lightbox;
 mod menu;
+mod menu_bar;
 mod notices;
 mod panes;
 mod polls;

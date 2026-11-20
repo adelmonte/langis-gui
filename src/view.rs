@@ -21,6 +21,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     }
     crate::shortcuts::handle(app, ui.ctx());
+    crate::menu_bar::show(app, ui);
     let full_call = !app.call_view.pip && app.call.as_ref().is_some_and(|c| !(c.incoming && c.status == langis_core::CallStatus::Ringing));
     if full_call {
         crate::call::show(app, ui);
