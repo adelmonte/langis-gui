@@ -38,12 +38,38 @@ pub enum Dialog {
     Pinned { messages: Vec<Message> },
     /// A notice's Learn more: what it means.
     Explain { title: &'static str, body: &'static str },
+    /// Desktop's `ShareContactDialog`: pick someone, then what of theirs
+    /// to share.
+    ShareContact(ShareStep),
     /// Desktop's `ReactionViewer`: who reacted, all or by emoji; your
     /// own row removes yours.
     ReactionViewer { message: i64, tab: Option<String> },
     /// Desktop's `CustomizingPreferredReactionsModal`: the reaction bar's
     /// six, one picked to change from the emoji picker.
     Reactions { slots: Vec<String>, selected: Option<usize>, picker: crate::emoji_picker::Picker },
+}
+
+pub enum ShareStep {
+    /// "Select contact": who can be shared, once loaded.
+    Pick { query: String, candidates: Option<Vec<langis_core::share_contact::ShareCandidate>> },
+    /// Loading the picked person's details.
+    Loading,
+    /// "Share contact": the card and the optional details.
+    Share { draft: langis_core::share_contact::ShareContactDraft, selection: langis_core::share_contact::ShareContactSelection },
+}
+
+/// Opens the share contact dialog and loads who can be shared.
+pub fn open_share_contact(app: &App, chat: &mut crate::chat::ChatView) {
+    chat.dialog = Some(Dialog::ShareContact(ShareStep::Pick { query: String::new(), candidates: None }));
+    let recipient = chat.id.clone();
+    app.load(move |db| async move {
+        let list = langis_core::share_contact::candidates(&db, &recipient).await;
+        Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
+            if let Some(Dialog::ShareContact(ShareStep::Pick { candidates, .. })) = app.chat.as_mut().and_then(|c| c.dialog.as_mut()) {
+                *candidates = Some(list);
+            }
+        })))
+    });
 }
 
 /// Desktop's `MessageDetail`: each recipient's state and the edits.
@@ -468,6 +494,107 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
             let modal = egui::Modal::new(egui::Id::unique("new-poll")).frame(frame).show(ui.ctx(), |ui| {
                 crate::polls::dialog(ui, &palette, poll, &c.id, &mut out);
             });
+            if modal.should_close() {
+                out.push(Do::Close);
+            }
+        }
+        Dialog::ShareContact(step) => {
+            use langis_core::share_contact as share;
+            let mut next = None;
+            let modal = egui::Modal::new(egui::Id::unique("share-contact")).frame(frame).show(ui.ctx(), |ui| {
+                ui.set_width(360.);
+                match step {
+                    ShareStep::Pick { query, candidates } => {
+                        ui.label(RichText::new("Select contact").font(theme::semibold(18.)));
+                        ui.add_space(12.);
+                        widgets::text_field(ui, query, "Search", false);
+                        ui.add_space(8.);
+                        let Some(list) = candidates else {
+                            ui.vertical_centered(|ui| ui.spinner());
+                            return;
+                        };
+                        let shown: Vec<share::ShareCandidate> = list.iter().filter(|c| share::matches(c, query)).cloned().collect();
+                        if shown.is_empty() {
+                            ui.add_space(24.);
+                            ui.vertical_centered(|ui| {
+                                let text = if query.trim().is_empty() { "No contacts".to_owned() } else { format!("No results for \u{201c}{}\u{201d}", query.trim()) };
+                                ui.label(RichText::new(text).font(theme::regular(14.)).color(palette.text_secondary));
+                            });
+                            ui.add_space(24.);
+                            return;
+                        }
+                        egui::ScrollArea::vertical().max_height(420.).min_scrolled_height(320.).auto_shrink([false, false]).show(ui, |ui| {
+                            // Desktop groups the list by first letter.
+                            for (letter, people) in share::group_by_first_initial(shown, |c| c.title.as_str()) {
+                                ui.add_space(6.);
+                                ui.label(RichText::new(letter).font(theme::semibold(13.)).color(palette.text_secondary));
+                                for person in people {
+                                    let sid = person.id.as_direct().unwrap_or_default().to_owned();
+                                    let color = sid.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                                    let photo = app.conversation(&person.id).and_then(|c| c.avatar_path.clone());
+                                    if crate::panes::contact_row(ui, &palette, &person.title, person.phone.as_deref(), color, photo.as_deref()).clicked() {
+                                        next = Some(person.clone());
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    ShareStep::Loading => {
+                        ui.label(RichText::new("Share contact").font(theme::semibold(18.)));
+                        ui.add_space(24.);
+                        ui.vertical_centered(|ui| ui.spinner());
+                        ui.add_space(24.);
+                    }
+                    ShareStep::Share { draft, selection } => {
+                        ui.label(RichText::new("Share contact").font(theme::semibold(18.)));
+                        ui.add_space(16.);
+                        let name = draft.name.as_ref().and_then(|n| n.full()).or_else(|| draft.organization.clone()).unwrap_or_default();
+                        ui.vertical_centered(|ui| {
+                            let color = draft.aci.as_deref().unwrap_or_default().bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                            let photo = draft.avatar.as_ref().map(|a| a.path.clone());
+                            let (at, _) = ui.allocate_exact_size(egui::vec2(80., 80.), Sense::hover());
+                            widgets::paint_avatar(ui, at, &widgets::AvatarSpec { photo: photo.as_deref(), ..widgets::AvatarSpec::person(&name, color) });
+                            ui.add_space(8.);
+                            ui.label(RichText::new(&name).font(theme::semibold(16.)));
+                        });
+                        ui.add_space(12.);
+                        // The optional details, each a checkbox as Desktop's.
+                        if let Some(e164) = &draft.e164 {
+                            ui.checkbox(&mut selection.e164, RichText::new(format!("Phone  {}", share::format_phone(e164, None))).font(theme::regular(14.)));
+                        }
+                        if let Some((given, family)) = &draft.nickname {
+                            ui.checkbox(&mut selection.nickname, RichText::new(format!("Nickname  {} {}", given, family).trim().to_owned()).font(theme::regular(14.)));
+                        }
+                        if let Some(note) = &draft.note {
+                            ui.checkbox(&mut selection.note, RichText::new(format!("Notes  {note}")).font(theme::regular(14.)));
+                        }
+                        ui.add_space(16.);
+                        let shared = share::apply_selection(draft, *selection);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let can = share::can_share(&shared);
+                            if ui.add_enabled_ui(can, |ui| widgets::pill_button(ui, "Send contact", true)).inner.clicked() {
+                                out.push(Do::Command(Command::ShareContact { conversation: c.id.clone(), share: Box::new(shared.clone()) }));
+                                out.push(Do::Close);
+                            }
+                            if widgets::pill_button(ui, "Cancel", false).clicked() {
+                                out.push(Do::Close);
+                            }
+                        });
+                    }
+                }
+            });
+            if let Some(person) = next {
+                *step = ShareStep::Loading;
+                app.load(move |db| async move {
+                    let draft = share::with_e164_as_missing_name(share::read_draft(&db, &person).await, None);
+                    let selection = share::default_selection(&draft);
+                    Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
+                        if let Some(Dialog::ShareContact(step)) = app.chat.as_mut().and_then(|c| c.dialog.as_mut()) {
+                            *step = ShareStep::Share { draft, selection };
+                        }
+                    })))
+                });
+            }
             if modal.should_close() {
                 out.push(Do::Close);
             }

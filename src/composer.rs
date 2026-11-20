@@ -1006,7 +1006,7 @@ fn insert_at_cursor(ctx: &egui::Context, id: egui::Id, chat: &mut ChatView, text
     set_cursor(ctx, id, char_index + text.chars().count());
 }
 
-/// Desktop's + menu: photos and videos, a file, a poll. View-once media is
+/// Desktop's + menu: photos and videos, a file, a poll, a contact. View-once media is
 /// ours here until drafts can carry Desktop's view-once toggle.
 fn attach_menu(app: &mut App, ui: &Ui, plus: &egui::Response, chat: &mut ChatView, _c: &langis_store::Conversation) {
     let mut choice = None;
@@ -1020,11 +1020,15 @@ fn attach_menu(app: &mut App, ui: &Ui, plus: &egui::Response, chat: &mut ChatVie
         if m.item(Some("poll"), "Poll") {
             choice = Some(1);
         }
+        if m.item(Some("person-circle"), "Contact") {
+            choice = Some(4);
+        }
     });
     match choice {
         Some(0) => attach(app, chat, true),
         Some(3) => attach(app, chat, false),
         Some(1) => chat.dialog = Some(crate::actions::Dialog::Poll(crate::polls::NewPoll::default())),
+        Some(4) => crate::actions::open_share_contact(app, chat),
         _ => {}
     }
 }

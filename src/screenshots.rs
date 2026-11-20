@@ -213,6 +213,17 @@ fn screenshots_message_actions() {
     save(&mut harness, "reaction-bar");
     harness.state_mut().chat.as_mut().unwrap().popup = None;
 
+    {
+        let app = harness.state_mut();
+        let mut chat = app.chat.take().unwrap();
+        crate::actions::open_share_contact(app, &mut chat);
+        app.chat = Some(chat);
+    }
+    wait(&mut harness, "share contact list", |app| {
+        matches!(app.chat.as_ref().and_then(|c| c.dialog.as_ref()), Some(Dialog::ShareContact(crate::actions::ShareStep::Pick { candidates: Some(_), .. })))
+    });
+    save(&mut harness, "share-contact-pick");
+
     let reacted = message_id(&harness, |m| !m.reactions.is_empty());
     harness.state_mut().chat.as_mut().unwrap().dialog = Some(Dialog::ReactionViewer { message: reacted, tab: None });
     wait(&mut harness, "reaction viewer", |_| true);
