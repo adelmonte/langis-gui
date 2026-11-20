@@ -43,6 +43,8 @@ pub struct Panes {
     pub lobby: Option<Lobby>,
     /// Reactions sent in the group call, with when they came.
     pub call_reactions: Vec<(CallReaction, Instant)>,
+    /// Desktop's `CallingToastManager` toasts over the call: text, since.
+    pub call_toasts: Vec<(String, Instant)>,
     pub participants_open: bool,
     /// Desktop's pending participants bubble: expanded to the whole list.
     pub pending_expanded: bool,

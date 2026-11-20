@@ -535,6 +535,21 @@ impl App {
                 if started { set.insert(author) } else { set.remove(&author) };
             }
             Event::Call(update) => {
+                // Desktop's presenting toasts: someone, or we, stopped.
+                if let (Some(old), Some(new)) = (self.call.as_ref(), update.as_ref()) {
+                    if old.sharing && !new.sharing {
+                        self.panes.call_toasts.push(("You stopped presenting".into(), Instant::now()));
+                    }
+                    for p in old.participants.iter().filter(|p| p.presenting) {
+                        if !new.participants.iter().any(|n| n.demux_id == p.demux_id && n.presenting) {
+                            let name = self.name(&p.aci);
+                            self.panes.call_toasts.push((format!("{name} stopped presenting"), Instant::now()));
+                        }
+                    }
+                }
+                if update.is_none() {
+                    self.panes.call_toasts.clear();
+                }
                 // Ring while a call rings us; a notification when it starts.
                 let ringing = update.as_ref().is_some_and(|u| u.incoming && u.status == langis_core::CallStatus::Ringing);
                 let was_ringing = self.call.as_ref().is_some_and(|u| u.incoming && u.status == langis_core::CallStatus::Ringing);

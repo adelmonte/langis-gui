@@ -231,7 +231,7 @@ const OVERFLOW_W: f32 = 107.;
 const LARGE_TILE_H: f32 = 200.;
 
 /// One participant's tile: their video, or their avatar, and their name.
-fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::CallParticipant, video: &langis_core::CallVideo, rect: Rect, small: bool) {
+fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::CallParticipant, video: &langis_core::CallVideo, rect: Rect, small: bool, raised: bool) {
     ui.painter().rect_filled(rect, CornerRadius::same(if small { 8 } else { 12 }), Color32::from_gray(50));
     let name = app.name(&p.aci);
     let frame = (p.video || p.presenting).then(|| app.call_view.texture(ctx, &format!("group-{}", p.demux_id), &video.group.slot(p.demux_id))).flatten();
@@ -251,11 +251,31 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
         ui.painter().rect_stroke(rect, CornerRadius::same(if small { 8 } else { 12 }), Stroke::new(3., Color32::WHITE), egui::StrokeKind::Inside);
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
+    // Desktop's tile footer: its CallingAudioIndicator (the muted mic, or
+    // three bars moving with their level while they speak), a raised hand,
+    // then the name.
+    let level = if p.audio { video.levels.level(p.demux_id) } else { 0. };
+    let base = rect.left_bottom() + Vec2::new(10., -10.);
+    let mut x = base.x;
+    let mid = base.y - 8.;
+    if !p.audio {
+        theme::paint_symbol(ui.painter(), "mic-slash-fill", Pos2::new(x + 8., mid), 16., Color32::WHITE);
+        x += 20.;
+    } else if level > 0.04 {
+        let t = ui.input(|i| i.time) as f32;
+        for i in 0..3 {
+            let wobble = ((t * 9. + i as f32 * 1.7).sin() + 1.) / 2.;
+            let h = (4. + 12. * level.min(1.) * (0.5 + 0.5 * wobble)).min(14.);
+            ui.painter().rect_filled(Rect::from_center_size(Pos2::new(x + 3. + i as f32 * 5., mid), Vec2::new(3., h)), CornerRadius::same(2), Color32::WHITE);
+        }
+        x += 20.;
+    }
+    if raised {
+        theme::paint_symbol(ui.painter(), "raisehand-fill", Pos2::new(x + 8., mid), 16., Color32::WHITE);
+        x += 20.;
+    }
     if !small {
-        let label = if p.audio { name } else { format!("{name} (muted)") };
-        ui.painter().text(rect.left_bottom() + Vec2::new(10., -10.), Align2::LEFT_BOTTOM, label, theme::medium(13.), Color32::WHITE);
-    } else if !p.audio {
-        theme::paint_symbol(ui.painter(), "mic-slash", rect.left_bottom() + Vec2::new(12., -12.), 14., Color32::WHITE);
+        ui.painter().text(Pos2::new(x, base.y), Align2::LEFT_BOTTOM, name, theme::medium(13.), Color32::WHITE);
     }
 }
 
@@ -311,7 +331,7 @@ fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate
     let area = if overflow { main_area } else { stage };
     let mut visible = Vec::new();
     for (p, rect) in people.iter().zip(grid_rects(large, area)) {
-        paint_tile(app, ui, ctx, p, video, rect, false);
+        paint_tile(app, ui, ctx, p, video, rect, false, call.raised_hands.contains(&p.demux_id));
         visible.push(p.demux_id);
     }
     if overflow {
@@ -327,7 +347,7 @@ fn group_grid(app: &mut App, ui: &mut Ui, ctx: &egui::Context, call: &CallUpdate
         let mut y = stage.top() + if scrolls { 28. } else { 0. };
         for p in rest.iter().skip(from).take(shown) {
             let rect = Rect::from_min_size(Pos2::new(stage.right() - OVERFLOW_W, y), Vec2::new(OVERFLOW_W, tile_h));
-            paint_tile(app, ui, ctx, p, video, rect, true);
+            paint_tile(app, ui, ctx, p, video, rect, true, call.raised_hands.contains(&p.demux_id));
             visible.push(p.demux_id);
             y += tile_h + gap;
         }
@@ -756,6 +776,8 @@ fn controls(app: &mut App, ui: &mut Ui, call: &CallUpdate, conversation: Option<
         Some("audio") => {
             app.call_view.audio_on = !audio_on;
             app.send(Command::SetCallAudio(!audio_on));
+            // `CallControls__MutedToast`.
+            app.panes.call_toasts.push((if audio_on { "Mic off" } else { "Mic on" }.into(), std::time::Instant::now()));
         }
         Some("hand") => app.send(Command::RaiseHand(!raised)),
         Some("present") => {

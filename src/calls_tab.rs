@@ -443,7 +443,27 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
 /// people waiting to join a link's call. Drawn over the call screen.
 /// The group call's extras: reactions, raised hands, the reaction picker
 /// and the participants list.
+/// Desktop's `CallingToastManager`: toasts at the call's top center, on
+/// gray-80 in 13px white, three seconds each, newest below.
+fn call_toasts(app: &mut App, ui: &Ui, area: Rect) {
+    app.panes.call_toasts.retain(|(_, at)| at.elapsed() < std::time::Duration::from_secs(3));
+    if app.panes.call_toasts.is_empty() {
+        return;
+    }
+    let mut y = area.top() + 20.;
+    for (text, _) in app.panes.call_toasts.iter().rev().take(3).rev() {
+        let galley = ui.painter().layout_no_wrap(text.clone(), theme::regular(13.), egui::Color32::WHITE);
+        let rect = Rect::from_center_size(Pos2::new(area.center().x, y + 18.), galley.size() + Vec2::new(32., 18.));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("call-toasts")));
+        painter.rect_filled(rect, CornerRadius::same(8), theme::rgb(0x2e2e2e));
+        painter.galley(rect.center() - galley.size() / 2., galley, egui::Color32::WHITE);
+        y += rect.height() + 8.;
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+}
+
 pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
+    call_toasts(app, ui, area);
     let Some(call) = app.call.clone() else { return };
     if !call.group {
         return;
