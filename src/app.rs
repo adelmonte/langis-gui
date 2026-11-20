@@ -79,6 +79,20 @@ pub enum Tab {
     Settings,
 }
 
+/// Desktop's Unread badges: count chats rather than messages, and count
+/// muted chats.
+#[derive(Clone, Copy, Debug)]
+pub struct BadgePrefs {
+    pub chats: bool,
+    pub muted: bool,
+}
+
+impl Default for BadgePrefs {
+    fn default() -> Self {
+        Self { chats: false, muted: true }
+    }
+}
+
 pub struct Toast {
     pub text: String,
     pub until: Instant,
@@ -108,6 +122,10 @@ pub struct App {
     /// Our number, from `Event::Ready`.
     pub phone: Option<String>,
     pub connection: ConnectionState,
+    /// Desktop's Unread badges settings, for the window's count.
+    pub badge_prefs: BadgePrefs,
+    /// The window title last set.
+    title_shown: String,
     /// This device was unlinked: Desktop's DialogRelink, until clicked.
     pub unlinked: bool,
     pub history: Option<HistoryProgress>,
@@ -241,6 +259,8 @@ impl App {
             aci: String::new(),
             phone: None,
             connection: ConnectionState::Offline,
+            badge_prefs: BadgePrefs::default(),
+            title_shown: String::new(),
             unlinked: false,
             history: None,
             tab: Tab::Chats,
@@ -389,6 +409,22 @@ impl App {
     }
 
     /// Takes in what came from the backend since the last frame.
+    /// The window title with the unread count, as Desktop's
+    /// `updateUnreadCount`: messages or chats, muted ones or not.
+    fn update_title(&mut self, ctx: &egui::Context) {
+        let count: u32 = self
+            .conversations
+            .iter()
+            .filter(|c| !c.archived && (self.badge_prefs.muted || !c.muted))
+            .map(|c| if self.badge_prefs.chats { u32::from(c.unread_count > 0 || c.marked_unread) } else { c.unread_count.max(u32::from(c.marked_unread)) })
+            .sum();
+        let title = if count > 0 { format!("langis ({count})") } else { "langis".to_owned() };
+        if title != self.title_shown {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title_shown = title;
+        }
+    }
+
     /// DialogRelink clicked: the link screen, for a new QR code.
     pub fn relink(&mut self) {
         self.unlinked = false;
@@ -492,9 +528,12 @@ impl App {
                     let tone = db.setting(crate::settings::SETTING_SKIN_TONE).await.ok().flatten().and_then(|v| v.parse::<usize>().ok()).filter(|i| (1..=5).contains(i));
                     let skin_tone = tone.map(|i| langis_emoji::SkinTone::ALL[i - 1]);
                     let spell = get(db.setting(crate::spell::SETTING_SPELL_CHECK).await.ok().flatten()).unwrap_or(true);
+                    let badge_chats = get(db.setting(crate::settings::SETTING_BADGE_CHATS).await.ok().flatten()).unwrap_or(false);
+                    let badge_muted = get(db.setting(crate::settings::SETTING_BADGE_MUTED).await.ok().flatten()).unwrap_or(true);
                     let words: Vec<String> = db.setting(crate::spell::SETTING_SPELL_WORDS).await.ok().flatten().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
                     Some(Loaded::Apply(Box::new(move |app: &mut App| {
                         app.input = InputPrefs { auto_convert, formatting, skin_tone, spell };
+                        app.badge_prefs = BadgePrefs { chats: badge_chats, muted: badge_muted };
                         crate::emoji_picker::set_skin_tone(skin_tone);
                         crate::spell::start(&app.ctx, words);
                     })))
@@ -1141,6 +1180,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         crate::view::show(self, ui);
+        self.update_title(ui.ctx());
     }
 
     /// Touchpad scrolling as Chromium's (`scroll.rs`). `LANGIS_SCROLL_SPEED`

@@ -174,7 +174,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             if app.panes.archived {
                 ui.horizontal(|ui| {
                     ui.add_space(24.);
-                    ui.add(egui::Label::new(RichText::new("These chats are archived and will only appear in the inbox if new messages are received.").font(theme::regular(13.)).color(palette.text_secondary)).wrap());
+                    ui.add(egui::Label::new(RichText::new(tr("These chats are archived and will only appear in the Inbox if new messages are received.")).font(theme::regular(13.)).color(palette.text_secondary)).wrap());
                 });
                 ui.add_space(6.);
             }

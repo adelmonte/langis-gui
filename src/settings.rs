@@ -21,6 +21,10 @@ pub const SETTING_NOTIFICATIONS: &str = "ui.notifications";
 pub const SETTING_AUTO_CONVERT_EMOJI: &str = "ui.auto_convert_emoji";
 pub const SETTING_TEXT_FORMATTING: &str = "ui.text_formatting";
 pub const SETTING_SKIN_TONE: &str = "ui.skin_tone";
+/// Desktop's badge count: unread chats rather than messages.
+pub const SETTING_BADGE_CHATS: &str = "ui.badge_chats";
+/// Desktop's "Include muted chats in app badge".
+pub const SETTING_BADGE_MUTED: &str = "ui.badge_muted";
 /// Ours: what notifications show: "all", "name" or "none".
 pub const SETTING_NOTIFICATION_CONTENT: &str = "ui.notification_content";
 /// Desktop's `navTabsCollapsed`: the nav tabs hidden, "true" or unset.
@@ -575,12 +579,11 @@ fn account(app: &mut App, ui: &mut Ui) {
 }
 
 fn general(app: &mut App, ui: &mut Ui) {
-    let footer = tr("To change the name of this device, open Signal on your phone and navigate to Settings > Linked devices");
-    axo_list::list(ui, None, Some(footer), |ui| {
+    axo_list::list(ui, None, None, |ui| {
         if let Some(phone) = &app.phone {
             axo_list::item(ui, Item::new(tr("Phone Number")), End::Value(&langis_core::share_contact::format_phone(phone, Some(phone))));
         }
-        axo_list::item(ui, Item::new(tr("Device Name")), End::Value(&crate::app::device_name()));
+        axo_list::item(ui, Item::new(tr("Device Name")).description(tr("To change the name of this device, open Signal on your phone and navigate to Settings > Linked devices")), End::Value(&crate::app::device_name()));
     });
     // Desktop's Open at login and Start minimized, as an XDG autostart
     // entry (~/.config/autostart/langis.desktop).
@@ -697,13 +700,13 @@ fn chats(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             write(app, crate::spell::SETTING_SPELL_CHECK, spell.to_string());
         }
         let mut formatting = app.input.formatting;
-        if axo_list::switch(ui, Item::new("Text formatting").description("Show the formatting toolbar when text is selected"), &mut formatting) {
+        if axo_list::switch(ui, Item::new("Text formatting").description("Show text formatting popover when text is selected"), &mut formatting) {
             app.input.formatting = formatting;
             write(app, SETTING_TEXT_FORMATTING, formatting.to_string());
         }
         let tones = [tr("Default"), tr("Light"), "Medium light", tr("Medium"), "Medium dark", tr("Dark")];
         let chosen = app.input.skin_tone.map(|t| langis_emoji::SkinTone::ALL.iter().position(|x| *x == t).unwrap_or(0) + 1).unwrap_or(0);
-        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("skin-tone"), Item::new("Default emoji skin tone"), &tones, Some(chosen)) {
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("skin-tone"), Item::new("Emoji skin tone"), &tones, Some(chosen)) {
             app.input.skin_tone = (i > 0).then(|| langis_emoji::SkinTone::ALL[i - 1]);
             crate::emoji_picker::set_skin_tone(app.input.skin_tone);
             write(app, SETTING_SKIN_TONE, i.to_string());
@@ -1231,6 +1234,11 @@ fn calls(app: &mut App, ui: &mut Ui, s: &Snapshot) {
                 snapshot.incoming_calls = incoming;
             }
         }
+        let mut ring = app.sound.ringtone;
+        if axo_list::switch(ui, Item::new(tr("Play calling sounds")), &mut ring) {
+            app.sound.ringtone = ring;
+            write(app, crate::sounds::KEYS[2], ring.to_string());
+        }
     });
     axo_list::gap(ui);
     axo_list::list(ui, Some(tr("Devices")), None, |ui| device_items(app, ui, "settings"));
@@ -1339,54 +1347,63 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             .filter(|(k, _)| account_on(s, *k))
             .map(|(_, l)| l)
             .collect();
-        let summary = if shown.is_empty() { tr("None").to_owned() } else { shown.join(tr(", ")) };
+        // Desktop's summaries: "Calls, mentions", lower case after the first.
+        let summary = if shown.is_empty() {
+            tr("None").to_owned()
+        } else {
+            let mut s = shown.join(", ");
+            if let Some((first, rest)) = s.split_once(", ") {
+                s = format!("{first}, {}", rest.to_lowercase());
+            }
+            s
+        };
         let item = Item::new(tr("While muted")).description(tr("Choose notifications to show for muted chats.")).disabled(!s.notifications);
         if axo_list::item(ui, item, End::Arrow(Some(&summary))).clicked() && s.notifications {
             app.settings.page = Page::WhileMuted;
         }
     });
-    // Desktop's sound and attention rows, then its call ones.
-    let enabled = s.notifications;
-    for (label, rows) in [
-        (
-            tr("Sounds"),
-            vec![
-                (0usize, "Notification sound", "Play a sound with each notification"),
-                (1, "In-chat sounds", "Play a sound for new messages in the chat you're reading"),
-                (4, tr("Draw attention to this window when a notification arrives"), ""),
-            ],
-        ),
-        (tr("Calls"), vec![(3, "Incoming call notifications", "Show a notification when a call comes in"), (2, "Call ringtone", "Play a ringtone for incoming calls")]),
-    ] {
-    axo_list::gap(ui);
-    axo_list::list(ui, Some(label), None, |ui| {
-        for (i, title, description) in rows {
-            let prefs = &mut app.sound;
-            let slot = match i {
-                0 => &mut prefs.notification,
-                1 => &mut prefs.in_chat,
-                2 => &mut prefs.ringtone,
-                3 => &mut prefs.call_notify,
-                _ => &mut prefs.attention,
-            };
-            let mut on = *slot;
-            // Message sounds follow notifications being on; call ones don't.
-            let off = !enabled && matches!(i, 0 | 4);
-            let item = if description.is_empty() { Item::new(title) } else { Item::new(title).description(description) }.disabled(off);
-            if axo_list::switch(ui, item, &mut on) && !off {
-                *slot = on;
-                write(app, crate::sounds::KEYS[i], on.to_string());
-                if on && i == 0 {
-                    crate::sounds::once(crate::sounds::Sound::Pop);
-                }
-            }
-        }
-    });
-    }
+    // Reactions, unread reminders and drawing attention.
     axo_list::gap(ui);
     axo_list::list(ui, None, None, |ui| {
         account_switch(app, ui, s, AccountSetting::ReactionNotifications, Item::new(tr("Reaction notifications")).description(tr("Notify when someone reacts to your message")));
         account_switch(app, ui, s, AccountSetting::ShowUnreadReminders, Item::new(tr("Unread reminders")).description(tr("Occasionally notify when there are unread messages in muted chats.")));
+        let mut on = app.sound.attention;
+        if axo_list::switch(ui, Item::new(tr("Draw attention to this window when a notification arrives")).disabled(!s.notifications), &mut on) && s.notifications {
+            app.sound.attention = on;
+            write(app, crate::sounds::KEYS[4], on.to_string());
+        }
+    });
+    // Desktop's Sounds.
+    axo_list::gap(ui);
+    axo_list::list(ui, Some(tr("Sounds")), None, |ui| {
+        let mut on = app.sound.notification;
+        if axo_list::switch(ui, Item::new(tr("Push notification sounds")).disabled(!s.notifications), &mut on) && s.notifications {
+            app.sound.notification = on;
+            write(app, crate::sounds::KEYS[0], on.to_string());
+            if on {
+                crate::sounds::once(crate::sounds::Sound::Pop);
+            }
+        }
+        let mut on = app.sound.in_chat;
+        if axo_list::switch(ui, Item::new(tr("In-chat message sounds")).description(tr("Hear a notification sound for sent and received messages while in the chat.")), &mut on) {
+            app.sound.in_chat = on;
+            write(app, crate::sounds::KEYS[1], on.to_string());
+        }
+    });
+    // Desktop's Unread badges: what the window's count counts.
+    axo_list::gap(ui);
+    axo_list::list(ui, Some(tr("Unread badges")), None, |ui| {
+        let options = [tr("Unread messages"), tr("Unread chats")];
+        let item = Item::new(tr("Badge count")).description(tr("Select if the badge count displays the number of unread messages or the number of unread chats"));
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("badge-count"), item, &options, Some(app.badge_prefs.chats as usize)) {
+            app.badge_prefs.chats = i == 1;
+            write(app, SETTING_BADGE_CHATS, app.badge_prefs.chats.to_string());
+        }
+        let mut muted = app.badge_prefs.muted;
+        if axo_list::switch(ui, Item::new(tr("Include muted chats in app badge")).description(tr("Chat folder badges will always include muted chats")), &mut muted) {
+            app.badge_prefs.muted = muted;
+            write(app, SETTING_BADGE_MUTED, muted.to_string());
+        }
     });
     // Desktop's Reset notification settings: this device's back to default.
     axo_list::gap(ui);
@@ -1409,6 +1426,14 @@ fn reset_notifications(app: &mut App) {
             write(app, SETTING_NOTIFICATIONS, "true".into());
             write(app, SETTING_NOTIFICATION_CONTENT, "all".into());
             app.notify = (true, "all".into());
+            // Desktop's reset takes chats' own settings back too.
+            let custom: Vec<_> = app.conversations.iter().filter(|c| c.dont_notify_mentions).map(|c| c.id.clone()).collect();
+            for conversation in custom {
+                app.send(Command::SetChat { conversation, change: ChatChange::DontNotifyMentions(false) });
+            }
+            app.badge_prefs = Default::default();
+            write(app, SETTING_BADGE_CHATS, "false".into());
+            write(app, SETTING_BADGE_MUTED, "true".into());
             app.settings.stale = true;
             app.toast("Notification settings reset.");
         }
@@ -1633,7 +1658,7 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
 fn data_usage(app: &mut App, ui: &mut Ui, s: &Snapshot) {
     let mut auto = s.auto_download.clone();
     let mut changed = false;
-    axo_list::list(ui, Some(tr("Media auto-download")), Some("Voice messages and stickers are always automatically downloaded."), |ui| {
+    axo_list::list(ui, Some(tr("Media auto-download")), Some("Voice messages and stickers are always auto-downloaded."), |ui| {
         for (label, on) in [(tr("Photos"), &mut auto.photos), (tr("Videos"), &mut auto.videos), (tr("Audio"), &mut auto.audio), (tr("Documents"), &mut auto.documents)] {
             changed |= axo_list::switch(ui, Item::new(label), on);
         }
@@ -1658,7 +1683,7 @@ fn ask(app: &mut App, ctx: &egui::Context) {
             "You can link a desktop, tablet or additional phone. Your primary device manages what\u{2019}s linked, you can link up to 5 devices. Account settings and Signal Secure Backups can only be managed on your primary device.",
             tr("OK"),
         ),
-        Ask::DeleteData => match dialog::confirm(ctx, id, tr("Delete all data?"), "Delete all data and messages from this version of Signal Desktop? Your Signal account and data on your phone or other devices will not be deleted.", tr("Delete data"), Variant::StrongDestructive) {
+        Ask::DeleteData => match dialog::confirm(ctx, id, tr("Delete all data?"), "Delete all data and messages from this version of Signal Desktop? Your Signal account and data on your phone or other linked devices will not be deleted.", tr("Delete data"), Variant::StrongDestructive) {
             Some(Choice::Action) => {
                 app.send(Command::Unlink);
                 true
