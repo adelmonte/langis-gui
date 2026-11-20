@@ -200,14 +200,13 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             let mut open_at = None;
             crate::search::follow_global(app, ui.ctx());
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.;
                 ui.add_space(4.);
+                // Desktop's list header: a 40px row, its text at the bottom
+                // with 8px under it, body-1-bold in the primary color.
                 let heading = |ui: &mut Ui, text: &str| {
-                    ui.add_space(4.);
-                    ui.horizontal(|ui| {
-                        ui.add_space(24.);
-                        ui.label(RichText::new(text).font(theme::semibold(13.)).color(palette.text_secondary));
-                    });
-                    ui.add_space(2.);
+                    let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::hover());
+                    ui.painter().text(Pos2::new(row.left() + 11. + 16., row.bottom() - 8.), egui::Align2::LEFT_BOTTOM, text, theme::semibold(14.), palette.text);
                 };
                 if !query.is_empty() && !rows.is_empty() {
                     heading(ui, "Chats");
@@ -356,13 +355,15 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
 #[allow(clippy::too_many_arguments)]
 fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, typing: bool, mentions: u32, badge: Option<&str>) -> egui::Response {
     let width = ui.available_width();
-    let (outer, response) = ui.allocate_exact_size(Vec2::new(width, 72.), Sense::click());
-    let rect = Rect::from_min_max(outer.min + Vec2::new(10., 2.), outer.max - Vec2::new(10., 2.));
+    // Desktop's row: 72 tall with 2px above and below, in a list padded 11
+    // a side, radius 10, padding 8/14.
+    let (outer, response) = ui.allocate_exact_size(Vec2::new(width, 76.), Sense::click());
+    let rect = Rect::from_min_max(outer.min + Vec2::new(11., 2.), outer.max - Vec2::new(11., 2.));
     if selected || response.hovered() {
         let fill = if selected || response.is_pointer_button_down_on() { palette.fill_pressed } else { palette.fill };
-        ui.painter().rect_filled(rect, CornerRadius::same(16), fill);
+        ui.painter().rect_filled(rect, CornerRadius::same(10), fill);
     }
-    let inner = rect.shrink2(Vec2::new(14., 10.));
+    let inner = rect.shrink2(Vec2::new(14., 8.));
     let avatar = Rect::from_min_size(inner.min, Vec2::splat(48.));
     widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
     if let Some(badge) = badge {
@@ -377,12 +378,13 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     let time_pos = Pos2::new(right - time.size().x, inner.top() + 2.);
     let title_max = (time_pos.x - 6. - left).max(20.);
     let mut title_job = egui::text::LayoutJob::simple_singleline(c.title.clone(), theme::semibold(14.), palette.text);
-    title_job.wrap = egui::text::TextWrapping::truncate_at_width(title_max - if c.muted { 18. } else { 0. });
+    title_job.wrap = egui::text::TextWrapping::truncate_at_width(title_max - if c.muted { 22. } else { 0. });
     let title = ui.fonts_mut(|f| f.layout_job(title_job));
     let title_w = title.size().x;
     painter.galley(Pos2::new(left, inner.top()), title, palette.text);
     if c.muted {
-        Icon::BellSlashFill.paint(ui, Rect::from_min_size(Pos2::new(left + title_w + 4., inner.top() + 2.), Vec2::splat(14.)), 12., palette.text_secondary);
+        // Desktop's bell-slash-bold, 14px, 8px after the name.
+        Icon::BellSlashBold.paint(ui, Rect::from_min_size(Pos2::new(left + title_w + 8., inner.top() + 2.), Vec2::splat(14.)), 14., palette.text_secondary);
     }
     painter.galley(time_pos, time, palette.text_secondary);
 
@@ -390,7 +392,15 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     let mut preview_right = right;
     let unread = c.unread_count + c.marked_unread as u32;
     if unread > 0 {
-        let badge = widgets::count_badge(ui, Pos2::new(right, inner.top() + 30.), c.unread_count.max(1), c.muted);
+        // Desktop's unread badge is always the accent; a chat only marked
+        // unread gets an empty dot.
+        let badge = if c.unread_count == 0 {
+            let dot = Rect::from_center_size(Pos2::new(right - 9., inner.top() + 30.), Vec2::splat(18.));
+            ui.painter().circle_filled(dot.center(), 9., palette.badge);
+            dot
+        } else {
+            widgets::count_badge(ui, Pos2::new(right, inner.top() + 30.), c.unread_count, false)
+        };
         preview_right = badge.left() - 10.;
         // Desktop's @ badge before the count, for unread mentions.
         if mentions > 0 {
@@ -408,13 +418,16 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     }
     let mut job = egui::text::LayoutJob::default();
     let body = |color| egui::TextFormat { font_id: theme::regular(13.), color, line_height: Some(18.), ..Default::default() };
-    if typing {
-        job.append("typing…", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
-    } else if c.blocked {
-        // Desktop's `ConversationListItem--blocked` and `--message-request`.
-        job.append("Blocked", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
+    // Desktop's order: blocked, message request, typing, draft, preview.
+    let mut dots = false;
+    if c.blocked {
+        // `__blocked`: the 16px block icon, 4px, then the text.
+        Icon::Block.paint(ui, Rect::from_center_size(Pos2::new(left + 8., inner.top() + 29.), Vec2::splat(16.)), 16., palette.text_secondary);
+        job.append("Blocked", 20., body(palette.text_secondary));
     } else if !c.accepted {
-        job.append("Message request", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
+        job.append("Message request", 0., egui::TextFormat { font_id: theme::semibold(13.), ..body(palette.text_secondary) });
+    } else if typing {
+        dots = true;
     } else if let Some(draft) = c.draft.as_deref().filter(|d| !d.is_empty()) {
         job.append("Draft: ", 0., egui::TextFormat { font_id: theme::italic(13.), ..body(palette.text_secondary) });
         crate::chat::append_with_emoji(&mut job, &crate::format::one_line(draft), body(palette.text_secondary));
@@ -425,8 +438,18 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     job.wrap = egui::text::TextWrapping { max_width: (preview_right - left).max(20.), max_rows: 2, break_anywhere: false, overflow_character: Some('…') };
     let preview = ui.fonts_mut(|f| f.layout_job(job));
     painter.galley(Pos2::new(left, inner.top() + 20.), preview, palette.text_secondary);
+    if dots {
+        // Desktop's TypingAnimation: three 6px dots taking turns.
+        let t = ui.input(|i| i.time) as f32;
+        for i in 0..3 {
+            let phase = ((t * 4. - i as f32 * 0.6).sin() + 1.) / 2.;
+            let color = palette.text_secondary.gamma_multiply(0.4 + 0.6 * phase);
+            painter.circle_filled(Pos2::new(left + 3. + i as f32 * 9., inner.top() + 29.), 3., color);
+        }
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
     if response.has_focus() {
-        painter.rect_stroke(rect, CornerRadius::same(16), Stroke::new(2., palette.accent), StrokeKind::Inside);
+        painter.rect_stroke(rect, CornerRadius::same(10), Stroke::new(2., palette.accent), StrokeKind::Inside);
     }
     response
 }

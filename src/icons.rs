@@ -8,6 +8,7 @@ use egui::{Color32, Image, ImageSource, Vec2};
 pub enum Icon {
     Archive,
     ArrowDown,
+    BellSlashBold,
     BellSlashFill,
     ChatFill,
     Chat,
@@ -119,6 +120,7 @@ impl Icon {
         match self {
             Icon::Archive => ("bytes://icon/archive.svg", include_bytes!("../assets/icons/archive.svg")),
             Icon::ArrowDown => ("bytes://icon/arrow-down.svg", include_bytes!("../assets/icons/arrow-down.svg")),
+            Icon::BellSlashBold => ("bytes://icon/bell-slash-bold.svg", include_bytes!("../assets/icons/bell-slash-bold.svg")),
             Icon::BellSlashFill => ("bytes://icon/bell-slash-fill.svg", include_bytes!("../assets/icons/bell-slash-fill.svg")),
             Icon::ChatFill => ("bytes://icon/chat-fill.svg", include_bytes!("../assets/icons/chat-fill.svg")),
             Icon::Chat => ("bytes://icon/chat.svg", include_bytes!("../assets/icons/chat.svg")),
