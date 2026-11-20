@@ -1703,6 +1703,16 @@ fn close_lobby(app: &mut App) {
 /// Opens Desktop's `CallingLobby`, before any call: a group's or a call
 /// link's is peeked for who's there.
 pub fn open_lobby(app: &mut App, conversation: ConversationId, video: bool) {
+    // Desktop doesn't start a call during another (`InAnotherCallTooltip`):
+    // the same chat's call comes back to the front instead.
+    if let Some(call) = app.call.as_ref() {
+        if call.conversation == conversation {
+            app.call_view.pip = false;
+        } else {
+            app.toast("You are already in a call");
+        }
+        return;
+    }
     if conversation.is_group() || conversation.as_call_link().is_some() {
         app.send(Command::PeekGroupCall { conversation: conversation.clone() });
     }
