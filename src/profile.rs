@@ -184,11 +184,11 @@ pub fn page(app: &mut App, ui: &mut Ui) {
         let name = format!("{} {}", e.given, e.family);
         let spec = widgets::AvatarSpec { name: name.trim(), color: 0, photo: e.photo.as_deref(), group: false, note_to_self: false };
         if widgets::avatar(ui, &spec, 80.).interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim()));
+            e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim(), false));
         }
         ui.add_space(12.);
         if widgets::axo_button(ui, tr("Edit photo"), widgets::Axo::SubtleSecondary).clicked() {
-            e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim()));
+            e.avatar_editor = Some(crate::avatar_editor::AvatarEditor::new(e.photo.clone(), name.trim(), false));
         }
     });
     ui.add_space(16.);

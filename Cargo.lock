@@ -3826,6 +3826,7 @@ dependencies = [
  "notify-rust",
  "qrcode",
  "raw-window-handle",
+ "resvg",
  "rfd",
  "serde_json",
  "signal-hook",

@@ -20,6 +20,8 @@ Copyright Signal Messenger, LLC, AGPL-3.0-only):
   and fixed at weight 400; src/symbols.rs is generated from its
   ts/axo/_internal/AxoSymbolDefs.generated.std.ts.
 - src/menu.rs follows its AxoDropdownMenu and AxoBaseMenu.
+- assets/avatars/*.svg are Signal Desktop's images/avatars, unchanged, the
+  avatar editor's presets.
 - assets/sounds/*.ogg are Signal Desktop's sounds/*.ogg, unchanged, played
   where Desktop plays them (src/sounds.rs).
 - assets/i18n/*.json are the messages the app shows, taken from Signal

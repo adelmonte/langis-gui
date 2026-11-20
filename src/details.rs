@@ -1251,7 +1251,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             _ => d.edit_info = Some((name, description)),
         }
         if open_avatar_editor {
-            d.group_avatar = Some(crate::avatar_editor::AvatarEditor::new(c.avatar_path.clone(), &c.title));
+            d.group_avatar = Some(crate::avatar_editor::AvatarEditor::new(c.avatar_path.clone(), &c.title, true));
         }
     }
     // Desktop's GroupMembersSearchDialog.

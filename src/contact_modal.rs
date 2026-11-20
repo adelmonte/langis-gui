@@ -409,7 +409,9 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
                     None => widgets::AvatarSpec::person(name, 0),
                 };
                 let r = widgets::avatar(ui, &spec, 216.).interact(Sense::click());
-                if let Some(path) = person.as_ref().and_then(|p| p.avatar_path.clone()).filter(|_| person.as_ref().is_some_and(|p| !p.avatar_withheld))
+                // Our own photo opens large too.
+                let photo = if you { own_photo.clone() } else { person.as_ref().and_then(|p| p.avatar_path.clone()).filter(|_| person.as_ref().is_some_and(|p| !p.avatar_withheld)) };
+                if let Some(path) = photo
                     && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
                 {
                     lightbox = Some(path);

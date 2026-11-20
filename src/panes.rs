@@ -1910,7 +1910,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
         app.panes.custom_timer = Some((TimerTarget::NewGroup, value, unit));
     }
     if open_group_avatar && let Some(Compose::Group { title, .. }) = app.panes.compose.as_ref() {
-        app.panes.new_group_avatar = Some(crate::avatar_editor::AvatarEditor::new(None, if title.trim().is_empty() { "Group" } else { title.trim() }));
+        app.panes.new_group_avatar = Some(crate::avatar_editor::AvatarEditor::new(None, if title.trim().is_empty() { "Group" } else { title.trim() }, true));
     }
     // Its result, into the group being made.
     if let Some(editor) = app.panes.new_group_avatar.as_mut() {
