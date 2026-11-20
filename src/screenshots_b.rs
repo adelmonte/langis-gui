@@ -226,6 +226,11 @@ fn screenshots_panes() {
         wait(&mut harness, name, |app| app.settings.snapshot.is_some());
         save(&mut harness, name);
     }
+    let params = langis_store::ChatFolderParams { name: "Family".into(), include_all_group_chats: true, included: harness.state().conversations.iter().take(2).map(|c| c.id.clone()).collect(), ..langis_store::ChatFolderParams::defaults() };
+    harness.state_mut().settings.folder = Some((crate::settings::new_id(), false, params));
+    wait(&mut harness, "folder page", |_| true);
+    save(&mut harness, "settings-folder-edit");
+    harness.state_mut().settings.folder = None;
     harness.state_mut().settings.page = Page::General;
     harness.state_mut().settings.help = Some(crate::settings::Help::About);
     wait(&mut harness, "about", |_| true);
