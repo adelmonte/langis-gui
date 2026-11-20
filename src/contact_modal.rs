@@ -398,6 +398,7 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         let own = contact.own.clone();
         let group = contact.group.as_ref().and_then(|g| app.conversation(g)).cloned();
         let mut go: Option<u8> = None;
+        let mut connections = false;
         let closed = crate::panes::modal(&egui::Ui::new(ctx.clone(), egui::Id::unique("about-host"), egui::UiBuilder::new()), "about-contact", 360., |ui| {
             crate::panes::title(ui, if you { tr("You") } else { tr("About") });
             ui.vertical_centered(|ui| {
@@ -473,8 +474,8 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
                 if d.verified && row(ui, "shield-check", tr("Verified"), None).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     safety = true;
                 }
-                if d.profile_sharing || person.as_ref().is_some_and(|p| p.accepted) {
-                    row(ui, "connections", tr("Signal Connection"), None);
+                if (d.profile_sharing || person.as_ref().is_some_and(|p| p.accepted)) && row(ui, "connections", tr("Signal Connection"), None).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    connections = true;
                 }
                 if d.in_system_contacts {
                     row(ui, "person-circle", &crate::i18n::tf("icu:AboutContactModal__system-contact", &format!("{name} is in your system contacts"), &[("name", crate::i18n::Arg::from(name))]), None);
@@ -505,6 +506,9 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         });
         if let Some(path) = lightbox {
             app.panes.avatar_lightbox = Some(path);
+        }
+        if connections {
+            app.panes.connections_modal = true;
         }
         if let Some(to) = go {
             let group = app.panes.contact.take().and_then(|c| c.group);

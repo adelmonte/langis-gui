@@ -120,6 +120,8 @@ pub struct Panes {
     pub pending_confirm: Option<PendingConfirm>,
     /// Desktop's ContactSpoofingReviewDialog for this chat.
     pub collision_review: Option<ConversationId>,
+    /// Desktop's `SignalConnectionsModal`.
+    pub connections_modal: bool,
     /// Chats whose same-name warning was closed.
     pub collision_dismissed: std::collections::HashSet<ConversationId>,
     /// Desktop's AvatarLightbox: a photo's file, shown large.
