@@ -275,9 +275,22 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         }
         if group {
             body(ui, palette, &format!("Group · {} members", c.members.len() + 1));
-            if let Some(d) = c.description.as_deref().filter(|d| !d.is_empty()) {
-                ui.add_space(4.);
-                body(ui, palette, d);
+            match c.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                Some(d) => {
+                    ui.add_space(4.);
+                    let w = ui.available_width().min(360.);
+                    widgets::group_description(ui, &c.title, d, w, true);
+                }
+                // Desktop's "Add group description..." for those who can.
+                None if c.can_edit_info => {
+                    ui.add_space(4.);
+                    if ui.add(egui::Label::new(RichText::new("Add group description...").font(theme::regular(14.)).color(palette.text_secondary)).sense(egui::Sense::click())).clicked()
+                        && let Some(d) = app.panes.details.as_mut()
+                    {
+                        d.edit_info = Some((c.title.clone(), String::new()));
+                    }
+                }
+                None => {}
             }
         } else if let Some(contact) = app.panes.details.as_ref().and_then(|d| d.contact.as_ref()) {
             if let Some(p) = &contact.profile {

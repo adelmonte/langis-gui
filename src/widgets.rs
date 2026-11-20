@@ -1,7 +1,7 @@
 //! Small pieces drawn the way Desktop draws them: avatars, icon buttons,
 //! pill buttons, badges and text fields.
 
-use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Ui, Vec2};
+use egui::{RichText, Align2, Color32, CornerRadius, Rect, Response, Sense, Ui, Vec2};
 use langis_store::{Conversation, ConversationKind};
 
 use crate::icons::Icon;
@@ -113,6 +113,74 @@ pub fn axo_icon_button_sm(ui: &mut Ui, symbol: &str, label: &str, pressed: bool)
     }
     theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., if pressed { Color32::WHITE } else { palette.text });
     response.on_hover_text(label)
+}
+
+/// Text with its links clickable (Desktop's `Linkify`: http, https and
+/// mailto, not sneaky ones), wrapped at `width` and cut to `max_rows`
+/// (0: all) with an ellipsis. Returns whether it was cut. Centered when
+/// `center`.
+pub fn linked_text(ui: &mut Ui, text: &str, size: f32, color: Color32, width: f32, max_rows: usize, center: bool) -> bool {
+    let links = crate::chat::find_links(text);
+    let mut job = egui::text::LayoutJob::default();
+    let plain = egui::TextFormat { font_id: theme::regular(size), color, line_height: Some(size * 1.43), ..Default::default() };
+    let mut at = 0;
+    for (range, _) in &links {
+        job.append(&text[at..range.start], 0., plain.clone());
+        job.append(&text[range.clone()], 0., egui::TextFormat { underline: egui::Stroke::new(1., color), ..plain.clone() });
+        at = range.end;
+    }
+    job.append(&text[at..], 0., plain);
+    job.wrap.max_width = width;
+    if max_rows > 0 {
+        job.wrap.max_rows = max_rows;
+        job.wrap.overflow_character = Some('\u{2026}');
+    }
+    if center {
+        job.halign = egui::Align::Center;
+    }
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let cut = galley.elided;
+    let (rect, r) = ui.allocate_exact_size(Vec2::new(if center { width } else { galley.size().x }, galley.size().y), Sense::click());
+    let origin = if center { egui::pos2(rect.center().x, rect.top()) } else { rect.min };
+    // The link under the pointer, by character.
+    let hovered = r.hover_pos().and_then(|p| {
+        let index = galley.cursor_from_pos(p - origin).index;
+        let byte = text.char_indices().nth(index.0).map_or(text.len(), |(b, _)| b);
+        links.iter().find(|(range, _)| range.contains(&byte)).map(|(_, url)| url.clone())
+    });
+    ui.painter().galley(origin, galley, color);
+    if let Some(url) = hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        if r.clicked() {
+            crate::chat::open_externally(&url);
+        }
+    }
+    cut
+}
+
+/// Desktop's `GroupDescription`: two lines, then "read more" opening the
+/// whole of it in a dialog titled with the group's name.
+pub fn group_description(ui: &mut Ui, title: &str, text: &str, width: f32, center: bool) {
+    let palette = Palette::of(ui.ctx());
+    let open_id = egui::Id::unique(("group-description", title));
+    let cut = linked_text(ui, text, 14., palette.text, width, 2, center);
+    if cut {
+        let r = ui.add(egui::Label::new(RichText::new("read more").font(theme::semibold(14.)).color(palette.text)).sense(Sense::click()));
+        if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(open_id, true));
+        }
+    }
+    if ui.ctx().data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false) {
+        let closed = crate::panes::modal(ui, "group-description", 400., |ui| {
+            crate::panes::title(ui, title);
+            egui::ScrollArea::vertical().max_height(400.).show(ui, |ui| {
+                linked_text(ui, text, 14., palette.text, 368., 0, false);
+            });
+        });
+        if closed {
+            ui.ctx().data_mut(|d| d.remove::<bool>(open_id));
+        }
+    }
 }
 
 /// Desktop's `InContactsIcon`: a 14px person-circle after the name of

@@ -1221,13 +1221,7 @@ fn chat_intro(app: &App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 }
                 if group && let Some(description) = c.description.as_deref().filter(|d| !d.trim().is_empty()) {
                     ui.add_space(8.);
-                    let mut job = egui::text::LayoutJob::simple(description.to_owned(), theme::regular(14.), palette.text, width - 40.);
-                    job.wrap.max_rows = 2;
-                    job.wrap.overflow_character = Some('\u{2026}');
-                    job.halign = egui::Align::Center;
-                    let g = ui.fonts_mut(|f| f.layout_job(job));
-                    let (rect, _) = ui.allocate_exact_size(Vec2::new(width - 40., g.size().y), Sense::hover());
-                    ui.painter().galley(Pos2::new(rect.center().x, rect.top()), g, palette.text);
+                    widgets::group_description(ui, &c.title, description, width - 40., true);
                 }
                 ui.add_space(10.);
                 let line = if group {
