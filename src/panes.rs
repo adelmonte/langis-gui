@@ -843,56 +843,80 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
     if c.accepted && !blocked && !c.left && !c.ended {
         return false;
     }
-    egui::Panel::bottom("message-request")
-        .show_separator_line(false)
-        .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin::symmetric(24, 16)))
-        .show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                let group = c.kind == ConversationKind::Group;
-                let text = if c.ended {
-                    "This group was ended by an admin.".to_owned()
-                } else if c.left {
-                    "You are no longer a member of this group.".to_owned()
-                } else if blocked {
-                    if group { "You have blocked this group. Unblock it to send messages." } else { "You have blocked this person. Unblock them to send messages." }
-                        .to_owned()
-                } else if let langis_store::Membership::Invited { by: Some(by) } = &c.group_state.membership {
-                    format!("{} invited you to join this group. Do you want to join? They won't know you've seen their messages until you accept.", app.name(by))
-                } else if group {
-                    "Do you want to join this group? They won't know you've seen their messages until you accept.".to_owned()
-                } else {
-                    format!("Let {} message you and share your name and photo with them? They won't know you've seen their messages until you accept.", c.title)
-                };
-                ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
-                if c.left || c.ended {
+    // Left and ended groups: what happened, and Delete.
+    if c.left || c.ended {
+        egui::Panel::bottom("message-request")
+            .show_separator_line(false)
+            .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin::symmetric(24, 16)))
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    let text = if c.ended { "This group was ended by an admin." } else { "You are no longer a member of this group." };
+                    ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
                     if ui.link("Delete chat").clicked() {
                         app.panes.delete_chat = Some((c.id.clone(), false));
                     }
-                    return;
-                }
-                ui.add_space(10.);
-                let answer = |a| Command::AnswerMessageRequest { conversation: c.id.clone(), answer: a };
+                });
+            });
+        return true;
+    }
+    // Desktop's `MessageRequestActions`: "Review requests carefully", what
+    // accepting means, then Block, Delete (once reported or blocked),
+    // Report..., Unblock (when blocked) and Accept.
+    egui::Panel::bottom("message-request")
+        .show_separator_line(false)
+        .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin { left: 16, right: 16, top: 8, bottom: 12 }))
+        .show(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.;
+                let group = c.kind == ConversationKind::Group;
+                let safety = if palette.dark { theme::rgb(0xeb977d) } else { theme::rgb(0xb94b29) };
                 ui.horizontal(|ui| {
-                    let labels: &[(&str, MessageRequestResponse)] = if blocked {
-                        &[("Delete", MessageRequestResponse::Delete), ("Unblock", MessageRequestResponse::Accept)]
-                    } else {
-                        &[
-                            ("Report spam", MessageRequestResponse::Spam),
-                            ("Block", MessageRequestResponse::Block),
-                            ("Delete", MessageRequestResponse::Delete),
-                            ("Accept", MessageRequestResponse::Accept),
-                        ]
-                    };
-                    let width: f32 = labels.iter().map(|(l, _)| l.len() as f32 * 8. + 44.).sum();
+                    let line = ui.painter().layout_no_wrap("Review requests carefully".into(), theme::medium(13.), safety);
+                    let w = 16. + 4. + line.size().x;
+                    ui.add_space(((ui.available_width() - w) / 2.).max(0.));
+                    let (at, _) = ui.allocate_exact_size(Vec2::new(w, 20.), Sense::hover());
+                    theme::paint_symbol(ui.painter(), "error-triangle", egui::pos2(at.left() + 8., at.center().y), 14., safety);
+                    ui.painter().galley(egui::pos2(at.left() + 20., at.center().y - line.size().y / 2.), line, safety);
+                });
+                ui.add_space(8.);
+                let name = c.title.clone();
+                let text = match (group, blocked) {
+                    (false, true) => format!("Let {name} message you and share your name and photo with them? You won't receive any messages until you unblock them."),
+                    (false, false) => format!("Let {name} message you and share your name and photo with them? They won\u{2019}t know you\u{2019}ve seen their messages until you accept."),
+                    (true, true) => "Unblock this group and share your name and photo with its members? You won't receive any messages until you unblock them.".into(),
+                    (true, false) => "Join this group and share your name and photo with its members? They won\u{2019}t know you\u{2019}ve seen their messages until you accept.".into(),
+                };
+                ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
+                ui.add_space(12.);
+                use widgets::Axo;
+                let mut buttons: Vec<(&str, Axo, MessageRequestResponse)> = Vec::new();
+                if !blocked {
+                    buttons.push(("Block", Axo::SubtleDestructive, MessageRequestResponse::Block));
+                }
+                if c.reported || blocked {
+                    buttons.push(("Delete", Axo::SubtleDestructive, MessageRequestResponse::Delete));
+                }
+                if !c.reported {
+                    buttons.push(("Report...", Axo::SubtleDestructive, MessageRequestResponse::Spam));
+                }
+                if blocked {
+                    buttons.push(("Unblock", Axo::SubtleSecondary, MessageRequestResponse::Unknown));
+                } else {
+                    buttons.push(("Accept", Axo::SubtleSecondary, MessageRequestResponse::Accept));
+                }
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.;
+                    let width: f32 = buttons.iter().map(|(l, _, _)| ui.painter().layout_no_wrap((*l).into(), theme::medium(13.), Color32::PLACEHOLDER).size().x + 24.).sum::<f32>() + 8. * (buttons.len() as f32 - 1.);
                     ui.add_space(((ui.available_width() - width) / 2.).max(0.));
-                    for (label, response) in labels {
-                        let primary = *response == MessageRequestResponse::Accept;
-                        if widgets::pill_button(ui, label, primary).clicked() {
-                            // Desktop asks before blocking, deleting or reporting.
-                            if primary {
-                                app.send(answer(*response));
+                    for (label, variant, response) in buttons {
+                        if widgets::axo_button(ui, label, variant).clicked() {
+                            // Desktop accepts at once when a 1:1 shares two or more groups.
+                            let trusted = response == MessageRequestResponse::Accept
+                                && c.id.as_direct().is_some_and(|sid| app.conversations.iter().filter(|g| g.kind == ConversationKind::Group && g.members.iter().any(|m| m == sid)).count() > 1);
+                            if trusted {
+                                app.send(Command::AnswerMessageRequest { conversation: c.id.clone(), answer: response });
                             } else {
-                                app.panes.confirm_answer = Some((c.id.clone(), *response));
+                                app.panes.confirm_answer = Some((c.id.clone(), response));
                             }
                         }
                     }
@@ -919,26 +943,47 @@ fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation
     let Some((id, answer)) = app.panes.confirm_answer.clone().filter(|(id, _)| *id == c.id) else { return };
     let group = c.kind == ConversationKind::Group;
     let who = c.title.clone();
+    // Desktop's `MessageRequestActionsConfirmation` and `ReportAndMaybeBlockModal`.
     let (title, body, actions): (String, String, Vec<(&str, Variant, MessageRequestResponse)>) = match answer {
-        MessageRequestResponse::Block => (
-            format!("Block {who}?"),
-            if group { "You will leave this group and no longer receive its messages or updates.".into() } else { "Blocked people won't be able to call you or send you messages.".into() },
+        MessageRequestResponse::Block if group => (
+            format!("Block and Leave {who}?"),
+            "You will no longer receive messages or updates from this group and members won't be able to add you to this group again.".into(),
             vec![("Block", Variant::StrongDestructive, MessageRequestResponse::Block)],
         ),
-        MessageRequestResponse::Delete if !c.blocked => (
-            if group { "Delete and leave group?".into() } else { "Delete chat?".into() },
-            if group { "You will leave this group, and its messages will be deleted from all your devices.".into() } else { "This chat will be deleted from all your devices.".into() },
-            vec![("Delete", Variant::StrongDestructive, MessageRequestResponse::Delete)],
+        MessageRequestResponse::Block => (
+            format!("Block {who}?"),
+            "Blocked people won't be able to call you or send you messages.".into(),
+            vec![("Block", Variant::StrongDestructive, MessageRequestResponse::Block)],
+        ),
+        MessageRequestResponse::Delete if group => (
+            format!("Delete and Leave {who}?"),
+            "You will leave this group, and it will be deleted from all your devices.".into(),
+            vec![("Delete and Leave", Variant::StrongDestructive, MessageRequestResponse::Delete)],
         ),
         MessageRequestResponse::Delete => (
             "Delete chat?".into(),
-            "This chat will be deleted from all your devices.".into(),
+            "This chat will be deleted from all of your devices.".into(),
             vec![("Delete", Variant::StrongDestructive, MessageRequestResponse::Delete)],
         ),
         MessageRequestResponse::Spam => (
-            "Report spam?".into(),
-            "Signal will be told this may be spam. Signal can't see the content of any chat.".into(),
-            vec![("Report", Variant::SubtleDestructive, MessageRequestResponse::Spam), ("Report and block", Variant::StrongDestructive, MessageRequestResponse::BlockAndSpam)],
+            "Report as spam?".into(),
+            match (group, &c.group_state.membership) {
+                (false, _) => "Signal will be notified that this person may be sending spam. Signal can\u{2019}t see the content of any chats.".into(),
+                (true, langis_store::Membership::Invited { by: Some(by) }) => format!("Signal will be notified that {}, who invited you to this group, may be sending spam. Signal can\u{2019}t see the content of any chats.", app.name(by)),
+                (true, _) => "Signal will be notified that the person who invited you to this group may be sending spam. Signal can\u{2019}t see the content of any chats.".into(),
+            },
+            vec![("Report Spam", Variant::SubtleDestructive, MessageRequestResponse::Spam), ("Report and Block", Variant::StrongDestructive, MessageRequestResponse::BlockAndSpam)],
+        ),
+        MessageRequestResponse::Accept => (
+            "Accept request?".into(),
+            "Only accept requests from people you trust. Signal will never message you for a registration code, PIN, or recovery key.".into(),
+            vec![("Accept", Variant::StrongPrimary, MessageRequestResponse::Accept)],
+        ),
+        // Unblock: accepting a blocked chat unblocks it.
+        MessageRequestResponse::Unknown => (
+            format!("Unblock {who}?"),
+            if group { "Group members will be able to add you to this group again.".into() } else { "You will be able to message and call each other.".into() },
+            vec![("Unblock", Variant::StrongPrimary, MessageRequestResponse::Accept)],
         ),
         other => {
             app.panes.confirm_answer = None;
@@ -950,7 +995,13 @@ fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation
     match crate::dialog::show(ctx, egui::Id::unique("message-request-confirm"), &title, &body, Some("Cancel"), &buttons) {
         Some(Answer::Action(i)) => {
             app.panes.confirm_answer = None;
-            app.send(Command::AnswerMessageRequest { conversation: id, answer: actions[i].2 });
+            let chosen = actions[i].2;
+            app.send(Command::AnswerMessageRequest { conversation: id, answer: chosen });
+            match chosen {
+                MessageRequestResponse::Spam => app.toast("Reported as spam."),
+                MessageRequestResponse::BlockAndSpam => app.toast("Reported as spam and blocked."),
+                _ => {}
+            }
         }
         Some(Answer::Cancel) => app.panes.confirm_answer = None,
         None => {}

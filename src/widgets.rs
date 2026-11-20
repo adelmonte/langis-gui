@@ -115,6 +115,29 @@ pub fn axo_icon_button_sm(ui: &mut Ui, symbol: &str, label: &str, pressed: bool)
     response.on_hover_text(label)
 }
 
+/// `AxoButton` variants used outside dialogs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Axo {
+    SubtleSecondary,
+    SubtleDestructive,
+}
+
+/// `AxoButton` size `md`: 30px tall, 12px a side, 13px medium, a pill.
+pub fn axo_button(ui: &mut Ui, label: &str, variant: Axo) -> Response {
+    let palette = Palette::of(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), theme::medium(13.), Color32::PLACEHOLDER);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(galley.size().x + 24., 30.), Sense::click());
+    let down = response.is_pointer_button_down_on();
+    let (fill, text) = match variant {
+        Axo::SubtleSecondary => (if down { palette.fill_pressed } else { palette.fill_secondary }, palette.text),
+        Axo::SubtleDestructive if palette.dark => (Color32::from_rgba_unmultiplied(0xff, 0x4a, 0x3a, if down { 41 } else { 31 }), theme::rgb(0xff4a3a)),
+        Axo::SubtleDestructive => (Color32::from_rgba_unmultiplied(0xf2, 0x16, 0x02, if down { 26 } else { 15 }), theme::rgb(0xf21602)),
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(15), fill);
+    ui.painter().galley(rect.center() - galley.size() / 2., galley, text);
+    response
+}
+
 /// Desktop's round button (`AxoButton`): accent-filled or quiet.
 pub fn pill_button(ui: &mut Ui, text: &str, primary: bool) -> Response {
     let palette = Palette::of(ui.ctx());
