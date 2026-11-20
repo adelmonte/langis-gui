@@ -107,6 +107,8 @@ pub struct App {
     /// Our number, from `Event::Ready`.
     pub phone: Option<String>,
     pub connection: ConnectionState,
+    /// This device was unlinked: Desktop's DialogRelink, until clicked.
+    pub unlinked: bool,
     pub history: Option<HistoryProgress>,
     pub tab: Tab,
     pub conversations: Vec<Conversation>,
@@ -236,6 +238,7 @@ impl App {
             aci: String::new(),
             phone: None,
             connection: ConnectionState::Offline,
+            unlinked: false,
             history: None,
             tab: Tab::Chats,
             conversations: Vec::new(),
@@ -383,6 +386,16 @@ impl App {
     }
 
     /// Takes in what came from the backend since the last frame.
+    /// DialogRelink clicked: the link screen, for a new QR code.
+    pub fn relink(&mut self) {
+        self.unlinked = false;
+        self.conversations.clear();
+        self.chat = None;
+        self.selected = None;
+        self.phase = Phase::Linking { url: None, error: None, qr: None };
+        self.send(Command::Link);
+    }
+
     pub fn poll(&mut self) {
         // A default skin tone chosen in an emoji picker, saved as Settings'.
         if let Some(tone) = crate::emoji_picker::take_tone_change() {
@@ -494,13 +507,9 @@ impl App {
                 self.send(Command::LoadCallDevices);
                 crate::panes::on_ready(self);
             }
-            Event::Unlinked => {
-                self.conversations.clear();
-                self.chat = None;
-                self.selected = None;
-                self.phase = Phase::Linking { url: None, error: None, qr: None };
-                self.send(Command::Link);
-            }
+            // Desktop keeps the window as it was and shows DialogRelink in
+            // the left pane; relinking starts from its click.
+            Event::Unlinked => self.unlinked = true,
             Event::Connection(state) => self.connection = state,
             Event::History(progress) => self.history = Some(progress),
             Event::ConversationsChanged | Event::ContactsSynced | Event::ProfileChanged(_) => self.reload_conversations(),

@@ -346,13 +346,15 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
     // the pane, a 24px icon (a spinner while connecting), a bold title
     // and a subtitle.
     let network = match app.connection {
+        // Desktop's DialogRelink comes before the rest.
+        _ if app.unlinked => Some((Some(Icon::WifiError), "Device unlinked", "Click to relink this device.")),
         ConnectionState::Connecting => Some((None, "Connecting...", "Shouldn't be long")),
         ConnectionState::Offline if !app.demo => Some((Some(Icon::WifiError), "Offline", "Check your network connection.")),
         _ => None,
     };
     if let Some((icon, title, subtitle)) = network {
         let black = Color32::BLACK;
-        egui::Frame::new().fill(Color32::from_rgb(0xff, 0xd6, 0x24)).inner_margin(egui::Margin { left: 16, right: 14, top: 12, bottom: 12 }).show(ui, |ui| {
+        let dialog = egui::Frame::new().fill(Color32::from_rgb(0xff, 0xd6, 0x24)).inner_margin(egui::Margin { left: 16, right: 14, top: 12, bottom: 12 }).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.set_min_height(40.);
             ui.horizontal(|ui| {
@@ -372,6 +374,9 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
                 });
             });
         });
+        if app.unlinked && ui.interact(dialog.response.rect, egui::Id::unique("relink"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            app.relink();
+        }
         ui.add_space(6.);
     }
     let text = match (&app.connection, &app.history) {

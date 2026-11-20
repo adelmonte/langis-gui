@@ -1133,18 +1133,23 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             widgets::text_field(ui, &mut query, "Search", false);
             ui.add_space(6.);
             let q = query.trim().to_lowercase();
+            let people: Vec<langis_store::Conversation> = app.conversations.iter().filter(|p| p.kind == ConversationKind::Direct && !p.blocked && (q.is_empty() || p.title.to_lowercase().contains(&q))).cloned().collect();
             egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
-                for p in app.conversations.iter().filter(|p| p.kind == ConversationKind::Direct && (q.is_empty() || p.title.to_lowercase().contains(&q))) {
+                for p in &people {
                     let Some(sid) = p.id.as_direct() else { continue };
-                    if c.members.iter().any(|m| m == sid) {
-                        continue;
-                    }
-                    let on = chosen.iter().any(|m| m == sid);
-                    let label = if on { format!("{} (added)", p.title) } else { p.title.clone() };
-                    if crate::panes::contact_row(ui, palette, &label, p.phone.as_deref(), p.color, p.avatar_path.as_deref()).clicked() {
+                    // Desktop's ChooseGroupMembersModal lists members too,
+                    // checked and disabled: "Already a member".
+                    let member = c.members.iter().any(|m| m == sid);
+                    let on = member || chosen.iter().any(|m| m == sid);
+                    let row = ui.add_enabled_ui(!member, |ui| {
+                        let r = crate::panes::contact_row(ui, palette, &p.title, if member { Some("Already a member") } else { p.phone.as_deref() }, p.color, p.avatar_path.as_deref());
+                        crate::panes::round_check(ui, palette, egui::pos2(r.rect.right() - 20., r.rect.center().y), on);
+                        r
+                    });
+                    if !member && row.inner.clicked() {
                         if on {
                             chosen.retain(|m| m != sid);
-                        } else {
+                        } else if crate::panes::may_add(app, c.members.len() + chosen.len() + 1) {
                             chosen.push(sid.to_owned());
                         }
                     }

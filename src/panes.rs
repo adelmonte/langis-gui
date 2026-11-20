@@ -30,6 +30,9 @@ pub struct Panes {
     pub new_call: Option<String>,
     /// A chat action waiting on its confirmation (`chat_confirm_dialog`).
     pub chat_confirm: Option<(ConversationId, ChatConfirm)>,
+    /// Desktop's group size dialogs: the recommended limit reached, or the
+    /// most a group can have.
+    pub size_limit: Option<SizeLimit>,
     /// Desktop's `DisappearingTimeDialog`: the chat, the number and unit.
     pub custom_timer: Option<(TimerTarget, u32, usize)>,
     /// Desktop's `MuteUntilDialog`: the chat, and the date and time typed.
@@ -116,7 +119,8 @@ pub struct Lobby {
 pub enum Compose {
     Chat { query: String, searching: bool, found: Option<Result<DirectoryEntry, String>> },
     /// Desktop's Find by username or Find by phone number step.
-    Find { phone: bool, query: String, searching: bool, found: Option<Result<DirectoryEntry, String>> },
+    /// `country`: the region chosen for a phone number (`CountryCodeSelect`).
+    Find { phone: bool, query: String, searching: bool, found: Option<Result<DirectoryEntry, String>>, country: String },
     Group { picking: bool, query: String, members: Vec<String>, title: String, timer: u32, avatar: Option<Vec<u8>> },
 }
 
@@ -425,6 +429,7 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     critical_alert(app, ui);
     key_transparency_dialog(app, ui);
     crate::stories::overlays(app, ui);
+    size_limit_dialog(app, ui);
 }
 
 /// Desktop's left pane notices: megaphones and server alerts, above the
@@ -1125,14 +1130,81 @@ fn step_button(ui: &mut Ui, palette: &Palette, symbol: &str, label: &str) -> boo
     response.clicked()
 }
 
-fn conversation_tile(ui: &mut Ui, palette: &Palette, c: &langis_store::Conversation) -> bool {
+/// Desktop's `ContactListItem` in New chat: the avatar, the name, a
+/// group's member count under it, and (for a person) its "…" menu.
+/// True when clicked.
+fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conversation) -> bool {
     let (inner, response) = tile(ui, palette, 52., egui::Id::unique("compose-row").with(&c.id.0));
     let avatar = Rect::from_min_size(Pos2::new(inner.left() + 14., inner.center().y - 18.), Vec2::splat(36.));
     widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
     let title = if c.kind == ConversationKind::NoteToSelf { "Note to Self".to_owned() } else { c.title.clone() };
+    let person = c.kind == ConversationKind::Direct;
+    let right = if person { inner.right() - 44. } else { inner.right() - 14. };
+    let clip = Rect::from_min_max(Pos2::new(avatar.right() + 12., inner.top()), Pos2::new(right, inner.bottom()));
     let g = ui.painter().layout_no_wrap(title, theme::regular(14.), palette.text);
-    let clip = Rect::from_min_max(Pos2::new(avatar.right() + 12., inner.top()), Pos2::new(inner.right() - 14., inner.bottom()));
-    ui.painter().with_clip_rect(clip).galley(Pos2::new(clip.left(), inner.center().y - g.size().y / 2.), g, palette.text);
+    let subtitle = match c.kind {
+        ConversationKind::Group => Some(match c.members.len() {
+            1 => "1 member".to_owned(),
+            n => format!("{n} members"),
+        }),
+        _ => None,
+    };
+    match subtitle {
+        Some(sub) => {
+            let s = ui.painter().layout_no_wrap(sub, theme::regular(13.), palette.text_secondary);
+            let top = inner.center().y - (g.size().y + s.size().y) / 2.;
+            let below = top + g.size().y;
+            ui.painter().with_clip_rect(clip).galley(Pos2::new(clip.left(), top), g, palette.text);
+            ui.painter().with_clip_rect(clip).galley(Pos2::new(clip.left(), below), s, palette.text_secondary);
+        }
+        None => {
+            ui.painter().with_clip_rect(clip).galley(Pos2::new(clip.left(), inner.center().y - g.size().y / 2.), g, palette.text);
+        }
+    }
+    // The "…" menu, shown on hover (and while open).
+    if person {
+        let menu_id = egui::Id::unique(("compose-row-menu", c.id.0.as_str()));
+        let open = crate::menu::is_open(ui.ctx(), menu_id);
+        let more = Rect::from_center_size(Pos2::new(inner.right() - 26., inner.center().y), Vec2::splat(28.));
+        let hit = ui.interact(more, menu_id.with("button"), Sense::click());
+        if response.hovered() || hit.hovered() || open {
+            if hit.hovered() || open {
+                ui.painter().circle_filled(more.center(), 14., palette.fill_pressed);
+            }
+            theme::paint_symbol(ui.painter(), "more", more.center(), 18., palette.text);
+        }
+        let pressed = hit.clicked();
+        if hit.on_hover_text("More actions").clicked() {
+            crate::menu::open_at(ui.ctx(), menu_id, more.left_bottom());
+        }
+        let mut action = None;
+        crate::menu::show(ui.ctx(), menu_id, |m| {
+            if m.item(Some("message"), "Message") {
+                action = Some(0);
+            }
+            if m.item(Some("phone"), "Voice call") {
+                action = Some(1);
+            }
+            if m.item(Some("videocamera"), "Video call") {
+                action = Some(2);
+            }
+            if m.item(Some("block"), "Block") {
+                action = Some(3);
+            }
+        });
+        match action {
+            Some(0) => return true,
+            Some(n @ (1 | 2)) => {
+                open_lobby(app, c.id.clone(), n == 2);
+                app.panes.compose = None;
+            }
+            Some(_) => app.panes.chat_confirm = Some((c.id.clone(), ChatConfirm::Block)),
+            None => {}
+        }
+        if pressed || open {
+            return false;
+        }
+    }
     response.clicked()
 }
 
@@ -1163,6 +1235,39 @@ pub fn round_check(ui: &Ui, palette: &Palette, center: Pos2, on: bool) {
         theme::paint_symbol(ui.painter(), "check", center, 14., Color32::WHITE);
     } else {
         ui.painter().circle_stroke(center, 9.5, egui::Stroke::new(1.5, palette.text_secondary));
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum SizeLimit {
+    Recommended(usize),
+    Max(usize),
+}
+
+/// Desktop's `toggleConversationInChooseMembers`: whether one more can be
+/// chosen when the group would then have `total` (us, its members and
+/// those chosen), with the dialog to show if any.
+pub fn may_add(app: &mut App, total: usize) -> bool {
+    let config = langis_core::remote_config::current();
+    let (recommended, hard) = (config.group_size_recommended(), config.group_size_hard_limit());
+    if total > hard {
+        app.panes.size_limit = Some(SizeLimit::Max(hard));
+        return false;
+    }
+    if total == recommended {
+        app.panes.size_limit = Some(SizeLimit::Recommended(recommended));
+    }
+    true
+}
+
+fn size_limit_dialog(app: &mut App, ui: &Ui) {
+    let Some(limit) = app.panes.size_limit else { return };
+    let (title, body) = match limit {
+        SizeLimit::Recommended(n) => ("Recommended member limit reached".to_owned(), format!("Signal groups perform best with {n} members or fewer. Adding more members will cause delays sending and receiving messages.")),
+        SizeLimit::Max(n) => ("Maximum group size reached".to_owned(), format!("Signal groups can have a maximum of {n} members.")),
+    };
+    if crate::dialog::show(ui.ctx(), egui::Id::unique("group-size-limit"), &title, &body, None, &[("Okay", crate::dialog::Variant::StrongPrimary)]).is_some() {
+        app.panes.size_limit = None;
     }
 }
 
@@ -1241,7 +1346,7 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
             if response.clicked() {
                 if chosen {
                     members.retain(|m| m != sid);
-                } else {
+                } else if may_add(app, members.len() + 2) {
                     members.push(sid.to_owned());
                 }
             }
@@ -1396,10 +1501,11 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                         next = Some(Compose::Group { picking: true, query: String::new(), members: Vec::new(), title: String::new(), timer: 0, avatar: None });
                     }
                     if step_button(ui, &palette, "at", "Find by username") {
-                        next = Some(Compose::Find { phone: false, query: String::new(), searching: false, found: None });
+                        next = Some(Compose::Find { phone: false, query: String::new(), searching: false, found: None, country: String::new() });
                     }
                     if step_button(ui, &palette, "number", "Find by phone number") {
-                        next = Some(Compose::Find { phone: true, query: String::new(), searching: false, found: None });
+                        let country = app.phone.as_deref().and_then(crate::countries::of_number).unwrap_or("US").to_owned();
+                        next = Some(Compose::Find { phone: true, query: String::new(), searching: false, found: None, country });
                     }
                 }
                 // A pasted group or call link opens it.
@@ -1413,7 +1519,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                     if !contacts.is_empty() {
                         list_header(ui, &palette, "Contacts");
                         for c in &contacts {
-                            if conversation_tile(ui, &palette, c) {
+                            if conversation_tile(app, ui, &palette, c) {
                                 open = Some(c.id.clone());
                             }
                         }
@@ -1421,7 +1527,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                     if !groups.is_empty() {
                         list_header(ui, &palette, "Groups");
                         for c in &groups {
-                            if conversation_tile(ui, &palette, c) {
+                            if conversation_tile(app, ui, &palette, c) {
                                 open = Some(c.id.clone());
                             }
                         }
@@ -1461,7 +1567,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 }
             });
         }
-        Compose::Find { phone, query, searching, found } => {
+        Compose::Find { phone, query, searching, found, country } => {
             let heading = if *phone { "Find by phone number" } else { "Find by username" };
             ui.add_space(12.);
             ui.horizontal(|ui| {
@@ -1472,6 +1578,20 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 ui.label(RichText::new(heading).font(theme::semibold(18.)));
             });
             ui.add_space(6.);
+            // Desktop's CountryCodeSelect, above the number.
+            ui.set_min_width(ui.available_width());
+            if *phone {
+                ui.horizontal(|ui| {
+                    ui.add_space(16.);
+                    let shown = crate::countries::COUNTRIES.iter().find(|(r, _, _)| r == country).map(|(_, name, code)| format!("{name} +{code}")).unwrap_or_default();
+                    egui::ComboBox::from_id_salt("find-country").width(ui.available_width() - 30.).selected_text(shown).height(320.).show_ui(ui, |ui| {
+                        for (region, name, code) in crate::countries::COUNTRIES {
+                            ui.selectable_value(country, (*region).to_owned(), format!("{name}  +{code}"));
+                        }
+                    });
+                });
+                ui.add_space(6.);
+            }
             let field = ui.horizontal(|ui| {
                 ui.add_space(16.);
                 ui.add(egui::TextEdit::singleline(query).hint_text(if *phone { "Phone number" } else { "Username" }).desired_width(ui.available_width() - 16.))
@@ -1509,7 +1629,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 if (clicked || enter) && ready {
                     *searching = true;
                     *found = None;
-                    let q = if *phone { query.trim().to_owned() } else { format!("@{}", query.trim().trim_start_matches('@')) };
+                    let q = if *phone { crate::countries::with_code(country, query) } else { format!("@{}", query.trim().trim_start_matches('@')) };
                     *query = q.clone();
                     app.send(Command::FindRecipient { query: q });
                 }
