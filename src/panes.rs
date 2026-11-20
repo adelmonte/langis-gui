@@ -121,6 +121,10 @@ pub struct Lobby {
     pub audio: bool,
     /// The camera preview langis was asked for (SetCallVideo).
     pub preview: bool,
+    /// The most devices the call takes (from its peek): at that, it's full.
+    pub max_devices: Option<u32>,
+    /// Desktop's lobby Ring toggle: ring the group, or only notify it.
+    pub ring: bool,
 }
 
 /// Desktop's "New chat" and "New group" flows.
@@ -179,14 +183,15 @@ pub fn on_event(app: &mut App, event: Event) {
             load_calls(app);
             let conversation = ConversationId::call_link(&room);
             app.send(Command::PeekGroupCall { conversation: conversation.clone() });
-            app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video: false, audio: true, preview: false });
+            app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video: false, audio: true, preview: false, max_devices: None, ring: true });
         }
         Event::CallLinkRefused { removed } => {
             app.toast(if removed { "You were removed from the call." } else { "Your request to join this call was declined." });
         }
-        Event::GroupPeek { conversation, users } => {
+        Event::GroupPeek { conversation, users, max_devices } => {
             if let Some(lobby) = app.panes.lobby.as_mut().filter(|l| l.conversation == conversation) {
                 lobby.users = users.clone();
+                lobby.max_devices = max_devices;
             }
             app.panes.active_calls.insert(conversation, users);
         }
@@ -1213,6 +1218,8 @@ fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_s
             1 => "1 member".to_owned(),
             n => format!("{n} members"),
         }),
+        // Desktop's ContactListItem shows a person's About under the name.
+        ConversationKind::Direct => c.about.clone(),
         _ => None,
     };
     match subtitle {
@@ -1777,6 +1784,9 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     let conversation = lobby.conversation.clone();
     let users = lobby.users.clone();
     let (mut video, mut audio, preview) = (lobby.video, lobby.audio, lobby.preview);
+    let mut ring = lobby.ring;
+    // Desktop's "Call full": as many devices as the call takes are in it.
+    let full = lobby.max_devices.is_some_and(|max| users.len() as u32 >= max);
     // The camera runs for the preview while it's on (langis's SetCallVideo
     // works before a call, for the lobby).
     if video != preview {
@@ -1797,7 +1807,10 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     // link that needs an admin's approval.
     let link = conversation.as_call_link().and_then(|room| app.panes.links.iter().find(|l| l.room_id == room)).cloned();
     let asks = link.as_ref().is_some_and(|l| l.admin_key.is_none() && l.restrictions == langis_store::CallLinkRestrictions::AdminApproval);
-    let join_label = if asks { "Ask to join" } else if group && !users.is_empty() { "Join" } else { "Start" };
+    let join_label = if full { "Call full" } else if asks { "Ask to join" } else if group && !users.is_empty() { "Join" } else { "Start" };
+    // The Ring toggle: a group's (not a link's) call no one's in yet, the
+    // group small enough to ring (Desktop's `isGroupTooLargeToRing`, 16).
+    let ringable = conversation.is_group() && users.is_empty() && chat.as_ref().is_some_and(|c| c.members.len() <= 16);
     // Desktop's `CallingLobby`, the whole window on gray-95: the close X and
     // settings above, our camera (or photo) 16:9 in the middle, the chat's
     // name and who's there, then camera, microphone and the green button.
@@ -1847,8 +1860,18 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
             ui.painter().text(frame.center() + Vec2::new(0., 72.), egui::Align2::CENTER_CENTER, note, theme::regular(13.), egui::Color32::from_white_alpha(200));
         }
         // `CallingPreCallInfo`.
+        // Members other than us, by name, for the ring line.
+        let others: Vec<String> = chat.as_ref().map(|c| c.members.iter().filter(|m| **m != app.aci).map(|m| app.name(m)).collect()).unwrap_or_default();
+        let listed = match others.len() {
+            0 => String::new(),
+            1 => others[0].clone(),
+            2 => format!("{} and {}", others[0], others[1]),
+            3 => format!("{}, {}, and {}", others[0], others[1], others[2]),
+            n => format!("{}, {}, and {} others", others[0], others[1], n - 2),
+        };
         let who = if group {
             match users.len() {
+                0 if ringable && !listed.is_empty() => if ring { format!("Signal will ring {listed}") } else { format!("{listed} will be notified") },
                 0 => "No one else is here".to_owned(),
                 1 => format!("{} is in this call", app.name(&users[0])),
                 2 => format!("{} and {} are in this call", app.name(&users[0]), app.name(&users[1])),
@@ -1866,7 +1889,7 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         // Controls: camera, microphone, then the join button.
         let label = ui.painter().layout_no_wrap(join_label.to_owned(), theme::semibold(14.), white);
         let pill_w = label.size().x + 48.;
-        let total = 56. + 16. + 56. + 24. + pill_w;
+        let total = 56. + 16. + 56. + if ringable { 16. + 56. } else { 0. } + 24. + pill_w;
         let mut x = screen.center().x - total / 2.;
         for (symbol_on, symbol_off, tip, on) in [("videocamera-fill", "videocamera-slash-fill", "Camera", &mut video), ("mic-fill", "mic-slash-fill", "Microphone", &mut audio)] {
             let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::splat(56.));
@@ -1880,13 +1903,28 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
             }
             x += 56. + 16.;
         }
+        // Desktop's Ring toggle (bell): ring, or only notify.
+        if ringable {
+            let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::splat(56.));
+            let r = ui.interact(rect, ui.scope_id().with("lobby-ring"), Sense::click());
+            let fill = if ring { theme::rgb(0x5e5e5e) } else { white };
+            let ink = if ring { white } else { theme::rgb(0x121212) };
+            ui.painter().circle_filled(rect.center(), 28., if r.hovered() { fill.gamma_multiply(0.85) } else { fill });
+            theme::paint_symbol(ui.painter(), if ring { "bell-ring-fill" } else { "bell-slash-fill" }, rect.center(), 24., ink);
+            if r.on_hover_text(if ring { "Ring on" } else { "Ring off" }).clicked() {
+                ring = !ring;
+            }
+            x += 56. + 16.;
+        }
         x += 8.;
         let pill = Rect::from_min_size(Pos2::new(x, y + 8.), Vec2::new(pill_w, 40.));
         let r = ui.interact(pill, ui.scope_id().with("lobby-join"), Sense::click());
-        let green = palette.green;
-        ui.painter().rect_filled(pill, CornerRadius::same(20), if r.hovered() { green.gamma_multiply(0.85) } else { green });
+        let green = if full { theme::rgb(0x5e5e5e) } else { palette.green };
+        ui.painter().rect_filled(pill, CornerRadius::same(20), if r.hovered() && !full { green.gamma_multiply(0.85) } else { green });
         ui.painter().galley(pill.center() - label.size() / 2., label, white);
-        if r.clicked() {
+        if full {
+            let _ = r.on_hover_text("This call has reached the limit of participants.");
+        } else if r.clicked() {
             answer = Some(0);
         }
     });
@@ -1894,6 +1932,7 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
     if let Some(l) = app.panes.lobby.as_mut() {
         l.video = video;
         l.audio = audio;
+        l.ring = ring;
     }
     if settings {
         app.send(Command::LoadCallDevices);
@@ -1903,6 +1942,9 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         Some(0) => {
             app.call_view.video_on = Some(video);
             app.call_view.audio_on = audio;
+            if ringable {
+                app.send(Command::SetOutgoingRing(ring));
+            }
             app.send(Command::StartCall { conversation, video });
             if !audio {
                 app.send(Command::SetCallAudio(false));
@@ -1939,7 +1981,7 @@ pub fn open_lobby(app: &mut App, conversation: ConversationId, video: bool) {
     if conversation.is_group() || conversation.as_call_link().is_some() {
         app.send(Command::PeekGroupCall { conversation: conversation.clone() });
     }
-    app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video, audio: true, preview: false });
+    app.panes.lobby = Some(Lobby { conversation, users: Vec::new(), video, audio: true, preview: false, max_devices: None, ring: true });
 }
 
 /// Desktop's captcha dialog: the challenge opens in the browser, which

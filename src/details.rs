@@ -398,6 +398,18 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     crate::panes::mute_items(app, m, &c.id);
                 }
             });
+            // Desktop's "Mentions" for a group: while muted, notify for
+            // mentions anyway or not.
+            if c.kind == ConversationKind::Group {
+                let options = ["Always notify", "Don't notify"];
+                let item = Item::new("Mentions").symbol("at").description("Receive notifications when you're mentioned in muted chats");
+                if let Some(i) = axo_list::select(ui, egui::Id::unique(("details-mentions", c.id.0.as_str())), item, &options, Some(c.dont_notify_mentions as usize)) {
+                    let off = i == 1;
+                    if off != c.dont_notify_mentions {
+                        app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::DontNotifyMentions(off) });
+                    }
+                }
+            }
         });
     }
 

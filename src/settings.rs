@@ -1548,7 +1548,17 @@ fn blocked(app: &mut App, ui: &mut Ui, palette: &Palette) {
                 }
                 let avatar = Rect::from_min_size(Pos2::new(rect.left() + 12., rect.center().y - 18.), Vec2::splat(36.));
                 widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
-                ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y), Align2::LEFT_CENTER, &c.title, theme::regular(13.), palette.text);
+                // The name, and when it was blocked under it.
+                match c.blocked_at {
+                    Some(at) => {
+                        let date = chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%b %-d, %Y").to_string()).unwrap_or_default();
+                        ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y - 8.), Align2::LEFT_CENTER, &c.title, theme::regular(13.), palette.text);
+                        ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y + 9.), Align2::LEFT_CENTER, format!("Blocked on {date}"), theme::regular(12.), palette.text_secondary);
+                    }
+                    None => {
+                        ui.painter().text(Pos2::new(avatar.right() + 12., rect.center().y), Align2::LEFT_CENTER, &c.title, theme::regular(13.), palette.text);
+                    }
+                }
                 if response.clicked() {
                     app.settings.ask = Some(Ask::Unblock(c.id.clone(), c.title.clone(), c.kind == ConversationKind::Group));
                 }

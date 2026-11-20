@@ -377,6 +377,14 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
         if app.unlinked && ui.interact(dialog.response.rect, egui::Id::unique("relink"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             app.relink();
         }
+        // Offline: a click tries the connection again now.
+        if !app.unlinked
+            && matches!(app.connection, ConnectionState::Offline)
+            && ui.interact(dialog.response.rect, egui::Id::unique("reconnect"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Click to reconnect").clicked()
+        {
+            app.send(langis_core::Command::Resumed);
+            app.connection = ConnectionState::Connecting;
+        }
         ui.add_space(6.);
     }
     let text = match (&app.connection, &app.history) {

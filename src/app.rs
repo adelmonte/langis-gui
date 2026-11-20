@@ -874,7 +874,8 @@ impl App {
         if reading && self.sound.in_chat && !chat.muted {
             crate::sounds::once(crate::sounds::Sound::Pop);
         }
-        if !on || reading || (chat.muted && !for_me) {
+        // A muted group set to "Mentions: Don't notify" stays quiet for them too.
+        if !on || reading || (chat.muted && (!for_me || chat.dont_notify_mentions)) {
             return;
         }
         if self.sound.notification {
