@@ -338,3 +338,40 @@ pub fn spinner(ui: &mut Ui, size: f32) -> Response {
     }
     response
 }
+
+/// Drag to reorder (Desktop's chat folders and sticker packs): each of
+/// `rows` (in order) can be dragged; a line shows where it'll land.
+/// Returns (from, to) when one is dropped somewhere else, `to` counted in
+/// the list without it.
+pub fn reorder_rows(ui: &Ui, id: egui::Id, rows: &[Rect], accent: Color32) -> Option<(usize, usize)> {
+    let held = ui.ctx().data(|d| d.get_temp::<usize>(id));
+    let mut dropped = None;
+    for (i, rect) in rows.iter().enumerate() {
+        let r = ui.interact(*rect, id.with(i), Sense::drag());
+        if r.hovered() && held.is_none() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if r.drag_started() {
+            ui.ctx().data_mut(|d| d.insert_temp(id, i));
+        }
+        if r.drag_stopped() {
+            dropped = Some(i);
+        }
+    }
+    let from = held.or(dropped)?;
+    let pointer = ui.ctx().pointer_interact_pos()?;
+    // Before the first row whose middle is under the pointer.
+    let slot = rows.iter().position(|r| pointer.y < r.center().y).unwrap_or(rows.len());
+    if dropped.is_none() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        if slot != from && slot != from + 1 {
+            let y = rows.get(slot).map(|r| r.top()).unwrap_or_else(|| rows.last().map(|r| r.bottom()).unwrap_or_default());
+            let x = rows.first().map(|r| r.x_range()).unwrap_or(egui::Rangef::new(0., 0.));
+            ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground, id)).hline(x, y, egui::Stroke::new(2., accent));
+        }
+        return None;
+    }
+    ui.ctx().data_mut(|d| d.remove::<usize>(id));
+    let to = if slot > from { slot - 1 } else { slot };
+    (to != from).then_some((from, to))
+}

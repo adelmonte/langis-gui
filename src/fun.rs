@@ -846,11 +846,12 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                     ui.label(RichText::new(empty).font(theme::regular(13.)).color(palette.text_secondary));
                 }
                 let installed_list = std::ptr::eq(packs, &manager.installed);
+                let mut rows = Vec::new();
                 for (i, pack) in packs.iter().enumerate() {
-                    // Desktop drags installed packs into order; here they
-                    // move a step from their row.
-                    let moves = if installed_list { (i > 0, i + 1 < packs.len()) } else { (false, false) };
-                    if let Some(action) = pack_row(ui, &palette, pack, title, moves) {
+                    let top = ui.cursor().top();
+                    let action = pack_row(ui, &palette, pack, title, (false, false));
+                    rows.push(Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top()));
+                    if let Some(action) = action {
                         match action {
                             PackAction::Move(up) => {
                                 let mut ids: Vec<Vec<u8>> = packs.iter().map(|p| p.id.clone()).collect();
@@ -866,6 +867,15 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                             }
                         }
                     }
+                }
+                // Desktop drags installed packs into order.
+                if installed_list
+                    && let Some((from, to)) = widgets::reorder_rows(ui, egui::Id::unique("sticker-pack-reorder"), &rows, palette.accent)
+                {
+                    let mut ids: Vec<Vec<u8>> = packs.iter().map(|p| p.id.clone()).collect();
+                    let moved = ids.remove(from);
+                    ids.insert(to, moved);
+                    app.send(Command::OrderStickerPacks(ids));
                 }
             }
         });

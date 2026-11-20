@@ -834,13 +834,16 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
         }
         let order: Vec<String> = folders.iter().map(|f| f.id.clone()).collect();
         let mut reorder: Option<Vec<String>> = None;
+        // Desktop drags folders into order.
+        let mut rows = Vec::new();
         for (i, f) in folders.iter().enumerate() {
             if f.folder_type == ChatFolderType::All {
-                axo_list::item(ui, Item::new(tr("All chats")).symbol("folder"), End::None);
+                rows.push(axo_list::item(ui, Item::new(tr("All chats")).symbol("folder"), End::None).row.rect);
                 continue;
             }
             let summary = folder_summary(f);
             let r = axo_list::item(ui, Item::new(&f.name).symbol("folder").description(&summary), End::Arrow(None));
+            rows.push(r.row.rect);
             let edit = || folder_edit(f);
             if r.clicked() {
                 app.settings.folder = Some(edit());
@@ -849,7 +852,7 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
                 if m.item(Some("pencil"), tr("Edit folder")) {
                     app.settings.folder = Some(edit());
                 }
-                // Desktop drags folders into order; here they move a step.
+                // Or a step at a time.
                 if i > 0 && m.item(Some("arrow-up"), "Move up") {
                     let mut o = order.clone();
                     o.swap(i, i - 1);
@@ -864,6 +867,12 @@ fn chat_folders(app: &mut App, ui: &mut Ui) {
                     app.settings.ask = Some(Ask::DeleteFolder(f.id.clone(), f.name.clone()));
                 }
             });
+        }
+        if let Some((from, to)) = widgets::reorder_rows(ui, egui::Id::unique("folder-reorder"), &rows, palette.accent) {
+            let mut o = order.clone();
+            let moved = o.remove(from);
+            o.insert(to, moved);
+            reorder = Some(o);
         }
         if let Some(order) = reorder {
             app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::Reorder(order)));
