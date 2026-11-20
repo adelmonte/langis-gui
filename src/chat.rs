@@ -1923,8 +1923,19 @@ fn message(
             qy += 20.;
             qh -= 20.;
         }
-        let rect = Rect::from_min_size(Pos2::new(left, qy), Vec2::new(bubble_w - pad.x * 2., qh - 6.));
+        check_quote(ctx.app, ui, ctx.chat_id, q);
+        let missing = quote_missing(ui, q) == Some(true);
+        let rect = Rect::from_min_size(Pos2::new(left, qy), Vec2::new(bubble_w - pad.x * 2., qh - 6. - if missing { QUOTE_MISSING_H } else { 0. }));
         quote(ui, palette, outgoing, q, rect, ctx);
+        if missing {
+            // `Quote__reference-warning`: under the quote, in its colors.
+            let warn = Rect::from_min_size(Pos2::new(rect.left(), rect.bottom()), Vec2::new(rect.width(), QUOTE_MISSING_H));
+            let fill = if outgoing { Color32::from_white_alpha(40) } else { palette.fill_secondary };
+            ui.painter().rect_filled(warn, CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, fill);
+            let ink = if outgoing { Color32::WHITE } else { palette.text };
+            theme::paint_symbol(ui.painter(), "info", Pos2::new(warn.left() + 14., warn.center().y), 14., ink);
+            ui.painter().text(Pos2::new(warn.left() + 28., warn.center().y), Align2::LEFT_CENTER, tr("Original message not found"), theme::regular(13.), ink);
+        }
         if !q.story && ui.interact(rect, ui.scope_id().with(("quote", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             actions.push(Action::JumpToQuote { author: q.author.clone(), sent_at: q.sent_at });
         }
@@ -2608,11 +2619,48 @@ fn quote_body(ui: &Ui, q: &langis_store::Quote, width: f32, color: Color32) -> s
     ui.fonts_mut(|f| f.layout_job(job))
 }
 
-/// A quote's height: the author, its text, at least the thumbnail's.
+/// A quote's height: the author, its text, at least the thumbnail's; and
+/// Desktop's "Original message not found" under it.
 fn quote_height(ui: &Ui, q: &langis_store::Quote, width: f32) -> f32 {
     let text = quote_body(ui, q, width, Color32::WHITE).size().y;
     let h = 6. + 19. + text + 7.;
-    if q.thumbnail.is_some() || q.attachment.is_some() { h.max(QUOTE_THUMB) } else { h }
+    let h = if q.thumbnail.is_some() || q.attachment.is_some() { h.max(QUOTE_THUMB) } else { h };
+    if quote_missing(ui, q) == Some(true) { h + QUOTE_MISSING_H } else { h }
+}
+
+const QUOTE_MISSING_H: f32 = 26.;
+
+fn quote_found_id(q: &langis_store::Quote) -> egui::Id {
+    egui::Id::unique(("quote-found", q.author.clone(), q.sent_at))
+}
+
+/// Whether the quoted message isn't here (Desktop's
+/// `referencedMessageNotFound`); `None` until looked up.
+fn quote_missing(ui: &Ui, q: &langis_store::Quote) -> Option<bool> {
+    if q.story {
+        return Some(false);
+    }
+    ui.ctx().data(|d| d.get_temp::<bool>(quote_found_id(q))).map(|found| !found)
+}
+
+/// Looks the quoted message up once, for [`quote_missing`].
+fn check_quote(app: &App, ui: &Ui, conversation: &langis_store::ConversationId, q: &langis_store::Quote) {
+    if q.story {
+        return;
+    }
+    let id = quote_found_id(q);
+    let asked = id.with("asked");
+    if ui.ctx().data(|d| d.get_temp::<bool>(id).is_some() || d.get_temp::<bool>(asked).is_some()) {
+        return;
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(asked, true));
+    let (conversation, author, sent_at, ctx) = (conversation.clone(), q.author.clone(), q.sent_at, ui.ctx().clone());
+    app.load(move |db| async move {
+        let found = db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten().is_some();
+        ctx.data_mut(|d| d.insert_temp(id, found));
+        ctx.request_repaint();
+        None
+    });
 }
 
 /// An image cropped to fill `at` (`object-fit: cover`), once its size is
