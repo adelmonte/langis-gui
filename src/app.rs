@@ -517,6 +517,10 @@ impl App {
                     if self.sound.call_notify && !self.focused
                         && let Some(u) = update.as_ref()
                     {
+                        // Desktop's incoming call notification plays TriTone.
+                        if self.sound.notification {
+                            crate::sounds::once(crate::sounds::Sound::TriTone);
+                        }
                         let who = self.conversation(&u.conversation).map(|c| c.title.clone()).unwrap_or_else(|| "Someone".into());
                         let body = if u.video { "Incoming video call" } else { "Incoming voice call" };
                         let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into() });
@@ -526,6 +530,23 @@ impl App {
                     }
                 } else if !ringing {
                     crate::sounds::stop_ring();
+                }
+                // Desktop's call tones (`callingTones`): the call ending,
+                // a hand going up, someone starting to present.
+                if let (Some(before), None) = (self.call.as_ref(), update.as_ref())
+                    && !(before.incoming && before.status == langis_core::CallStatus::Ringing)
+                {
+                    crate::sounds::once(crate::sounds::Sound::HangUp);
+                }
+                if let (Some(before), Some(now)) = (self.call.as_ref(), update.as_ref()) {
+                    let mine = now.local_demux_id;
+                    if now.raised_hands.iter().any(|h| !before.raised_hands.contains(h) && Some(*h) != mine) {
+                        crate::sounds::once(crate::sounds::Sound::HandRaised);
+                    }
+                    let presenting = |u: &langis_core::CallUpdate| u.remote_sharing || u.participants.iter().any(|p| p.presenting);
+                    if presenting(now) && !presenting(before) {
+                        crate::sounds::once(crate::sounds::Sound::Presenting);
+                    }
                 }
                 if update.is_none() {
                     self.call_view = Default::default();
@@ -778,13 +799,13 @@ impl App {
         let reading = self.focused && self.selected.as_ref() == Some(conversation);
         // Desktop's in-chat sound, for the chat being read.
         if reading && self.sound.in_chat && !chat.muted {
-            crate::sounds::once(crate::sounds::in_chat_tick());
+            crate::sounds::once(crate::sounds::Sound::Pop);
         }
         if !on || reading || (chat.muted && !for_me) {
             return;
         }
         if self.sound.notification {
-            crate::sounds::once(crate::sounds::message_chime());
+            crate::sounds::once(crate::sounds::Sound::Pop);
         }
         if self.sound.attention {
             self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
@@ -973,7 +994,12 @@ impl App {
     fn play_next_voice(&mut self, (conversation, message_id): (ConversationId, i64)) {
         let Some(chat) = self.chat.as_ref().filter(|c| c.id == conversation) else { return };
         let Some(at) = chat.messages.iter().position(|m| m.id == message_id) else { return };
-        let Some(next) = chat.messages.get(at + 1) else { return };
+        // Desktop's VoiceNoteEnd when a run of voice messages is over.
+        let next_voice = chat.messages.get(at + 1).filter(|n| n.attachments.iter().any(|a| a.voice));
+        if next_voice.is_none() && chat.messages[at].attachments.iter().any(|a| a.voice) {
+            crate::sounds::once(crate::sounds::Sound::VoiceNoteEnd);
+        }
+        let Some(next) = next_voice else { return };
         let Some(voice) = next.attachments.iter().find(|a| a.voice) else { return };
         let Some(path) = voice.local_path.clone() else { return };
         let Some(peaks) = self.audio.peaks(&self.ctx, &path) else { return };

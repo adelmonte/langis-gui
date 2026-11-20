@@ -1064,6 +1064,10 @@ pub fn send_text(app: &mut App, chat: &mut ChatView, c: &langis_store::Conversat
     if matches!(command, Command::EditMessage { .. }) {
         app.send(command);
     } else {
+        // Desktop's Whoosh as a message goes, with in-chat sounds on.
+        if app.sound.in_chat {
+            crate::sounds::once(crate::sounds::Sound::Whoosh);
+        }
         app.send_checked(c.id.clone(), PendingSend::Command(Box::new(command)));
     }
 }

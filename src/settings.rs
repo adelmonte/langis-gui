@@ -941,7 +941,7 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
                 *slot = on;
                 write(app, crate::sounds::KEYS[i], on.to_string());
                 if on && i == 0 {
-                    crate::sounds::once(crate::sounds::message_chime());
+                    crate::sounds::once(crate::sounds::Sound::Pop);
                 }
             }
         }

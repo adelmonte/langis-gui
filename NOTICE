@@ -20,6 +20,8 @@ Copyright Signal Messenger, LLC, AGPL-3.0-only):
   and fixed at weight 400; src/symbols.rs is generated from its
   ts/axo/_internal/AxoSymbolDefs.generated.std.ts.
 - src/menu.rs follows its AxoDropdownMenu and AxoBaseMenu.
+- assets/sounds/*.ogg are Signal Desktop's sounds/*.ogg, unchanged, played
+  where Desktop plays them (src/sounds.rs).
 
 assets/fonts/Inter-*.ttf: Inter 3.19 by Rasmus Andersson, SIL Open Font
 License 1.1 (https://github.com/rsms/inter), converted from the WOFF2 files

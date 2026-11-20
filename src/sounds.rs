@@ -1,14 +1,64 @@
-//! The app's sounds, made here rather than taken from Desktop: a short
-//! chime for a new message, a softer tick in the open chat, and a ringtone
-//! for incoming calls. Each is synthesized as 48 kHz samples and played by
-//! PipeWire's `pw-play`, as voice messages are.
+//! The app's sounds: Signal Desktop's own (`sounds/*.ogg`, AGPL-3.0,
+//! credited in NOTICE), played where Desktop plays them
+//! (`ts/util/Sound.std.ts`, `ts/services/notifications.preload.ts`,
+//! `ts/util/callingTones.preload.ts`). PipeWire's `pw-play` plays them, or
+//! `ffplay` without it.
 
-use std::io::Write;
 use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
-const RATE: u32 = 48_000;
+/// Desktop's `SoundType`s that this app plays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sound {
+    /// A message or reaction notification, and a message in the open chat.
+    Pop,
+    /// An incoming call's notification.
+    TriTone,
+    /// A message sent, with in-chat sounds on.
+    Whoosh,
+    /// While a call rings us.
+    Ringtone,
+    /// A call ending.
+    HangUp,
+    /// Someone raising a hand in a call.
+    HandRaised,
+    /// Someone starting to present in a call.
+    Presenting,
+    /// The last of a run of voice messages finishing.
+    VoiceNoteEnd,
+}
+
+impl Sound {
+    fn file(self) -> (&'static str, &'static [u8]) {
+        match self {
+            Self::Pop => ("pop.ogg", include_bytes!("../assets/sounds/pop.ogg")),
+            Self::TriTone => ("notification.ogg", include_bytes!("../assets/sounds/notification.ogg")),
+            Self::Whoosh => ("whoosh.ogg", include_bytes!("../assets/sounds/whoosh.ogg")),
+            Self::Ringtone => ("ringtone_minimal.ogg", include_bytes!("../assets/sounds/ringtone_minimal.ogg")),
+            Self::HangUp => ("navigation-cancel.ogg", include_bytes!("../assets/sounds/navigation-cancel.ogg")),
+            Self::HandRaised => ("notification_simple-01.ogg", include_bytes!("../assets/sounds/notification_simple-01.ogg")),
+            Self::Presenting => {
+                ("navigation_selection-complete-celebration.ogg", include_bytes!("../assets/sounds/navigation_selection-complete-celebration.ogg"))
+            }
+            Self::VoiceNoteEnd => ("state-change_confirm-up.ogg", include_bytes!("../assets/sounds/state-change_confirm-up.ogg")),
+        }
+    }
+
+    /// The sound as a file the players can open: written to the cache
+    /// directory the first time.
+    fn path(self) -> Option<PathBuf> {
+        let (name, bytes) = self.file();
+        let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("langis-gui").join("sounds");
+        let path = dir.join(name);
+        if std::fs::metadata(&path).map(|m| m.len() as usize) .ok() != Some(bytes.len()) {
+            std::fs::create_dir_all(&dir).ok()?;
+            std::fs::write(&path, bytes).ok()?;
+        }
+        Some(path)
+    }
+}
 
 /// Desktop's notification sound settings, kept as `ui.` settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,74 +97,30 @@ impl Prefs {
     }
 }
 
-/// A note: its pitch in hertz, start and length in seconds, loudness.
-struct Note(f32, f32, f32, f32);
-
-/// Sine notes with a soft attack and an exponential fade, mixed.
-fn render(notes: &[Note], length: f32) -> Vec<f32> {
-    let n = (length * RATE as f32) as usize;
-    let mut out = vec![0f32; n];
-    for &Note(freq, start, dur, gain) in notes {
-        let from = (start * RATE as f32) as usize;
-        let len = (dur * RATE as f32) as usize;
-        for i in 0..len.min(n.saturating_sub(from)) {
-            let t = i as f32 / RATE as f32;
-            let attack = (t / 0.008).min(1.);
-            let fade = (-t * 6. / dur).exp();
-            // A little of the octave above makes it bell-like.
-            let wave = (std::f32::consts::TAU * freq * t).sin() + 0.25 * (std::f32::consts::TAU * freq * 2. * t).sin();
-            out[from + i] += wave * attack * fade * gain;
-        }
-    }
-    out
-}
-
-/// A new message: two rising notes.
-pub fn message_chime() -> Vec<f32> {
-    render(&[Note(880., 0., 0.18, 0.22), Note(1318.5, 0.09, 0.3, 0.18)], 0.45)
-}
-
-/// A message in the chat you're looking at: one quiet tick.
-pub fn in_chat_tick() -> Vec<f32> {
-    render(&[Note(1046.5, 0., 0.12, 0.12)], 0.15)
-}
-
-/// One ring of an incoming call: a phrase of four notes, then quiet;
-/// played again and again while it rings.
-pub fn ring() -> Vec<f32> {
-    render(
-        &[Note(659.25, 0., 0.25, 0.22), Note(783.99, 0.2, 0.25, 0.22), Note(987.77, 0.4, 0.35, 0.22), Note(783.99, 0.7, 0.5, 0.18)],
-        2.,
-    )
-}
-
-fn play(samples: Vec<f32>) -> Option<Child> {
-    let mut child = unsafe {
-        Command::new("pw-play")
-            .args(["--raw", "--format", "f32", "--rate", &RATE.to_string(), "--channels", "1"])
-            .args(["-P", "{ application.name = langis media.role = Notification }", "-"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .pre_exec(|| {
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-                Ok(())
-            })
-            .spawn()
-            .ok()?
+fn play(sound: Sound) -> Option<Child> {
+    let path = sound.path()?;
+    let die_with_parent = |command: &mut Command| unsafe {
+        command.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
     };
-    let mut stdin = child.stdin.take()?;
-    std::thread::spawn(move || {
-        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let _ = stdin.write_all(&bytes);
-    });
-    Some(child)
+    let mut pw = Command::new("pw-play");
+    pw.args(["-P", "{ application.name = langis media.role = Notification }"]).arg(&path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    die_with_parent(&mut pw);
+    if let Ok(child) = pw.spawn() {
+        return Some(child);
+    }
+    let mut ffplay = Command::new("ffplay");
+    ffplay.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]).arg(&path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    die_with_parent(&mut ffplay);
+    ffplay.spawn().ok()
 }
 
 /// Plays a sound once, in the background.
-pub fn once(samples: Vec<f32>) {
+pub fn once(sound: Sound) {
     std::thread::spawn(move || {
-        if let Some(mut child) = play(samples) {
+        if let Some(mut child) = play(sound) {
             let _ = child.wait();
         }
     });
@@ -132,7 +138,7 @@ pub fn start_ring() {
     *ringing = Some(on.clone());
     std::thread::spawn(move || {
         while on.load(std::sync::atomic::Ordering::Relaxed) {
-            let Some(mut child) = play(ring()) else { return };
+            let Some(mut child) = play(Sound::Ringtone) else { return };
             // Wait for the ring, stopping it early when answered.
             loop {
                 if !on.load(std::sync::atomic::Ordering::Relaxed) {
@@ -158,11 +164,11 @@ pub fn stop_ring() {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn sounds_are_short_and_never_clip() {
-        for (sound, max_len) in [(super::message_chime(), 0.5), (super::in_chat_tick(), 0.2), (super::ring(), 2.)] {
-            assert!(!sound.is_empty());
-            assert!(sound.len() as f32 / super::RATE as f32 <= max_len + 0.01);
-            assert!(sound.iter().all(|s| s.abs() < 1.), "a sample clips");
+    fn every_sound_is_a_real_ogg() {
+        use super::Sound::*;
+        for sound in [Pop, TriTone, Whoosh, Ringtone, HangUp, HandRaised, Presenting, VoiceNoteEnd] {
+            let (name, bytes) = sound.file();
+            assert!(bytes.starts_with(b"OggS"), "{name}");
         }
     }
 }
