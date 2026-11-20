@@ -611,7 +611,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
     }
     hero_dialog(ui.ctx(), &mut chat);
     if let Some(dialog) = chat.dialog.as_mut() {
-        for d in crate::actions::show_dialog(app, ui, dialog, &chat.messages, &conversation) {
+        for d in crate::actions::show_dialog(app, ui, dialog, &chat.messages, &conversation, chat.pinned.len()) {
             todo.push((false, d));
         }
     }
@@ -683,7 +683,8 @@ fn popups(app: &mut App, ui: &mut Ui) {
         app.open(to);
     }
     if let Some((title, body, action, commands)) = asked {
-        crate::panes::ask(app, title, body, action, true, commands);
+        let destructive = action != tr("Continue");
+        crate::panes::ask(app, title, body, action, destructive, commands);
     }
 }
 
@@ -991,6 +992,15 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 Some(langis_store::Notice::Group { .. }) => Some(0u8),
                 Some(langis_store::Notice::Timer { .. }) => Some(1),
                 Some(langis_store::Notice::Call { .. } | langis_store::Notice::GroupCall { .. }) => Some(2),
+                // Desktop's chat updates: who someone is and their keys.
+                Some(
+                    langis_store::Notice::ProfileNameChanged { .. }
+                    | langis_store::Notice::NumberChanged { .. }
+                    | langis_store::Notice::SafetyNumberChanged { .. }
+                    | langis_store::Notice::Verified { .. }
+                    | langis_store::Notice::JoinedSignal { .. }
+                    | langis_store::Notice::SessionEnded,
+                ) => Some(3),
                 _ => None,
             };
             if let Some(k) = kind(m) {
@@ -1001,10 +1011,25 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                     let open = chat.unfolded.contains(&messages[first].id);
                     if i == first {
                         ui.add_space(10.);
+                        use crate::i18n::{Arg, tf};
                         let label = match k {
-                            0 => crate::i18n::tf("icu:collapsedGroupUpdates", &format!("{run} group updates"), &[("count", crate::i18n::Arg::from(&run))]),
-                            1 => format!("{run} disappearing message timer changes"),
-                            _ => crate::i18n::tf("icu:collapsedCallEvents", &format!("{run} call events"), &[("count", crate::i18n::Arg::from(run))]),
+                            0 => tf("icu:collapsedGroupUpdates", &format!("{run} group updates"), &[("count", Arg::from(run))]),
+                            1 => {
+                                // Desktop adds where the timer ended up.
+                                let last = messages[first..first + run].last().and_then(|o| match o.notice {
+                                    Some(langis_store::Notice::Timer { seconds, .. }) => Some(seconds),
+                                    _ => None,
+                                });
+                                match last {
+                                    Some(0) | None => tf("icu:collapsedTimerChanges--disabled", &format!("{run} disappearing message timer changes \u{b7} Disabled"), &[("count", Arg::from(run))]),
+                                    Some(s) => {
+                                        let state = crate::format::timer_long(s);
+                                        tf("icu:collapsedTimerChanges", &format!("{run} disappearing message timer changes \u{b7} {state}"), &[("count", Arg::from(run)), ("endingState", Arg::from(&state))])
+                                    }
+                                }
+                            }
+                            2 => tf("icu:collapsedCallEvents", &format!("{run} call events"), &[("count", Arg::from(run))]),
+                            _ => tf("icu:collapsedChatUpdates", &format!("{run} chat updates"), &[("count", Arg::from(run))]),
                         };
                         let r = ui
                             .vertical_centered(|ui| {

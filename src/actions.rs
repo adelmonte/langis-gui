@@ -393,7 +393,7 @@ pub fn plain_text(app: &App, m: &Message) -> String {
 }
 
 /// Draws the open dialog; returns what it asked for.
-pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c: &langis_store::Conversation) -> Vec<Do> {
+pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c: &langis_store::Conversation, pinned: usize) -> Vec<Do> {
     let palette = Palette::of(ui.ctx());
     let mut out = Vec::new();
     let frame = egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(16)).inner_margin(24);
@@ -460,7 +460,13 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 ui.add_space(16.);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if widgets::pill_button(ui, tr("Pin"), true).clicked() {
-                        out.push(Do::Command(Command::PinMessage { message_id: id, duration: PIN_DURATIONS[*choice].1 }));
+                        let pin = Command::PinMessage { message_id: id, duration: PIN_DURATIONS[*choice].1 };
+                        // Desktop's HasMaxPinnedMessages: the oldest goes.
+                        if pinned >= langis_core::remote_config::current().pinned_message_limit() {
+                            out.push(Do::Ask(tr("Replace oldest pin?").into(), tr("Pinning this message will replace the oldest one.").into(), tr("Continue").into(), vec![pin]));
+                        } else {
+                            out.push(Do::Command(pin));
+                        }
                     }
                     if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
                         out.push(Do::Close);
