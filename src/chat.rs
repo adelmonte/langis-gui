@@ -153,6 +153,8 @@ enum Action {
     Chat(langis_store::ConversationId),
     /// Desktop's ContactDetail for a message's shared contact.
     ContactDetail(i64),
+    /// The hover bar's extra: Download, or a sticker's favorite star.
+    Extra(i64),
     /// "Retry failed delete?" for a delete for everyone that failed.
     RetryDelete(i64),
     /// Read more: 3000 more characters of a long message.
@@ -435,6 +437,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     for action in actions {
         match action {
             Action::Retry(message_id) => app.send_checked(id.clone(), PendingSend::Retry(message_id)),
+            Action::Extra(message_id) => {
+                let m = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == message_id).cloned());
+                if let Some(m) = m {
+                    match crate::actions::hover_extra_command(app, &m) {
+                        Some(command) => app.send(command),
+                        None => crate::actions::save_attachment(app, &m, m.attachments.iter().position(|a| a.local_path.is_some()).unwrap_or(0)),
+                    }
+                }
+            }
             Action::RetryDelete(message_id) => crate::panes::ask(
                 app,
                 tr("Retry failed delete?"),
@@ -1587,11 +1598,12 @@ fn message(
             actions.push(Action::Menu { message_id: m.id, at: r.interact_pointer_pos().unwrap_or(rect.center()) });
         }
         if (ui.rect_contains_pointer(rect) || ctx.menu_for == Some(m.id))
-            && let Some((what, at)) = crate::actions::hover_bar(ui, palette, m.id, rect, outgoing)
+            && let Some((what, at)) = crate::actions::hover_bar(ui, palette, m.id, rect, outgoing, crate::actions::hover_extra(ctx.app, m))
         {
             actions.push(match what {
                 0 => Action::ReactBar { message_id: m.id, at },
                 1 => Action::Reply(m.id),
+                3 => Action::Extra(m.id),
                 _ => Action::Menu { message_id: m.id, at },
             });
         }
@@ -2004,11 +2016,12 @@ fn message(
     let menu_open = ctx.menu_for == Some(m.id);
     if !ctx.selecting
         && (ui.rect_contains_pointer(hover_zone) || menu_open)
-        && let Some((what, at)) = crate::actions::hover_bar(ui, palette, m.id, bubble, outgoing)
+        && let Some((what, at)) = crate::actions::hover_bar(ui, palette, m.id, bubble, outgoing, crate::actions::hover_extra(ctx.app, m))
     {
         actions.push(match what {
             0 => Action::ReactBar { message_id: m.id, at },
             1 => Action::Reply(m.id),
+            3 => Action::Extra(m.id),
             _ => Action::Menu { message_id: m.id, at },
         });
     }

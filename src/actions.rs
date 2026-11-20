@@ -135,32 +135,55 @@ pub fn popover(ctx: &egui::Context, id: &str, at: Pos2, width: f32, keep: Option
 
 /// The hover bar beside a bubble: react, reply, more. Returns which was
 /// clicked (0 react, 1 reply, 2 more) and where.
-pub fn hover_bar(ui: &Ui, palette: &Palette, id: i64, bubble: Rect, outgoing: bool) -> Option<(u8, Pos2)> {
+/// Desktop's hover bar: React, Reply and More, plus `extra` (Download for
+/// an attachment, the favorite star for a sticker: what 3 means) at its
+/// outer end.
+pub fn hover_bar(ui: &Ui, palette: &Palette, id: i64, bubble: Rect, outgoing: bool, extra: Option<(&str, &str)>) -> Option<(u8, Pos2)> {
     let w = 30.;
-    let bx = if outgoing { bubble.left() - 3. * w - 6. } else { bubble.right() + 6. };
+    let mut buttons: Vec<(Option<Icon>, &str, &str, u8)> = vec![(Some(Icon::Emoji), "", tr("React"), 0), (Some(Icon::Reply), "", tr("Reply"), 1), (Some(Icon::More), "", tr("More actions"), 2)];
+    if let Some((symbol, tip)) = extra {
+        buttons.push((None, symbol, tip, 3));
+    }
+    if outgoing {
+        buttons.reverse();
+    }
+    let n = buttons.len() as f32;
+    let bx = if outgoing { bubble.left() - n * w - 6. } else { bubble.right() + 6. };
     let mut clicked = None;
-    let buttons: [(Icon, &str); 3] = if outgoing {
-        [(Icon::More, tr("More actions")), (Icon::Reply, tr("Reply")), (Icon::Emoji, tr("React"))]
-    } else {
-        [(Icon::Emoji, tr("React")), (Icon::Reply, tr("Reply")), (Icon::More, tr("More actions"))]
-    };
-    for (i, (icon, tip)) in buttons.into_iter().enumerate() {
+    for (i, (icon, symbol, tip, what)) in buttons.into_iter().enumerate() {
         let rect = Rect::from_min_size(Pos2::new(bx + i as f32 * w, bubble.center().y - 14.), Vec2::splat(28.));
         let r = ui.interact(rect, ui.scope_id().with(("hover-action", id, i)), Sense::click()).on_hover_text(tip);
         if r.hovered() {
             ui.painter().rect_filled(rect, CornerRadius::same(14), palette.fill);
         }
-        icon.paint(ui, rect, 18., palette.text_secondary);
+        match icon {
+            Some(icon) => icon.paint(ui, rect, 18., palette.text_secondary),
+            None => theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., palette.text_secondary),
+        }
         if r.clicked() {
-            let what = match icon {
-                Icon::Emoji => 0,
-                Icon::Reply => 1,
-                _ => 2,
-            };
             clicked = Some((what, rect.left_bottom() + Vec2::new(0., 4.)));
         }
     }
     clicked
+}
+
+/// The hover bar's extra button for `m`: Download, or a sticker's star.
+pub fn hover_extra(app: &App, m: &Message) -> Option<(&'static str, &'static str)> {
+    if m.deleted || m.view_once.is_some() {
+        return None;
+    }
+    if let Some((pack_id, _, sticker_id)) = m.attachments.iter().find(|a| a.sticker).and_then(|a| a.sticker_pack.as_ref()).and_then(sticker_ref) {
+        let favorite = app.fun.favorite_ids.iter().any(|(p, s)| *p == pack_id && *s == sticker_id);
+        return Some(if favorite { ("star-fill", tr("Remove from Favorites")) } else { ("star", tr("Add to Favorites")) });
+    }
+    m.attachments.iter().any(|a| a.local_path.is_some()).then_some(("download", tr("Download")))
+}
+
+/// What the extra button does for `m`.
+pub fn hover_extra_command(app: &App, m: &Message) -> Option<Command> {
+    let (pack_id, pack_key, sticker_id) = m.attachments.iter().find(|a| a.sticker).and_then(|a| a.sticker_pack.as_ref()).and_then(sticker_ref)?;
+    let favorite = app.fun.favorite_ids.iter().any(|(p, s)| *p == pack_id && *s == sticker_id);
+    Some(Command::SetStickerFavorite { pack_id, pack_key, sticker_id, favorite: !favorite })
 }
 
 /// What the menu offers for `m` (Desktop's `MessageContextMenu` and
