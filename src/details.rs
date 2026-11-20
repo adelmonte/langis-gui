@@ -25,6 +25,7 @@ pub enum Page {
     Permissions,
     ChatColor,
     AllMedia,
+    Notifications,
 }
 
 pub struct Details {
@@ -211,6 +212,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Page::Permissions => tr("Permissions"),
                     Page::ChatColor => tr("Chat Color"),
                     Page::AllMedia => "",
+                    Page::Notifications => tr("Notifications"),
                 };
                 ui.label(RichText::new(heading).font(theme::semibold(14.)));
                 if page == Page::AllMedia
@@ -230,6 +232,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 match page {
                     Page::Main => main(app, ui, &palette, &c),
                     Page::Safety => safety(app, ui, &palette, &c),
+                    Page::Notifications => notifications_page(app, ui, &c),
                     Page::GroupLink => group_link(app, ui, &palette, &c),
                     Page::Requests => requests(app, ui, &palette, &c),
                     Page::Permissions => permissions(app, ui, &palette, &c),
@@ -408,42 +411,19 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         }
     });
 
-    // `ConversationNotificationsSettings`: mute, and until when.
-    if c.kind != ConversationKind::NoteToSelf {
+    // Desktop's Notifications row: its own page.
+    {
         axo_list::gap(ui);
-        axo_list::list(ui, Some(tr("Notifications")), None, |ui| {
-            let state = if !c.muted {
-                tr("Not muted").to_owned()
-            } else if c.muted_until == i64::MAX {
-                tr("Muted always").to_owned()
-            } else {
-                crate::i18n::tf("icu:muteExpirationLabel", &format!("Muted until {}", crate::format::short_timestamp(c.muted_until)), &[("duration", crate::i18n::Arg::from(&crate::format::short_timestamp(c.muted_until)))])
-            };
-            let r = axo_list::item(ui, Item::new(tr("Mute notifications")).symbol(if c.muted { "bell-slash" } else { "bell" }), End::Arrow(Some(&state)));
-            let menu = egui::Id::unique("details-mute").with(&c.id.0);
-            if r.clicked() {
-                crate::menu::open_at(ui.ctx(), menu, r.row.rect.right_bottom() - egui::vec2(220., 0.));
-            }
-            crate::menu::show(ui.ctx(), menu, |m| {
-                if c.muted {
-                    if m.item(Some("bell"), tr("Unmute")) {
-                        app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(0) });
-                    }
-                } else {
-                    crate::panes::mute_items(app, m, &c.id);
-                }
-            });
-            // Desktop's "Mentions" for a group: while muted, notify for
-            // mentions anyway or not.
-            if c.kind == ConversationKind::Group {
-                let options = ["Always notify", "Don't notify"];
-                let item = Item::new(tr("Mentions")).symbol("at").description("Receive notifications when you're mentioned in muted chats");
-                if let Some(i) = axo_list::select(ui, egui::Id::unique(("details-mentions", c.id.0.as_str())), item, &options, Some(c.dont_notify_mentions as usize)) {
-                    let off = i == 1;
-                    if off != c.dont_notify_mentions {
-                        app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::DontNotifyMentions(off) });
-                    }
-                }
+        let state = if !c.muted {
+            tr("Not muted").to_owned()
+        } else if c.muted_until == i64::MAX {
+            tr("Muted always").to_owned()
+        } else {
+            crate::i18n::tf("icu:muteExpirationLabel", &format!("Muted until {}", crate::format::short_timestamp(c.muted_until)), &[("duration", crate::i18n::Arg::from(&crate::format::short_timestamp(c.muted_until)))])
+        };
+        axo_list::list(ui, None, None, |ui| {
+            if axo_list::item(ui, Item::new(tr("Notifications")).symbol(if c.muted { "bell-slash" } else { "bell" }), End::Arrow(Some(&state))).clicked() {
+                set_page(app, Page::Notifications);
             }
         });
     }
@@ -879,6 +859,47 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     {
                         d.kt_popup = None;
                     }
+                }
+            }
+        }
+    });
+}
+
+/// Desktop's `ConversationNotificationsSettings`: mute and until when,
+/// and a group's mentions while muted.
+fn notifications_page(app: &mut App, ui: &mut Ui, c: &Conversation) {
+    use crate::axo_list::{self, End, Item};
+        axo_list::list(ui, Some(tr("Notifications")), None, |ui| {
+        let state = if !c.muted {
+            tr("Not muted").to_owned()
+        } else if c.muted_until == i64::MAX {
+            tr("Muted always").to_owned()
+        } else {
+            crate::i18n::tf("icu:muteExpirationLabel", &format!("Muted until {}", crate::format::short_timestamp(c.muted_until)), &[("duration", crate::i18n::Arg::from(&crate::format::short_timestamp(c.muted_until)))])
+        };
+        let r = axo_list::item(ui, Item::new(tr("Mute notifications")).symbol(if c.muted { "bell-slash" } else { "bell" }), End::Arrow(Some(&state)));
+        let menu = egui::Id::unique("details-mute").with(&c.id.0);
+        if r.clicked() {
+            crate::menu::open_at(ui.ctx(), menu, r.row.rect.right_bottom() - egui::vec2(220., 0.));
+        }
+        crate::menu::show(ui.ctx(), menu, |m| {
+            if c.muted {
+                if m.item(Some("bell"), tr("Unmute")) {
+                    app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::MutedUntil(0) });
+                }
+            } else {
+                crate::panes::mute_items(app, m, &c.id);
+            }
+        });
+        // Desktop's "Mentions" for a group: while muted, notify for
+        // mentions anyway or not.
+        if c.kind == ConversationKind::Group {
+            let options = ["Always notify", "Don't notify"];
+            let item = Item::new(tr("Mentions")).symbol("at").description("Receive notifications when you're mentioned in muted chats");
+            if let Some(i) = axo_list::select(ui, egui::Id::unique(("details-mentions", c.id.0.as_str())), item, &options, Some(c.dont_notify_mentions as usize)) {
+                let off = i == 1;
+                if off != c.dont_notify_mentions {
+                    app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::DontNotifyMentions(off) });
                 }
             }
         }
