@@ -923,23 +923,42 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
         Dialog::Info { message, details } => {
             let id = *message;
             let Some(m) = chat.iter().find(|m| m.id == id) else { return vec![Do::Close] };
-            let modal = egui::Modal::new(egui::Id::unique("message-info")).frame(frame).show(ui.ctx(), |ui| {
-                ui.set_width(400.);
-                ui.label(RichText::new("Message details").font(theme::semibold(18.)));
-                ui.add_space(12.);
-                egui::ScrollArea::vertical().max_height(420.).auto_shrink([false, true]).show(ui, |ui| {
-                    info_body(app, ui, &palette, m, details.as_ref());
-                });
-                ui.add_space(12.);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::pill_button(ui, "Done", true).clicked() {
-                        out.push(Do::Close);
-                    }
+            // Desktop's MessageDetail is a panel over the conversation: a
+            // back button and its title, then the details.
+            let pane = ui.max_rect();
+            egui::Area::new(egui::Id::unique("message-info")).order(egui::Order::Middle).fixed_pos(pane.min).show(ui.ctx(), |ui| {
+                ui.set_min_size(pane.size());
+                ui.set_max_size(pane.size());
+                ui.interact(pane, ui.scope_id().with("message-info-bg"), Sense::click());
+                ui.painter().rect_filled(pane, 0, palette.background);
+                let header = Rect::from_min_size(pane.min, Vec2::new(pane.width(), 52.));
+                ui.painter().text(header.center(), Align2::CENTER_CENTER, "Message details", theme::semibold(14.), palette.text);
+                ui.painter().hline(header.x_range(), header.bottom(), Stroke::new(1., palette.border));
+                let back = Rect::from_center_size(Pos2::new(header.left() + 30., header.center().y), Vec2::splat(32.));
+                let hit = ui.interact(back, ui.scope_id().with("message-info-back"), Sense::click());
+                if hit.hovered() {
+                    ui.painter().circle_filled(back.center(), 16., palette.fill);
+                }
+                Icon::ChevronLeft.paint(ui, back, 20., palette.text);
+                if hit.on_hover_text("Back").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    out.push(Do::Close);
+                }
+                let body = Rect::from_min_max(Pos2::new(pane.left(), header.bottom() + 1.), pane.max);
+                ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                        let width = ui.available_width().min(600.);
+                        ui.add_space(20.);
+                        ui.horizontal(|ui| {
+                            ui.add_space(((ui.available_width() - width) / 2.).max(16.));
+                            ui.vertical(|ui| {
+                                ui.set_width(width - 32.);
+                                info_body(app, ui, &palette, m, details.as_ref());
+                            });
+                        });
+                        ui.add_space(20.);
+                    });
                 });
             });
-            if modal.should_close() {
-                out.push(Do::Close);
-            }
         }
     }
     out
