@@ -860,7 +860,14 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
         None if mine => widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec { photo: app.me.1.as_deref(), ..widgets::AvatarSpec::person(&app.me.0, 0) }),
         None => widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::person(&name, 0)),
     }
-    let header = format!("{author}{name}");
+    // Desktop's "{name} to {group}" for a group's story.
+    let header = if story.group.is_some() {
+        let from = if mine { tr("You").to_owned() } else { story.author_name.clone().unwrap_or_else(|| story.author.as_deref().map(|a| app.name(a)).unwrap_or_default()) };
+        crate::i18n::tf("icu:Stories__from-to-group", &format!("{from} to {name}"), &[("name", crate::i18n::Arg::from(&from)), ("group", crate::i18n::Arg::from(&name))])
+    } else {
+        let _ = &author;
+        name.clone()
+    };
     ui.painter().text(Pos2::new(avatar.right() + 8., avatar.center().y), egui::Align2::LEFT_CENTER, header, theme::semibold(13.), Color32::WHITE);
     let pause = Rect::from_center_size(Pos2::new(rect.right() - 22., rect.top() + 34.), Vec2::splat(28.));
     let time = ui.painter().layout_no_wrap(crate::format::short_timestamp(story.sent_at), theme::regular(13.), Color32::from_white_alpha(200));

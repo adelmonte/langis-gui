@@ -177,6 +177,65 @@ impl Editor {
         })
     }
 
+    fn undo_step(&mut self) {
+        if let Some(prev) = self.undo.pop() {
+            let turned_changed = (prev.turns, prev.flip) != (self.edits.turns, self.edits.flip);
+            self.redo.push(std::mem::replace(&mut self.edits, prev));
+            self.typing = None;
+            self.sticker_selected = None;
+            if turned_changed {
+                self.retexture();
+            }
+        }
+    }
+
+    fn redo_step(&mut self) {
+        if let Some(next) = self.redo.pop() {
+            let turned_changed = (next.turns, next.flip) != (self.edits.turns, self.edits.flip);
+            self.undo.push(std::mem::replace(&mut self.edits, next));
+            if turned_changed {
+                self.retexture();
+            }
+        }
+    }
+
+    /// Desktop's MediaEditor keys: Ctrl+Z, Ctrl+Shift+Z, Ctrl+D (draw),
+    /// Ctrl+T (text), Ctrl+C (crop), and Delete for what's selected.
+    fn keys(&mut self, ctx: &egui::Context) {
+        let typing = self.typing.is_some() && ctx.memory(|m| m.focused().is_some());
+        let (cmd, shift) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
+        let pressed = |k: egui::Key| ctx.input(|i| i.key_pressed(k));
+        if cmd && pressed(egui::Key::Z) {
+            if shift {
+                self.redo_step();
+            } else {
+                self.undo_step();
+            }
+        }
+        if typing {
+            return;
+        }
+        if cmd && pressed(egui::Key::D) {
+            self.mode = Mode::Draw;
+        }
+        if cmd && pressed(egui::Key::T) {
+            self.mode = Mode::Text;
+        }
+        if cmd && pressed(egui::Key::C) {
+            self.mode = Mode::Crop;
+            self.typing = None;
+        }
+        if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
+            if let Some(i) = self.sticker_selected.take().filter(|i| *i < self.edits.stickers.len()) {
+                self.remember();
+                self.edits.stickers.remove(i);
+            } else if let Some(i) = self.typing.take().filter(|i| *i < self.edits.labels.len()) {
+                self.remember();
+                self.edits.labels.remove(i);
+            }
+        }
+    }
+
     fn remember(&mut self) {
         self.undo.push(self.edits.clone());
         self.redo.clear();
@@ -264,6 +323,7 @@ impl Editor {
             let image = egui::ColorImage::from_rgba_unmultiplied([preview.width() as usize, preview.height() as usize], preview.as_raw());
             self.texture = Some(ctx.load_texture("media-editor", image, TextureOptions::LINEAR));
         }
+        self.keys(ctx);
         egui::Area::new(egui::Id::unique("media-editor")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
             let (rect, _) = ui.allocate_exact_size(screen.size(), Sense::click());
             ui.painter().rect_filled(rect, 0, Color32::from_gray(18));
@@ -607,25 +667,12 @@ impl Editor {
                         result = Some(None);
                     }
                     let can_redo = !self.redo.is_empty();
-                    if ui.add_enabled(can_redo, egui::Button::new(RichText::new(tr("Redo")).color(Color32::WHITE))).clicked()
-                        && let Some(next) = self.redo.pop()
-                    {
-                        let turned_changed = (next.turns, next.flip) != (self.edits.turns, self.edits.flip);
-                        self.undo.push(std::mem::replace(&mut self.edits, next));
-                        if turned_changed {
-                            self.retexture();
-                        }
+                    if ui.add_enabled(can_redo, egui::Button::new(RichText::new(tr("Redo")).color(Color32::WHITE))).clicked() {
+                        self.redo_step();
                     }
                     let can_undo = !self.undo.is_empty();
-                    if ui.add_enabled(can_undo, egui::Button::new(RichText::new(tr("Undo")).color(Color32::WHITE))).clicked()
-                        && let Some(prev) = self.undo.pop()
-                    {
-                        let turned_changed = (prev.turns, prev.flip) != (self.edits.turns, self.edits.flip);
-                        self.redo.push(std::mem::replace(&mut self.edits, prev));
-                        self.typing = None;
-                        if turned_changed {
-                            self.retexture();
-                        }
+                    if ui.add_enabled(can_undo, egui::Button::new(RichText::new(tr("Undo")).color(Color32::WHITE))).clicked() {
+                        self.undo_step();
                     }
                 });
             });

@@ -361,8 +361,12 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         labels.push(tr("Custom time…").to_owned());
         let options: Vec<&str> = labels.iter().map(String::as_str).collect();
         let chosen = values.iter().position(|v| *v == c.expire_timer);
-        let item = Item::new(tr("Disappearing messages")).symbol("timer-slash").description(info).disabled(group && !c.can_edit_info);
-        if let Some(i) = axo_list::select(ui, egui::Id::unique("details-timer").with(&c.id.0), item, &options, chosen) {
+        // Desktop hides it from those who can't set it while it's off, and
+        // greys it out once a group has ended.
+        let hidden = group && !c.can_edit_info && c.expire_timer == 0;
+        let item = Item::new(tr("Disappearing messages")).symbol("timer-slash").description(info).disabled((group && !c.can_edit_info) || c.ended);
+        if hidden {
+        } else if let Some(i) = axo_list::select(ui, egui::Id::unique("details-timer").with(&c.id.0), item, &options, chosen) {
             if i == values.len() {
                 let (value, unit) = crate::panes::custom_timer_start(if c.expire_timer > 0 { c.expire_timer } else { 3_600 });
                 app.panes.custom_timer = Some((crate::panes::TimerTarget::Chat(c.id.clone()), value, unit));
@@ -775,7 +779,8 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             None => {
                 crate::widgets::spinner(ui, 24.);
             }
-            Some(Err(why)) => body(ui, palette, &why),
+            // Desktop's SafetyNumberNotReady.
+            Some(Err(_)) => body(ui, palette, tr("A safety number will be created with this person after you exchange messages with them.")),
             Some(Ok(number)) => {
                 ui.add_space(8.);
                 // The code they scan (Desktop's `SafetyNumberViewer`), kept

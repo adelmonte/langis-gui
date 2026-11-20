@@ -75,6 +75,8 @@ enum Do {
     Block,
     Safety,
     Confirm(Confirm),
+    /// A row that only says something ("{name} is blocked").
+    Nothing,
 }
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
@@ -214,7 +216,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.add_space(12.);
             let blocked = person.as_ref().is_some_and(|p| p.blocked);
             let mut items: Vec<(&str, String, Do)> = vec![("pencil", tr("Nickname").into(), Do::Nickname)];
-            if !blocked {
+            if blocked {
+                items.push(("block", crate::i18n::tf("icu:AboutContactModal__blocked", &format!("{name} is blocked"), &[("name", crate::i18n::Arg::from(&name))]), Do::Nothing));
+            } else {
                 items.push(("block", tr("Block").into(), Do::Block));
             }
             items.push(("shield-check", tr("View Safety Number").into(), Do::Safety));
@@ -225,7 +229,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             // `ContactModal--add-to-group`, when some group can take them.
             let can_add = app.conversations.iter().any(|g| g.kind == langis_store::ConversationKind::Group && g.can_add_members && !g.left && !g.members.contains(&aci));
             if can_add {
-                items.push(("group", tr("Add to a group").into(), Do::AddToGroup));
+                items.push(("group", tr("Add to another group").into(), Do::AddToGroup));
             }
             // In a call with them: mute them, or (a call link's admin) remove.
             if let Some(call) = app.call.as_ref()
@@ -284,6 +288,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             crate::panes::ask(app, "", body, tr("Remove"), true, vec![Command::RemoveFromCall { demux_id }]);
             return;
         }
+        Do::Nothing => {}
         Do::Confirm(which) => {
             if let Some(c) = app.panes.contact.as_mut() {
                 c.confirm = Some(which);
