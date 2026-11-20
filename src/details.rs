@@ -546,7 +546,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 let photo = if you { app.me.1.clone() } else { app.conversation(&ConversationId::direct(&m)).and_then(|p| p.avatar_path.clone()) };
                 let label_color = theme::name_color(&m, palette.dark);
                 let row = member_row(ui, palette, &name, label.as_deref().map(|l| (l, label_color)), color, photo.as_deref(), is_admin.then_some(tr("Admin")));
-                if !you && row.clicked() {
+                if row.clicked() {
                     crate::contact_modal::open(app, Some(c.id.clone()), m.clone());
                 }
                 if !you {

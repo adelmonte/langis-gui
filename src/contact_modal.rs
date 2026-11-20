@@ -28,6 +28,8 @@ pub struct Contact {
     pub add_to_group: Option<String>,
     /// Desktop's `GroupMemberLabelInfoModal`, from the label's pill.
     pub label_info: bool,
+    /// Ourselves (About You): our profile.
+    pub own: Option<langis_core::OwnProfile>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -48,14 +50,25 @@ pub fn confirm_member(app: &mut App, group: ConversationId, aci: String, admin: 
         about_open: false,
         add_to_group: None,
         label_info: false,
+        own: None,
     });
 }
 
 pub fn open(app: &mut App, group: Option<ConversationId>, aci: String) {
     if aci == app.aci {
+        // Desktop's About You.
+        app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, confirm_only: false, about: None, about_open: true, add_to_group: None, label_info: false, own: None });
+        app.load(move |db| async move {
+            let p = langis_core::own_profile(&db, &aci).await;
+            Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
+                if let Some(c) = app.panes.contact.as_mut().filter(|c| c.aci == aci) {
+                    c.own = Some(p);
+                }
+            })))
+        });
         return;
     }
-    app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, confirm_only: false, about: None, about_open: false, add_to_group: None, label_info: false });
+    app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, confirm_only: false, about: None, about_open: false, add_to_group: None, label_info: false, own: None });
     app.load(move |db| async move {
         let details = langis_core::contact_details(&db, &aci).await;
         Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
@@ -125,6 +138,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         return;
     }
 
+    if aci == app.aci {
+        // About You alone, without the contact modal.
+        about_and_add(app, ctx, &aci, &name);
+        if app.panes.contact.as_ref().is_some_and(|c| !c.about_open) {
+            app.panes.contact = None;
+        }
+        return;
+    }
     if app.panes.contact.as_ref().is_some_and(|c| c.label_info) {
         label_info(app, ctx, &palette, group.as_ref());
         return;
@@ -374,10 +395,15 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         let mut safety = false;
         let mut lightbox = None;
         let you = aci == app.aci;
+        let own = contact.own.clone();
+        let group = contact.group.as_ref().and_then(|g| app.conversation(g)).cloned();
+        let mut go: Option<u8> = None;
         let closed = crate::panes::modal(&egui::Ui::new(ctx.clone(), egui::Id::unique("about-host"), egui::UiBuilder::new()), "about-contact", 360., |ui| {
             crate::panes::title(ui, if you { tr("You") } else { tr("About") });
             ui.vertical_centered(|ui| {
+                let own_photo = own.as_ref().and_then(|p| p.photo.as_ref()).map(|p| p.to_string_lossy().into_owned()).or_else(|| app.me.1.clone());
                 let spec = match &person {
+                    _ if you => widgets::AvatarSpec { name, color: 0, photo: own_photo.as_deref(), group: false, note_to_self: false },
                     Some(p) => widgets::AvatarSpec::of(p),
                     None => widgets::AvatarSpec::person(name, 0),
                 };
@@ -402,6 +428,35 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
                     None => r,
                 }
             };
+            if you {
+                // About You: the name opens the profile editor; our label in
+                // this group; Your QR code with a username.
+                let mine = own.as_ref().map(|p| format!("{} {}", p.given_name, p.family_name).trim().to_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| app.me.0.clone());
+                if row(ui, "person", &mine, None).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    go = Some(0);
+                }
+                if let Some(g) = group.as_ref().filter(|g| !g.left && !g.ended) {
+                    match g.member_labels.get(&app.aci) {
+                        Some(l) => {
+                            let text = format!("{} {}", l.emoji.clone().unwrap_or_default(), l.text).trim().to_owned();
+                            let r = row(ui, "label", &text, None);
+                            if g.can_label && r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                go = Some(1);
+                            }
+                        }
+                        None if g.can_label => {
+                            if row(ui, "label", tr("Add a member label"), None).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                go = Some(1);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                if own.as_ref().is_some_and(|p| p.username.is_some()) && row(ui, "qrcode", tr("Your QR code"), None).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    go = Some(2);
+                }
+                return;
+            }
             // The name: with a nickname, the nickname then the real name.
             let nickname = details.as_ref().and_then(|d| d.nickname.as_ref()).map(|n| format!("{} {}", n.given, n.family).trim().to_owned()).filter(|n| !n.is_empty());
             let profile_name = details.as_ref().and_then(|d| d.profile.as_ref()).map(|p| format!("{} {}", p.given_name, p.family_name).trim().to_owned()).filter(|n| !n.is_empty());
@@ -450,6 +505,22 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
         });
         if let Some(path) = lightbox {
             app.panes.avatar_lightbox = Some(path);
+        }
+        if let Some(to) = go {
+            let group = app.panes.contact.take().and_then(|c| c.group);
+            match to {
+                0 => {
+                    app.tab = crate::app::Tab::Settings;
+                    app.settings.page = crate::settings::Page::Profile;
+                }
+                1 => {
+                    if let Some(g) = group {
+                        crate::details::open_label_editor(app, g);
+                    }
+                }
+                _ => crate::profile::open_link_screen(app),
+            }
+            return;
         }
         if safety {
             crate::details::open_safety(app, ConversationId::direct(aci));

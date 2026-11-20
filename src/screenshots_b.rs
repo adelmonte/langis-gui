@@ -191,6 +191,11 @@ fn screenshots_panes() {
             wait(&mut harness, "about contact", |_| true);
             save(&mut harness, "about-contact");
             harness.state_mut().panes.contact = None;
+            let (me, group) = (harness.state().aci.clone(), harness.state().conversations.iter().find(|c| c.kind == langis_store::ConversationKind::Group).map(|c| c.id.clone()));
+            crate::contact_modal::open(harness.state_mut(), group, me);
+            wait(&mut harness, "about you", |app| app.panes.contact.as_ref().is_some_and(|c| c.own.is_some()));
+            save(&mut harness, "about-you");
+            harness.state_mut().panes.contact = None;
         }
     }
 
