@@ -2661,6 +2661,10 @@ pub fn find_links(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
                 linkify::LinkKind::Url if bare_domain(&lower) => format!("http://{found}"),
                 _ => return None,
             };
+            // Desktop's Linkify: a sneaky web link stays plain text.
+            if !url.starts_with("mailto:") && langis_core::link_preview::is_link_sneaky(&url) {
+                return None;
+            }
             Some((link.start()..link.end(), url))
         })
         .collect()
@@ -2735,6 +2739,7 @@ mod tests {
 
     #[test]
     fn only_web_links() {
+        assert!(find_links("go to https://user:pw@example.com/x or http://192.168.1.1/").is_empty());
         assert!(super::is_file_dangerous("invoice.EXE"));
         assert!(super::is_file_dangerous("run me.desktop. "));
         assert!(!super::is_file_dangerous("trail map.pdf"));
