@@ -97,6 +97,10 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// A new group is being made (Create's spinner); a failure shows
+    /// Desktop's error.
+    pub creating_group: bool,
+    pub group_failed: bool,
     /// Desktop's AcceptedOptionsModal for this chat: Block or Report spam.
     pub accepted_options: Option<ConversationId>,
     /// Desktop's "Message an admin" list for an announcements-only group.
@@ -260,6 +264,7 @@ pub fn on_event(app: &mut App, event: Event) {
             }
         }
         Event::GroupCreated(conversation) => {
+            app.panes.creating_group = false;
             app.panes.compose = None;
             app.reload_conversations();
             app.open(conversation);
@@ -476,6 +481,9 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     pending_confirm(app, ui);
     admins_dialog(app, ui);
     accepted_options(app, ui);
+    if app.panes.group_failed && crate::dialog::alert(ui.ctx(), egui::Id::unique("group-failed"), "", tr("This group couldn\u{2019}t be created. Check your connection and try again."), tr("OK")) {
+        app.panes.group_failed = false;
+    }
 }
 
 /// Desktop's MessageRequestActionsConfirmation for an accepted request:
@@ -1640,8 +1648,10 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
                 }
             });
             let ready = !name.trim().is_empty();
-            footer_button(ui, tr("Create"), ready, |create| {
+            let creating = app.panes.creating_group;
+            footer_button(ui, if creating { "\u{2026}" } else { tr("Create") }, ready && !creating, |create| {
                 if create {
+                    app.panes.creating_group = true;
                     app.send(Command::CreateGroup { title: name.trim().to_owned(), members: members.clone(), avatar: avatar.clone(), expire_timer: *timer });
                 }
             });

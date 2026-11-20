@@ -716,7 +716,15 @@ impl App {
                     self.load_pinned(conversation);
                 }
             }
-            Event::Error(text) => self.toast(text),
+            Event::Error(text) => {
+                // A new group that failed: Desktop's error dialog instead.
+                if self.panes.creating_group && text.contains("group") {
+                    self.panes.creating_group = false;
+                    self.panes.group_failed = true;
+                } else {
+                    self.toast(text);
+                }
+            }
             other => crate::panes::on_event(self, other),
         }
     }

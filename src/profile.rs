@@ -391,6 +391,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 /// Desktop's `EditUsernameModalBody`: the nickname, a dot and its
 /// numbers, the check as it's typed, Cancel and Done. True to close.
 fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor) -> bool {
+    let had_username = e.username.is_some();
     let Some(edit) = e.editing_username.as_mut() else { return true };
     let field = egui::Frame::new().fill(palette.fill_secondary).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -421,7 +422,24 @@ fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor
     if let Some(problem) = &edit.problem {
         ui.label(RichText::new(problem).font(theme::regular(12.)).color(palette.destructive));
     } else {
-        body(ui, palette, tr("Usernames are always paired with a set of numbers."));
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(tr("Usernames are always paired with a set of numbers.")).font(theme::regular(14.)).color(palette.text_secondary));
+            // Desktop's Learn More: what the digits are for.
+            if ui.link(tr("Learn More")).clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("username-learn-more"), true));
+            }
+        });
+    }
+    if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("username-learn-more"))).unwrap_or(false)
+        && crate::dialog::alert(
+            ui.ctx(),
+            egui::Id::unique("username-learn-more-dialog"),
+            tr("What is this number?"),
+            tr("These digits help keep your username private so you can avoid unwanted messages. Share your username with only the people and groups you\u{2019}d like to chat with. If you change usernames you\u{2019}ll get a new set of digits."),
+            tr("OK"),
+        )
+    {
+        ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("username-learn-more")));
     }
     let ready = edit.reservation.is_some() && !edit.saving;
     let mut close = false;
@@ -432,14 +450,32 @@ fn username(app: &mut App, ui: &mut Ui, palette: &Palette, e: &mut ProfileEditor
             && ready
             && let Some(r) = edit.reservation.clone()
         {
-            edit.saving = true;
-            app.send(Command::ConfirmUsername(r));
+            // Desktop asks before replacing a username: its link resets.
+            if had_username {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("username-change-confirm"), true));
+            } else {
+                edit.saving = true;
+                app.send(Command::ConfirmUsername(r));
+            }
         }
         ui.add_space(4.);
         if widgets::pill_button(ui, tr("Cancel"), false).clicked() {
             close = true;
         }
     });
+    if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("username-change-confirm"))).unwrap_or(false) {
+        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("username-change-dialog"), "", tr("Changing your username will reset your existing QR code and link. Are you sure?"), tr("Continue"), crate::dialog::Variant::StrongPrimary) {
+            Some(crate::dialog::Choice::Action) => {
+                ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("username-change-confirm")));
+                if let Some(r) = edit.reservation.clone() {
+                    edit.saving = true;
+                    app.send(Command::ConfirmUsername(r));
+                }
+            }
+            Some(crate::dialog::Choice::Cancel) => ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("username-change-confirm"))),
+            None => {}
+        }
+    }
     close
 }
 
