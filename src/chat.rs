@@ -696,9 +696,15 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                 ui.vertical(|ui| {
                     // Desktop's subtitle: only the timer (with its icon).
                     ui.add_space(if c.expire_timer > 0 { 8. } else { 16. });
-                    if ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(14.))).sense(egui::Sense::click())).clicked() {
-                        crate::details::open(app, c.id.clone());
-                    }
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.;
+                        if ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(14.))).sense(egui::Sense::click())).clicked() {
+                            crate::details::open(app, c.id.clone());
+                        }
+                        if c.system_contact && c.kind == ConversationKind::Direct {
+                            widgets::in_contacts_icon(ui);
+                        }
+                    });
                     if c.expire_timer > 0 {
                         ui.add_space(-4.);
                         ui.horizontal(|ui| {

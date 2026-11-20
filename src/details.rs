@@ -261,6 +261,13 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         }
         ui.add_space(10.);
         let name = ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(20.))).sense(egui::Sense::click()));
+        // Desktop's InContactsIcon after the name.
+        if !group && c.system_contact {
+            let at = egui::Rect::from_min_size(egui::pos2(name.rect.right() + 6., name.rect.center().y - 7.), egui::vec2(14., 14.));
+            let color = if palette.dark { theme::rgb(0xb9b9b9) } else { theme::rgb(0x5e5e5e) };
+            theme::paint_symbol(ui.painter(), "person-circle", at.center(), 14., color);
+            ui.interact(at, ui.id().with("in-contacts"), egui::Sense::hover()).on_hover_text("This person is in your contacts.");
+        }
         if c.can_edit_info && group && name.on_hover_text("Edit").clicked()
             && let Some(d) = app.panes.details.as_mut()
         {

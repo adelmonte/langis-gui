@@ -115,6 +115,16 @@ pub fn axo_icon_button_sm(ui: &mut Ui, symbol: &str, label: &str, pressed: bool)
     response.on_hover_text(label)
 }
 
+/// Desktop's `InContactsIcon`: a 14px person-circle after the name of
+/// someone in the phone's contacts, gray-60 / gray-25, with its tooltip.
+pub fn in_contacts_icon(ui: &mut Ui) {
+    let palette = Palette::of(ui.ctx());
+    let (rect, r) = ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
+    let color = if palette.dark { theme::rgb(0xb9b9b9) } else { theme::rgb(0x5e5e5e) };
+    theme::paint_symbol(ui.painter(), "person-circle", rect.center(), 14., color);
+    r.on_hover_text("This person is in your contacts.");
+}
+
 /// `AxoButton` variants used outside dialogs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Axo {
