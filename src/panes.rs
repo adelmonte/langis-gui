@@ -97,6 +97,8 @@ pub struct Panes {
     pub confirm_delete_link: Option<String>,
     /// Who's in each group's call, from its last peek (empty: no call).
     pub active_calls: std::collections::HashMap<ConversationId, Vec<String>>,
+    /// The most devices each group's call takes, from its peek.
+    pub call_max: std::collections::HashMap<ConversationId, u32>,
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
@@ -229,6 +231,9 @@ pub fn on_event(app: &mut App, event: Event) {
                 }
                 lobby.users = users.clone();
                 lobby.max_devices = max_devices;
+            }
+            if let Some(max) = max_devices {
+                app.panes.call_max.insert(conversation.clone(), max);
             }
             app.panes.active_calls.insert(conversation, users);
         }

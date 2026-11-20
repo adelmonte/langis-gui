@@ -562,6 +562,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 NoticeButton::Call { video } => crate::panes::open_lobby(app, id.clone(), video),
                 NoticeButton::Join => crate::panes::open_lobby(app, id.clone(), true),
                 NoticeButton::Return => app.call_view.pip = false,
+                NoticeButton::Full => {
+                    let max = app.panes.call_max.get(&id).copied().unwrap_or(0);
+                    app.toast(crate::i18n::tf("icu:calling__call-notification__button__call-full-tooltip", &format!("Call has reached capacity of {max} participants"), &[("max", crate::i18n::Arg::from(&max))]));
+                }
                 NoticeButton::AcceptedOptions => app.panes.accepted_options = Some(id.clone()),
                 NoticeButton::Nickname(who) => crate::details::open_nickname(app, ConversationId::direct(&who)),
                 NoticeButton::Safety(who) => crate::details::open_safety(app, ConversationId::direct(&who)),
@@ -3068,6 +3072,8 @@ pub enum NoticeButton {
     Join,
     /// Back to the call we're in (Desktop's "Return to call").
     Return,
+    /// "Call is full": a disabled button.
+    Full,
     /// Desktop's accepted-request options: Block or Report spam.
     AcceptedOptions,
     /// The nickname editor (a profile name change while a nickname's set).
@@ -3090,16 +3096,25 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
             let label = if *incoming && *outcome == CallOutcome::Missed { tr("Call back") } else { tr("Call again") };
             Some((label, NoticeButton::Call { video: *video }))
         }
-        // While the group's call goes on: Join, or Return when we're in it.
-        Notice::GroupCall { .. } => {
-            let going = ctx.app.panes.active_calls.get(ctx.chat_id).is_some_and(|u| !u.is_empty());
+        // Desktop's group call notice: while the call goes on, Join (or
+        // Return when we're in it; "Call is full" at its limit); after it
+        // ended, Call back for one we missed or one in the last 5 minutes.
+        notice @ Notice::GroupCall { status, .. } => {
+            let users = ctx.app.panes.active_calls.get(ctx.chat_id);
+            let going = users.is_some_and(|u| !u.is_empty());
             let latest = ctx.app.chat.as_ref().is_none_or(|c| !c.messages.iter().any(|o| o.sent_at > m.sent_at && matches!(o.notice, Some(Notice::GroupCall { .. }))));
             let ours = ctx.app.call.as_ref().is_some_and(|c| c.conversation == *ctx.chat_id);
-            match (going && latest, ours) {
-                (true, false) => Some((tr("Join call"), NoticeButton::Join)),
-                (_, true) if latest => Some((tr("Return to call"), NoticeButton::Return)),
-                _ => None,
+            let full = ctx.app.panes.call_max.get(ctx.chat_id).is_some_and(|max| users.is_some_and(|u| u.len() as u32 >= *max));
+            if going && latest {
+                return match (ours, ctx.app.call.is_some(), full) {
+                    (true, _, _) => Some((tr("Return to call"), NoticeButton::Return)),
+                    (false, false, true) => Some((tr("Call is full"), NoticeButton::Full)),
+                    _ => Some((tr("Join"), NoticeButton::Join)),
+                };
             }
+            let missed = notice.group_call_incoming() && matches!(status, Some(langis_store::GroupCallStatus::Missed | langis_store::GroupCallStatus::Declined));
+            let recent = chrono::Utc::now().timestamp_millis() - m.sent_at < 5 * 60 * 1000;
+            (missed || recent).then_some((tr("Call back"), NoticeButton::Call { video: true }))
         }
         Notice::SafetyNumberChanged { who } => Some((tr("View Safety Number"), NoticeButton::Safety(who.clone()))),
         Notice::PollEnded { by, sent_at, .. } => Some((tr("View poll"), NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
