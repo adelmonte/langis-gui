@@ -153,6 +153,8 @@ enum Action {
     Chat(langis_store::ConversationId),
     /// Desktop's ContactDetail for a message's shared contact.
     ContactDetail(i64),
+    /// "Retry failed delete?" for a delete for everyone that failed.
+    RetryDelete(i64),
     /// Read more: 3000 more characters of a long message.
     ReadMore(i64),
     /// Play or pause a message's audio, or (at, 0 to 1) play from a point.
@@ -433,6 +435,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     for action in actions {
         match action {
             Action::Retry(message_id) => app.send_checked(id.clone(), PendingSend::Retry(message_id)),
+            Action::RetryDelete(message_id) => crate::panes::ask(
+                app,
+                tr("Retry failed delete?"),
+                tr("Message failed to delete. Check your connection and try again."),
+                tr("Try again"),
+                false,
+                vec![Command::RetryDeleteForEveryone { message_id }],
+            ),
             Action::Fetch { message_id, index } => {
                 // Shown as downloading at once, before its first progress.
                 let size = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.id == message_id)).and_then(|m| m.attachments.get(index)).map(|a| a.size).unwrap_or(0);
@@ -523,9 +533,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         }
                     });
                 }
-                NoticeButton::Explain(title, body) => {
+                NoticeButton::Explain(title, body, support) => {
                     if let Some(chat) = app.chat.as_mut() {
-                        chat.dialog = Some(crate::actions::Dialog::Explain { title, body });
+                        chat.dialog = Some(crate::actions::Dialog::Explain { title, body, support });
                     }
                 }
             },
@@ -1945,6 +1955,7 @@ fn message(
             if r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
                 actions.push(match then {
                     Action::Retry(id) => Action::Retry(*id),
+                    Action::RetryDelete(id) => Action::RetryDelete(*id),
                     _ => Action::Info(m.id),
                 });
             }
@@ -2793,7 +2804,9 @@ pub enum NoticeButton {
     Return,
     Safety(String),
     Go { author: Option<String>, sent_at: i64 },
-    Explain(&'static str, &'static str),
+    /// Desktop's explainer dialog: a title, its text, and (for a chat
+    /// session refresh) Contact Support.
+    Explain(String, String, bool),
 }
 
 fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> Option<(&'static str, NoticeButton)> {
@@ -2821,20 +2834,20 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
         Notice::SafetyNumberChanged { who } => Some((tr("View Safety Number"), NoticeButton::Safety(who.clone()))),
         Notice::PollEnded { by, sent_at, .. } => Some((tr("View poll"), NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
         Notice::Pinned { author, sent_at, .. } => Some((tr("Go to message"), NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),
+        // Desktop's ChatSessionRefreshedDialog and DeliveryIssueDialog.
         Notice::SessionRefreshed => Some((
-            tr("Learn more"),
-            NoticeButton::Explain(
-                tr("Chat session refreshed"),
-                "Signal encrypts each message with keys that change as you chat. One of them couldn't be used, so the session was reset; a message from them may not have arrived. Ask them to send it again if something is missing.",
-            ),
+            tr("Learn More"),
+            NoticeButton::Explain(tr("Chat session refreshed").into(), tr("Signal uses end-to-end encryption and it may need to refresh your chat session sometimes. This doesn\u{2019}t affect your chat\u{2019}s security but you may have missed a message from this contact and you can ask them to resend it.").into(), true),
         )),
-        Notice::DeliveryIssue { .. } => Some((
-            tr("Learn more"),
-            NoticeButton::Explain(
-                tr("Delivery issue"),
-                "A message, sticker, reaction or receipt they sent couldn't be decrypted, and it won't be sent again. They can resend it if it mattered.",
-            ),
-        )),
+        Notice::DeliveryIssue { who } => {
+            let sender = ctx.app.name(who);
+            let body = if ctx.group {
+                crate::i18n::tf("icu:DeliveryIssue--summary--group", &format!("A message, sticker, reaction, read receipt or media couldn\u{2019}t be delivered to you from {sender} in this chat."), &[("sender", crate::i18n::Arg::from(&sender))])
+            } else {
+                crate::i18n::tf("icu:DeliveryIssue--summary", &format!("A message, sticker, reaction, read receipt or media couldn\u{2019}t be delivered to you from {sender}. They may have tried sending it to you directly, or in a group."), &[("sender", crate::i18n::Arg::from(&sender))])
+            };
+            Some((tr("Learn More"), NoticeButton::Explain(tr("Delivery Issue").into(), body, false)))
+        }
         _ => None,
     }
 }
@@ -2846,7 +2859,7 @@ fn status_line(m: &Message) -> Option<(&'static str, Option<Action>)> {
         return None;
     }
     match m.status {
-        DeliveryStatus::Failed if m.deleted => Some((tr("Delete failed, click for details"), Some(Action::Info(m.id)))),
+        DeliveryStatus::Failed if m.deleted => Some((tr("Delete failed, click for details"), Some(Action::RetryDelete(m.id)))),
         DeliveryStatus::Failed if m.edited => Some((tr("Edit failed, click for details"), Some(Action::Info(m.id)))),
         DeliveryStatus::Failed => Some((tr("Send failed"), Some(Action::Retry(m.id)))),
         DeliveryStatus::PartialSent if m.deleted => Some((tr("Partially deleted, click for details"), Some(Action::Info(m.id)))),

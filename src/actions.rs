@@ -42,7 +42,7 @@ pub enum Dialog {
     /// Desktop's `PinnedMessagesPanel`: every pinned message.
     Pinned { messages: Vec<Message> },
     /// A notice's Learn more: what it means.
-    Explain { title: &'static str, body: &'static str },
+    Explain { title: String, body: String, support: bool },
     /// Desktop's `ShareContactDialog`: pick someone, then what of theirs
     /// to share.
     ShareContact(ShareStep),
@@ -800,10 +800,16 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 out.push(Do::Close);
             }
         }
-        Dialog::Explain { title, body } => {
-            let (title, body) = (*title, *body);
-            if let Some(answer) = crate::dialog::show(ui.ctx(), egui::Id::unique("notice-explain"), title, body, None, &[(tr("OK"), crate::dialog::Variant::StrongPrimary)]) {
-                let _ = answer;
+        Dialog::Explain { title, body, support } => {
+            let actions: Vec<(&str, crate::dialog::Variant)> = if *support {
+                vec![(tr("Contact Support"), crate::dialog::Variant::StrongPrimary), (tr("OK"), crate::dialog::Variant::StrongPrimary)]
+            } else {
+                vec![(tr("OK"), crate::dialog::Variant::StrongPrimary)]
+            };
+            if let Some(answer) = crate::dialog::show(ui.ctx(), egui::Id::unique("notice-explain"), title, body, None, &actions) {
+                if *support && answer == crate::dialog::Answer::Action(0) {
+                    crate::chat::open_externally("https://support.signal.org/hc/requests/new");
+                }
                 out.push(Do::Close);
             }
         }
