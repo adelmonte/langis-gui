@@ -21,6 +21,9 @@ pub const SETTING_NOTIFICATIONS: &str = "ui.notifications";
 pub const SETTING_AUTO_CONVERT_EMOJI: &str = "ui.auto_convert_emoji";
 pub const SETTING_TEXT_FORMATTING: &str = "ui.text_formatting";
 pub const SETTING_SKIN_TONE: &str = "ui.skin_tone";
+/// Desktop's Minimize to system tray, and Start minimized to tray.
+pub const SETTING_TRAY: &str = "ui.tray";
+pub const SETTING_TRAY_START: &str = "ui.tray_start";
 /// Desktop's badge count: unread chats rather than messages.
 pub const SETTING_BADGE_CHATS: &str = "ui.badge_chats";
 /// Desktop's "Include muted chats in app badge".
@@ -593,6 +596,18 @@ fn general(app: &mut App, ui: &mut Ui) {
         let current = entry.as_ref().and_then(|p| std::fs::read_to_string(p).ok());
         let mut at_login = current.is_some();
         let mut minimized = current.as_deref().is_some_and(|t| t.contains("--minimized"));
+        // Desktop's system tray rows.
+        let (mut tray, mut tray_start) = app.tray_prefs;
+        if axo_list::switch(ui, Item::new(tr("Minimize to system tray")), &mut tray) {
+            app.tray_prefs.0 = tray;
+            write(app, SETTING_TRAY, tray.to_string());
+            let ctx = ui.ctx().clone();
+            app.set_tray(&ctx, tray);
+        }
+        if axo_list::switch(ui, Item::new(tr("Start minimized to tray")).disabled(!tray), &mut tray_start) && tray {
+            app.tray_prefs.1 = tray_start;
+            write(app, SETTING_TRAY_START, tray_start.to_string());
+        }
         let mut changed = axo_list::switch(ui, Item::new(tr("Open at computer login")), &mut at_login);
         changed |= axo_list::switch(ui, Item::new("Start minimized").description("When opened at login, start in the background").disabled(!at_login), &mut minimized);
         if changed && let Some(entry) = entry {

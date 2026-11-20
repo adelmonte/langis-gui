@@ -126,6 +126,16 @@ pub struct App {
     pub badge_prefs: BadgePrefs,
     /// The window title last set.
     title_shown: String,
+    /// Desktop's system tray: the icon, and its settings (Minimize to
+    /// system tray, Start minimized to tray).
+    pub tray: Option<crate::tray::TrayIcon>,
+    pub tray_prefs: (bool, bool),
+    /// The count and visibility the tray last showed, and whether the
+    /// window's shown (hidden to the tray).
+    tray_shown: (u32, bool),
+    pub window_shown: bool,
+    /// Quit from the tray: closing really closes.
+    quitting: bool,
     /// This device was unlinked: Desktop's DialogRelink, until clicked.
     pub unlinked: bool,
     pub history: Option<HistoryProgress>,
@@ -261,6 +271,11 @@ impl App {
             connection: ConnectionState::Offline,
             badge_prefs: BadgePrefs::default(),
             title_shown: String::new(),
+            tray: None,
+            tray_prefs: (false, false),
+            tray_shown: (u32::MAX, true),
+            window_shown: true,
+            quitting: false,
             unlinked: false,
             history: None,
             tab: Tab::Chats,
@@ -423,6 +438,66 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title_shown = title;
         }
+        self.tray_frame(ctx, count);
+    }
+
+    /// Turns the tray icon on or off for the setting.
+    pub fn set_tray(&mut self, ctx: &egui::Context, on: bool) {
+        match (on, self.tray.is_some()) {
+            (true, false) => {
+                self.tray = crate::tray::TrayIcon::start(ctx);
+                self.tray_shown = (u32::MAX, true);
+            }
+            (false, true) => {
+                if let Some(t) = self.tray.take() {
+                    t.stop();
+                }
+                self.show_window(ctx);
+            }
+            _ => {}
+        }
+    }
+
+    fn show_window(&mut self, ctx: &egui::Context) {
+        self.window_shown = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    pub fn hide_window(&mut self, ctx: &egui::Context) {
+        self.window_shown = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    }
+
+    /// The tray's requests, its count, and closing to the tray.
+    fn tray_frame(&mut self, ctx: &egui::Context, count: u32) {
+        let Some(tray) = self.tray.as_ref() else { return };
+        let mut asked = Vec::new();
+        while let Ok(e) = tray.events.try_recv() {
+            asked.push(e);
+        }
+        for e in asked {
+            match e {
+                crate::tray::TrayEvent::Show => self.show_window(ctx),
+                crate::tray::TrayEvent::Hide => self.hide_window(ctx),
+                crate::tray::TrayEvent::Quit => {
+                    self.quitting = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+        if let Some(tray) = self.tray.as_ref()
+            && self.tray_shown != (count, self.window_shown)
+        {
+            tray.update(count, self.window_shown);
+            self.tray_shown = (count, self.window_shown);
+        }
+        // Desktop's Minimize to system tray: closing hides the window.
+        if self.tray_prefs.0 && !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.hide_window(ctx);
+        }
     }
 
     /// DialogRelink clicked: the link screen, for a new QR code.
@@ -529,11 +604,20 @@ impl App {
                     let skin_tone = tone.map(|i| langis_emoji::SkinTone::ALL[i - 1]);
                     let spell = get(db.setting(crate::spell::SETTING_SPELL_CHECK).await.ok().flatten()).unwrap_or(true);
                     let badge_chats = get(db.setting(crate::settings::SETTING_BADGE_CHATS).await.ok().flatten()).unwrap_or(false);
+                    let tray = get(db.setting(crate::settings::SETTING_TRAY).await.ok().flatten()).unwrap_or(false);
+                    let tray_start = get(db.setting(crate::settings::SETTING_TRAY_START).await.ok().flatten()).unwrap_or(false);
                     let badge_muted = get(db.setting(crate::settings::SETTING_BADGE_MUTED).await.ok().flatten()).unwrap_or(true);
                     let words: Vec<String> = db.setting(crate::spell::SETTING_SPELL_WORDS).await.ok().flatten().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
                     Some(Loaded::Apply(Box::new(move |app: &mut App| {
                         app.input = InputPrefs { auto_convert, formatting, skin_tone, spell };
                         app.badge_prefs = BadgePrefs { chats: badge_chats, muted: badge_muted };
+                        app.tray_prefs = (tray, tray_start);
+                        let ctx = app.ctx.clone();
+                        app.set_tray(&ctx, tray);
+                        // Desktop's Start minimized to tray.
+                        if tray && tray_start {
+                            app.hide_window(&ctx);
+                        }
                         crate::emoji_picker::set_skin_tone(skin_tone);
                         crate::spell::start(&app.ctx, words);
                     })))
@@ -1204,6 +1288,9 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        if let Some(t) = self.tray.take() {
+            t.stop();
+        }
         self.shutdown();
         if let Some(drops) = &self.drops {
             drops.stop();

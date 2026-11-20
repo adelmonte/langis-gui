@@ -53,6 +53,7 @@ mod startup;
 mod stories;
 mod symbols;
 mod theme;
+mod tray;
 mod view;
 mod video;
 mod voice;
