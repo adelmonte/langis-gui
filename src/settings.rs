@@ -3,6 +3,7 @@
 //! `PreferencesList`s on the right. Rows for what langis doesn't do (spell
 //! check, sounds, badges, donations, backups, the language) are left out.
 
+use egui::RichText;
 use egui::{Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use langis_core::auto_download::{AutoDownload, SETTING_AUTO_DOWNLOAD};
 use langis_core::{AccountSetting, ChatChange, Command, DeviceKind, ShareQuality};
@@ -142,6 +143,15 @@ pub struct SettingsView {
     ask: Option<Ask>,
     /// Desktop's Add blocked user: its search, while choosing.
     block_chooser: Option<String>,
+    /// Desktop's Help menu windows: Debug Log, About.
+    pub help: Option<Help>,
+}
+
+pub enum Help {
+    /// Desktop's `DebugLogWindow`: the log once assembled, then, after
+    /// Submit, its link (or why it failed).
+    DebugLog { log: Option<String>, uploading: bool, link: Option<Result<String, String>> },
+    About,
 }
 
 fn load(app: &App) {
@@ -268,6 +278,151 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     ask(app, ui.ctx());
     folder_editor(app, ui);
+    help_window(app, ui);
+}
+
+/// The app's version, for About and the debug log.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Opens the Debug Log window and assembles the log off the UI thread:
+/// langis's `debug_log::assemble`, with phone numbers, ids and our own
+/// paths redacted, as Desktop's.
+fn open_debug_log(app: &mut App) {
+    app.settings.help = Some(Help::DebugLog { log: None, uploading: false, link: None });
+    let dir = langis_core::debug_log::log_dir(&app.data_dir);
+    let mut sensitive = vec![app.data_dir.clone()];
+    sensitive.extend(dirs::home_dir());
+    let mut user = Vec::new();
+    if let Some(phone) = &app.phone {
+        user.push(("e164".to_owned(), phone.clone()));
+    }
+    if !app.aci.is_empty() {
+        user.push(("uuid".to_owned(), app.aci.clone()));
+    }
+    let os = std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|t| t.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_owned())))
+        .unwrap_or_else(|| std::env::consts::OS.to_owned());
+    let header = langis_core::debug_log::Header { app_version: VERSION.into(), os_version: os, arch: std::env::consts::ARCH.into(), user };
+    app.load(move |_| async move {
+        // Three days of info lines: small enough to read here.
+        let log = langis_core::debug_log::assemble(&dir, &header, &sensitive);
+        Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
+            if let Some(Help::DebugLog { log: slot, .. }) = app.settings.help.as_mut() {
+                *slot = Some(log);
+            }
+        })))
+    });
+}
+
+fn help_window(app: &mut App, ui: &mut Ui) {
+    let palette = Palette::of(ui.ctx());
+    let close;
+    let mut submit = None;
+    let mut save = None;
+    match app.settings.help.as_mut() {
+        None => return,
+        Some(Help::About) => {
+            close = crate::panes::modal(ui, "about", 340., |ui| {
+                crate::panes::title(ui, "About langis-gui");
+                ui.vertical_centered(|ui| {
+                    ui.add(egui::Image::new(egui::include_image!("../assets/app/langis-256.png")).fit_to_exact_size(egui::vec2(96., 96.)));
+                    ui.add_space(8.);
+                    ui.label(RichText::new("langis-gui").font(theme::semibold(18.)));
+                    ui.label(RichText::new(format!("Version {VERSION}")).color(palette.text_secondary));
+                    ui.add_space(8.);
+                    ui.label(RichText::new("An unofficial desktop client, not affiliated with Signal.").font(theme::regular(13.)).color(palette.text_secondary));
+                    ui.label(RichText::new("AGPL-3.0. Icons and sounds from Signal Desktop (AGPL-3.0); Inter (OFL).").font(theme::regular(12.)).color(palette.text_secondary));
+                    ui.add_space(8.);
+                    if ui.link("github.com/adelmonte/langis-gui").clicked() {
+                        crate::chat::open_externally("https://github.com/adelmonte/langis-gui");
+                    }
+                });
+            });
+        }
+        Some(Help::DebugLog { log, uploading, link }) => {
+            close = crate::panes::modal(ui, "debug-log", 560., |ui| {
+                crate::panes::title(ui, "Debug Log");
+                match link {
+                    Some(Ok(url)) => {
+                        // Desktop's submitted state: the link and Copy Link.
+                        ui.label(RichText::new("Debug log submitted").font(theme::semibold(14.)));
+                        ui.add_space(8.);
+                        let mut shown = url.clone();
+                        ui.add(egui::TextEdit::singleline(&mut shown).desired_width(f32::INFINITY));
+                        ui.add_space(12.);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if widgets::pill_button(ui, "Copy Link", true).clicked() {
+                                ui.ctx().copy_text(url.clone());
+                                submit = Some(String::new());
+                            }
+                        });
+                    }
+                    _ => {
+                        ui.label(RichText::new("When you click Submit, your log will be posted online for 30 days at a unique, unpublished URL. You may Save it locally first.").font(theme::regular(13.)).color(palette.text_secondary));
+                        if let Some(Err(why)) = link {
+                            ui.add_space(6.);
+                            ui.colored_label(palette.destructive, "Something went wrong with the upload! Please email support@signal.org and attach your log as a text file.").on_hover_text(why.as_str());
+                        }
+                        ui.add_space(10.);
+                        match log {
+                            None => {
+                                ui.vertical_centered(|ui| ui.spinner());
+                            }
+                            Some(text) => {
+                                // Desktop shows the start of it, read-only.
+                                let mut preview: String = text.chars().take(20_000).collect();
+                                egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
+                                    ui.add(egui::TextEdit::multiline(&mut preview).font(egui::FontId::monospace(11.)).desired_width(f32::INFINITY).interactive(true));
+                                });
+                                ui.add_space(12.);
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if *uploading {
+                                        ui.spinner();
+                                    } else if widgets::pill_button(ui, "Submit", true).clicked() {
+                                        submit = Some(text.clone());
+                                    }
+                                    if widgets::pill_button(ui, "Save", false).clicked() {
+                                        save = Some(text.clone());
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    if let Some(text) = save
+        && let Some(path) = rfd::FileDialog::new().set_file_name(format!("debuglog-{}.txt", chrono::Local::now().format("%Y-%m-%d-%H%M%S"))).save_file()
+    {
+        match std::fs::write(&path, text) {
+            Ok(()) => app.toast(format!("Saved to {}", path.display())),
+            Err(error) => app.toast(format!("Couldn't save: {error}")),
+        }
+    }
+    if let Some(text) = submit {
+        if text.is_empty() {
+            app.toast("Link Copied to Your Clipboard");
+            app.settings.help = None;
+            return;
+        }
+        if let Some(Help::DebugLog { uploading, .. }) = app.settings.help.as_mut() {
+            *uploading = true;
+        }
+        app.load(move |_| async move {
+            let result = langis_core::debug_log::upload(&text, VERSION).await.map_err(|e| e.to_string());
+            Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
+                if let Some(Help::DebugLog { uploading, link, .. }) = app.settings.help.as_mut() {
+                    *uploading = false;
+                    *link = Some(result);
+                }
+            })))
+        });
+    }
+    if close {
+        app.settings.help = None;
+    }
 }
 
 /// The profile card, then a button per page (`PreferencesButton`).
@@ -405,6 +560,16 @@ fn general(app: &mut App, ui: &mut Ui) {
             if let Err(error) = result {
                 app.toast(format!("Couldn't change the login item: {error}"));
             }
+        }
+    });
+    // Desktop's Help menu (Debug Log, About), here in Settings.
+    axo_list::gap(ui);
+    axo_list::list(ui, Some("Help"), None, |ui| {
+        if axo_list::item(ui, Item::new("Debug log").symbol("file"), End::Click).clicked() {
+            open_debug_log(app);
+        }
+        if axo_list::item(ui, Item::new("About langis-gui").symbol("info"), End::Click).clicked() {
+            app.settings.help = Some(Help::About);
         }
     });
     axo_list::gap(ui);

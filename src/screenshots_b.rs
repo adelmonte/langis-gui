@@ -195,6 +195,14 @@ fn screenshots_panes() {
         wait(&mut harness, name, |app| app.settings.snapshot.is_some());
         save(&mut harness, name);
     }
+    harness.state_mut().settings.page = Page::General;
+    harness.state_mut().settings.help = Some(crate::settings::Help::About);
+    wait(&mut harness, "about", |_| true);
+    save(&mut harness, "about");
+    harness.state_mut().settings.help = Some(crate::settings::Help::DebugLog { log: Some("========= System info =========\nApp version: demo\n".into()), uploading: false, link: None });
+    wait(&mut harness, "debug log", |_| true);
+    save(&mut harness, "debug-log");
+    harness.state_mut().settings.help = None;
     harness.state_mut().settings.page = Page::ChatColor;
     harness.state_mut().color_editor = Some(crate::chat_colors::Editor::sample());
     wait(&mut harness, "color editor", |_| true);

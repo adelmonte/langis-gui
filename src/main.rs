@@ -103,10 +103,40 @@ impl Args {
     }
 }
 
+/// Logging: the terminal at `RUST_LOG` (warnings by default), and, for a
+/// real account, info and up in a file a day under `<data dir>/logs`
+/// (three kept, as Desktop keeps three days), for the debug log.
+fn init_logging(args: &Args) {
+    use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
+    let terminal = tracing_subscriber::fmt::layer()
+        .with_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()));
+    let file = (!args.demo)
+        .then(|| {
+            let data_dir = args.data_dir.clone().unwrap_or_else(app::default_data_dir);
+            let dir = langis_core::debug_log::log_dir(&data_dir);
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).ok()?;
+            }
+            tracing_appender::rolling::Builder::new()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix("langis-gui")
+                .filename_suffix("log")
+                .max_log_files(3)
+                .build(&dir)
+                .ok()
+        })
+        .flatten()
+        .map(|writer| {
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(writer))
+                .with_filter(tracing_subscriber::EnvFilter::new("info"))
+        });
+    tracing_subscriber::registry().with(terminal).with(file).init();
+}
+
 fn main() -> eframe::Result {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()))
-        .init();
     let args = match Args::parse() {
         Ok(args) => args,
         Err(error) => {
@@ -114,6 +144,7 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+    init_logging(&args);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("langis")

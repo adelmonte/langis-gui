@@ -1172,7 +1172,7 @@ fn quit_on_signals(ctx: &egui::Context) -> std::sync::Arc<std::sync::atomic::Ato
     closing
 }
 
-fn default_data_dir() -> PathBuf {
+pub fn default_data_dir() -> PathBuf {
     dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("langis-gui")
 }
 
