@@ -486,18 +486,91 @@ pub fn in_call_extras(app: &mut App, ui: &mut Ui, area: Rect) {
         let galley = ui.fonts_mut(|f| f.layout_job(job));
         ui.painter().galley(pos, galley, white);
     }
-    // Raised hands, top left.
-    if !call.raised_hands.is_empty() {
-        let names: Vec<String> = call
+    // Desktop's raised hands toast (`CallControls__RaiseHandsToast--*`):
+    // who raised a hand, and "Open queue", or "Lower" when ours is up;
+    // the queue (`CallingRaisedHandsList`) lists them in order.
+    if call.raised_hands.is_empty() {
+        app.panes.raised_open = false;
+    } else {
+        let mine = call.local_demux_id.is_some_and(|d| call.raised_hands.contains(&d));
+        let others: Vec<(u32, String)> = call
             .raised_hands
             .iter()
-            .map(|d| if Some(*d) == call.local_demux_id { "You".to_owned() } else { call.participants.iter().find(|p| p.demux_id == *d).map(|p| app.name(&p.aci)).unwrap_or_default() })
+            .filter(|d| Some(**d) != call.local_demux_id)
+            .map(|d| (*d, call.participants.iter().find(|p| p.demux_id == *d).map(|p| app.name(&p.aci)).unwrap_or_default()))
             .collect();
-        let text = format!("✋ {}", names.join(", "));
-        let galley = ui.painter().layout_no_wrap(text, theme::medium(13.), white);
-        let rect = Rect::from_min_size(area.min + Vec2::new(16., 16.), galley.size() + Vec2::new(20., 12.));
-        ui.painter().rect_filled(rect, CornerRadius::same(10), egui::Color32::from_white_alpha(30));
-        ui.painter().galley(rect.min + Vec2::new(10., 6.), galley, white);
+        let first = |i: usize| others.get(i).map(|(_, n)| n.split_whitespace().next().unwrap_or(n).to_owned()).unwrap_or_default();
+        let text = match (mine, others.len()) {
+            (true, 0) => "You raised a hand.".to_owned(),
+            (true, 1) => format!("You and {} raised a hand.", first(0)),
+            (true, n) => format!("You, {}, and {} more raised a hand.", first(0), n - 1),
+            (false, 1) => format!("{} raised a hand.", first(0)),
+            (false, 2) => format!("{} and {} raised a hand.", first(0), first(1)),
+            (false, n) => format!("{}, {}, and {} more raised a hand.", first(0), first(1), n - 2),
+        };
+        let button = if mine { "Lower" } else { "Open queue" };
+        let galley = ui.painter().layout_no_wrap(text, theme::regular(13.), white);
+        let label = ui.painter().layout_no_wrap(button.to_owned(), theme::semibold(13.), theme::rgb(0xb0c8f9));
+        let rect = Rect::from_min_size(area.min + Vec2::new(16., 16.), Vec2::new(16. + 16. + 8. + galley.size().x + 16. + label.size().x + 16., 40.));
+        ui.painter().rect_filled(rect, CornerRadius::same(8), theme::rgb(0x2e2e2e));
+        theme::paint_symbol(ui.painter(), "raisehand-fill", Pos2::new(rect.left() + 24., rect.center().y), 16., white);
+        ui.painter().galley(Pos2::new(rect.left() + 40., rect.center().y - galley.size().y / 2.), galley, white);
+        let at = Rect::from_min_size(Pos2::new(rect.right() - 16. - label.size().x, rect.center().y - label.size().y / 2.), label.size());
+        let r = ui.interact(at.expand(6.), ui.scope_id().with("raised-hands-button"), Sense::click());
+        ui.painter().galley(at.min, label, theme::rgb(0xb0c8f9));
+        if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            if mine {
+                app.send(Command::RaiseHand(false));
+            } else {
+                app.panes.raised_open = !app.panes.raised_open;
+            }
+        }
+        if app.panes.raised_open {
+            let mut close = false;
+            egui::Area::new(egui::Id::unique("raised-hands")).fixed_pos(Pos2::new(rect.left(), rect.bottom() + 8.)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+                egui::Frame::new().fill(theme::rgb(0x2e2e2e)).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+                    ui.set_width(300.);
+                    ui.horizontal(|ui| {
+                        let n = call.raised_hands.len();
+                        ui.label(RichText::new(format!("{n} raised {}", if n == 1 { "hand" } else { "hands" })).font(theme::semibold(14.)).color(white));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let (x, r) = ui.allocate_exact_size(Vec2::splat(18.), Sense::click());
+                            theme::paint_symbol(ui.painter(), "x", x.center(), 16., white);
+                            close = r.clicked();
+                        });
+                    });
+                    ui.add_space(6.);
+                    for (i, d) in call.raised_hands.iter().enumerate() {
+                        let me = Some(*d) == call.local_demux_id;
+                        let (name, aci) = if me {
+                            ("You".to_owned(), app.aci.clone())
+                        } else {
+                            let aci = call.participants.iter().find(|p| p.demux_id == *d).map(|p| p.aci.clone()).unwrap_or_default();
+                            (app.name(&aci), aci)
+                        };
+                        let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.), Sense::hover());
+                        ui.painter().text(Pos2::new(row.left() + 4., row.center().y), egui::Align2::LEFT_CENTER, (i + 1).to_string(), theme::regular(13.), egui::Color32::from_white_alpha(180));
+                        let color = aci.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
+                        let initials_of = if me { app.me.0.clone() } else { name.clone() };
+                        widgets::paint_avatar(ui, Rect::from_min_size(Pos2::new(row.left() + 22., row.center().y - 16.), Vec2::splat(32.)), &widgets::AvatarSpec::person(&initials_of, color));
+                        ui.painter().text(Pos2::new(row.left() + 62., row.center().y), egui::Align2::LEFT_CENTER, &name, theme::regular(13.), white);
+                        if me {
+                            let lower = Rect::from_min_size(Pos2::new(row.right() - 60., row.center().y - 12.), Vec2::new(56., 24.));
+                            let r = ui.interact(lower, ui.scope_id().with("lower-own-hand"), Sense::click());
+                            ui.painter().text(lower.center(), egui::Align2::CENTER_CENTER, "Lower", theme::semibold(13.), theme::rgb(0xb0c8f9));
+                            if r.clicked() {
+                                app.send(Command::RaiseHand(false));
+                            }
+                        } else {
+                            theme::paint_symbol(ui.painter(), "raisehand-fill", Pos2::new(row.right() - 16., row.center().y), 16., white);
+                        }
+                    }
+                });
+            });
+            if close {
+                app.panes.raised_open = false;
+            }
+        }
     }
     if app.panes.reactions_open {
         // `CallControls__ReactionPickerContainer`: 70 above the bottom,

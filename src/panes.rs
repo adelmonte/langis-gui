@@ -46,6 +46,8 @@ pub struct Panes {
     /// Desktop's `CallingToastManager` toasts over the call: text, since.
     pub call_toasts: Vec<(String, Instant)>,
     pub participants_open: bool,
+    /// Desktop's `CallingRaisedHandsList`, opened from its toast.
+    pub raised_open: bool,
     /// Desktop's pending participants bubble: expanded to the whole list.
     pub pending_expanded: bool,
     /// "Approve all" or "Deny all" waiting on its confirmation.
