@@ -196,6 +196,14 @@ fn screenshots_panes() {
             wait(&mut harness, "about you", |app| app.panes.contact.as_ref().is_some_and(|c| c.own.is_some()));
             save(&mut harness, "about-you");
             harness.state_mut().panes.contact = None;
+            // Desktop's search in a chat: the chat as a pill in the list's box.
+            harness.state_mut().find_requested = true;
+            wait(&mut harness, "search pill", |app| app.message_search.within.is_some());
+            harness.state_mut().search = "code".into();
+            wait(&mut harness, "search in chat", |app| !app.message_search.hits.is_empty());
+            save(&mut harness, "search-in-chat");
+            harness.state_mut().search.clear();
+            harness.state_mut().message_search.within = None;
         }
     }
 

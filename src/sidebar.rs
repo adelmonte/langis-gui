@@ -182,7 +182,10 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             ui.add_space(6.);
             ui.horizontal(|ui| {
                 ui.add_space(16.);
-                search_field(ui, &palette, &mut app.search, &mut app.unread_only);
+                let within = app.message_search.within.clone().and_then(|c| app.conversation(&c).cloned());
+                if search_field(ui, &palette, &mut app.search, &mut app.unread_only, within.as_ref()) {
+                    app.message_search.within = None;
+                }
                 ui.add_space(16.);
             });
             ui.add_space(6.);
@@ -211,6 +214,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             let rows: Vec<Conversation> = app
                 .conversations
                 .iter()
+                .filter(|_| app.message_search.within.is_none() || query.is_empty())
                 .filter(|c| if query.is_empty() { crate::panes::visible(app, c) } else { matches(c) })
                 .filter(|c| !app.unread_only || c.unread_count > 0 || c.marked_unread)
                 .cloned()
@@ -296,7 +300,10 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     ui.add_space(24.);
                     ui.vertical_centered(|ui| {
                         // Desktop's `noSearchResults` and its unread-filter form.
-                        let text = if app.unread_only {
+                        let within = app.message_search.within.as_ref().and_then(|c| app.conversation(c)).map(|c| c.title.clone());
+                        let text = if let Some(name) = within {
+                            crate::i18n::tf("icu:noSearchResultsInConversation", &format!("No results for \"{}\" in {name}", app.search.trim()), &[("searchTerm", crate::i18n::Arg::from(&app.search.trim())), ("conversationName", crate::i18n::Arg::from(&name))])
+                        } else if app.unread_only {
                             format!("No results for \"{}\" in unread chats", app.search.trim())
                         } else {
                             format!("No results for \"{}\"", app.search.trim())
@@ -327,34 +334,61 @@ pub fn search_id() -> egui::Id {
     egui::Id::unique("chat-list-search")
 }
 
-fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String, unread_only: &mut bool) {
+/// The chat list's search box; with `within`, Desktop's pill for the chat
+/// searched in (its avatar and an X). True when the pill was closed.
+fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String, unread_only: &mut bool, within: Option<&Conversation>) -> bool {
     // Desktop's LeftPaneSearchInput: a 28px field, then the unread filter
     // as its own small round button beside it.
     ui.spacing_mut().item_spacing.x = 0.;
     let width = ui.available_width() - 16. - 28. - 8.;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 28.), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
-    Icon::SearchCompactLight.paint(ui, Rect::from_min_size(rect.min, Vec2::new(30., 28.)), 16., palette.text_secondary);
+    let mut start = rect.left() + 30.;
+    let mut ended = false;
+    match within {
+        Some(c) => {
+            // `LeftPaneSearchInput__in-conversation-pill`.
+            let pill = Rect::from_min_size(Pos2::new(rect.left() + 4., rect.top() + 3.), Vec2::new(46., 22.));
+            ui.painter().rect_filled(pill, CornerRadius::same(11), palette.fill_pressed);
+            widgets::paint_avatar(ui, Rect::from_min_size(Pos2::new(pill.left() + 2., pill.top() + 1.), Vec2::splat(20.)), &widgets::AvatarSpec::of(c));
+            let x = Rect::from_center_size(Pos2::new(pill.right() - 11., pill.center().y), Vec2::splat(16.));
+            let xr = ui.interact(x, ui.scope_id().with("search-pill-x"), Sense::click());
+            theme::paint_symbol(ui.painter(), "x", x.center(), 12., palette.text_secondary);
+            if xr.on_hover_text(tr("Clear Search")).clicked() {
+                ended = true;
+            }
+            start = pill.right() + 6.;
+        }
+        None => Icon::SearchCompactLight.paint(ui, Rect::from_min_size(rect.min, Vec2::new(30., 28.)), 16., palette.text_secondary),
+    }
     let mut end = rect.right() - 4.;
-    if !text.is_empty() {
+    if !text.is_empty() || within.is_some() {
         let clear = Rect::from_center_size(Pos2::new(rect.right() - 14., rect.center().y), Vec2::splat(20.));
         let cr = ui.interact(clear, ui.scope_id().with("clear-search"), Sense::click());
         theme::paint_symbol(ui.painter(), "x", clear.center(), 14., palette.text_secondary);
-        if cr.on_hover_text("Clear search").clicked() {
+        if cr.on_hover_text(tr("Clear Search")).clicked() {
             text.clear();
+            ended |= within.is_some();
         }
         end = clear.left() - 2.;
     }
-    let field = Rect::from_min_max(rect.min + Vec2::new(30., 5.), Pos2::new(end, rect.bottom() - 5.));
-    let hint = if *unread_only { tr("Search unread chats") } else { tr("Search") };
+    // Escape in an empty box leaves the chat's search.
+    let focused = ui.ctx().memory(|m| m.has_focus(search_id()));
+    if within.is_some() && text.is_empty() && focused && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        ended = true;
+    }
+    let field = Rect::from_min_max(Pos2::new(start, rect.top() + 5.), Pos2::new(end, rect.bottom() - 5.));
+    let hint = if within.is_some() { tr("Search chat") } else if *unread_only { tr("Search unread chats") } else { tr("Search") };
     ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
         ui.add(egui::TextEdit::singleline(text).hint_text(RichText::new(hint).font(theme::regular(13.))).font(theme::regular(13.)).frame(egui::Frame::NONE).desired_width(field.width()).id(search_id()));
     });
-    ui.add_space(8.);
+    // Placed by the box, wherever the field's editor left the cursor.
     let label = if *unread_only { "Show all chats" } else { "Show only unread chats" };
-    if widgets::axo_icon_button_sm(ui, "filter", label, *unread_only).clicked() {
+    let button = Rect::from_min_size(Pos2::new(rect.right() + 8., rect.top()), Vec2::splat(28.));
+    if ui.scope_builder(egui::UiBuilder::new().max_rect(button), |ui| widgets::axo_icon_button_sm(ui, "filter", label, *unread_only)).inner.clicked() {
         *unread_only = !*unread_only;
     }
+    ended
 }
 
 /// Connection and history transfer, as Desktop's left pane dialogs.

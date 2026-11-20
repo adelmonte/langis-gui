@@ -123,8 +123,6 @@ pub struct ChatView {
     pub gif_draft: Option<(langis_core::giphy::Gif, std::path::PathBuf)>,
     /// A picked GIF waiting on "Replace attachment?".
     pub gif_replacing: Option<(langis_core::giphy::Gif, std::path::PathBuf)>,
-    /// Search in this chat, while open.
-    pub find: Option<crate::search::Find>,
 }
 
 /// Store reads for the open chat.
@@ -253,7 +251,6 @@ impl ChatView {
             voice_draft: None,
             gif_draft: None,
             gif_replacing: None,
-            find: None,
         }
     }
 
@@ -390,8 +387,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     };
     header(app, ui, &palette, &conversation);
+    // Desktop searches a chat from the chat list's search box, with the
+    // chat as a pill in it.
     if std::mem::take(&mut app.find_requested) {
-        chat.find = Some(crate::search::Find::open());
+        app.message_search.within = Some(chat.id.clone());
+        app.search.clear();
+        app.tab = crate::app::Tab::Chats;
+        ui.ctx().memory_mut(|m| m.request_focus(crate::sidebar::search_id()));
     }
     if std::mem::take(&mut app.select_requested) {
         chat.selected = Some(Vec::new());
@@ -399,7 +401,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if chat.selected.is_some() && chat.dialog.is_none() && chat.popup.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         chat.selected = None;
     }
-    crate::search::find_bar(app, ui, &palette, &mut chat);
     // Desktop's header shows the mini player, while there is one, in
     // place of the pinned messages.
     if !crate::audio::mini_player(app, ui, &palette) {
