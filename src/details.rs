@@ -502,10 +502,10 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                         }
                         if admin {
                             if menu.item(Some("key"), if is_admin { "Remove as admin" } else { "Make admin" }) {
-                                app.send(Command::SetGroupAdmin { conversation: c.id.clone(), member: m.clone(), admin: !is_admin });
+                                crate::contact_modal::confirm_member(app, c.id.clone(), m.clone(), true);
                             }
                             if menu.item(Some("minus-circle"), "Remove from group") {
-                                app.send(Command::RemoveFromGroup { conversation: c.id.clone(), service_id: m.clone() });
+                                crate::contact_modal::confirm_member(app, c.id.clone(), m.clone(), false);
                             }
                         }
                     });
@@ -980,7 +980,7 @@ fn requests(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     body(ui, palette, "Details of people invited to this group aren't shown until they join. Invitees will only see messages after they join the group.");
 }
 
-fn permissions(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
+fn permissions(app: &mut App, ui: &mut Ui, _palette: &Palette, c: &Conversation) {
     let ask = egui::Id::unique("confirm-label-access");
     if ui.ctx().data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
         let body_text = "Members who aren't admins will lose their member labels, and only admins will be able to set them.";
@@ -994,35 +994,30 @@ fn permissions(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) 
         }
     }
     let state = &c.group_state;
-    section(ui, palette, |ui| {
+    crate::axo_list::list(ui, None, None, |ui| {
         let choices: [(&str, bool, fn(bool) -> Permission); 4] = [
             ("Add members", state.members_admins_only, |a| Permission::AddMembers { admins_only: a }),
             ("Edit group info", state.info_admins_only, |a| Permission::EditInfo { admins_only: a }),
             ("Send messages", state.announcements_only, |a| Permission::SendMessages { admins_only: a }),
             ("Set member labels", state.labels_admins_only, |a| Permission::SetMemberLabels { admins_only: a }),
         ];
+        // Desktop's permission rows: each a select of All members or
+        // Only admins.
         for (label, admins_only, make) in choices {
-            ui.horizontal(|ui| {
-                ui.set_min_height(36.);
-                ui.label(RichText::new(label).font(theme::regular(14.)));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mut value = admins_only;
-                    egui::ComboBox::from_id_salt(label).selected_text(if value { "Only admins" } else { "All members" }).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut value, false, "All members");
-                        ui.selectable_value(&mut value, true, "Only admins");
-                    });
-                    if value != admins_only {
-                        // Desktop warns that admins-only labels takes away
-                        // the labels non-admins have.
-                        let labelled = c.member_labels.keys().any(|m| !c.admins.contains(m));
-                        if label == "Set member labels" && value && labelled {
-                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("confirm-label-access"), true));
-                        } else {
-                            app.send(Command::SetGroupPermission { conversation: c.id.clone(), permission: make(value) });
-                        }
+            let options = ["All members", "Only admins"];
+            if let Some(i) = crate::axo_list::select(ui, egui::Id::unique(("group-permission", label)), crate::axo_list::Item::new(label), &options, Some(admins_only as usize)) {
+                let value = i == 1;
+                if value != admins_only {
+                    // Desktop warns that admins-only labels takes away the
+                    // labels non-admins have.
+                    let labelled = c.member_labels.keys().any(|m| !c.admins.contains(m));
+                    if label == "Set member labels" && value && labelled {
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("confirm-label-access"), true));
+                    } else {
+                        app.send(Command::SetGroupPermission { conversation: c.id.clone(), permission: make(value) });
                     }
-                });
-            });
+                }
+            }
         }
     });
 }

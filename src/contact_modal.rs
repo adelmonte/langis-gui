@@ -17,6 +17,9 @@ pub struct Contact {
     pub group: Option<ConversationId>,
     pub aci: String,
     confirm: Option<Confirm>,
+    /// Opened only for a confirmation (from the details' member menu):
+    /// closes with it.
+    confirm_only: bool,
     /// Their about, number and verification, for the About view.
     about: Option<langis_core::ContactDetails>,
     pub about_open: bool,
@@ -30,11 +33,25 @@ enum Confirm {
     Remove,
 }
 
+/// The member menu's Make admin / Remove as admin (`admin`) or Remove from
+/// group, asked as `ContactModal` asks, without the modal itself.
+pub fn confirm_member(app: &mut App, group: ConversationId, aci: String, admin: bool) {
+    app.panes.contact = Some(Contact {
+        group: Some(group),
+        aci,
+        confirm: Some(if admin { Confirm::Admin } else { Confirm::Remove }),
+        confirm_only: true,
+        about: None,
+        about_open: false,
+        add_to_group: None,
+    });
+}
+
 pub fn open(app: &mut App, group: Option<ConversationId>, aci: String) {
     if aci == app.aci {
         return;
     }
-    app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, about: None, about_open: false, add_to_group: None });
+    app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, confirm_only: false, about: None, about_open: false, add_to_group: None });
     app.load(move |db| async move {
         let details = langis_core::contact_details(&db, &aci).await;
         Some(crate::app::Loaded::Apply(Box::new(move |app: &mut App| {
@@ -87,7 +104,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     Confirm::Remove => app.send(Command::RemoveFromGroup { conversation: g, service_id: aci.clone() }),
                 }
             }
-            if let Some(c) = app.panes.contact.as_mut() {
+            if app.panes.contact.as_ref().is_some_and(|c| c.confirm_only) {
+                app.panes.contact = None;
+            } else if let Some(c) = app.panes.contact.as_mut() {
                 c.confirm = None;
             }
         }
