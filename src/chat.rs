@@ -155,6 +155,8 @@ enum Action {
     ContactDetail(i64),
     /// Starts selecting, with this message (Desktop's Ctrl-click).
     Select(i64),
+    /// A toast (a view-once message already gone).
+    Toast(&'static str),
     /// The hover bar's extra: Download, or a sticker's favorite star.
     Extra(i64),
     /// "Retry failed delete?" for a delete for everyone that failed.
@@ -443,6 +445,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     for action in actions {
         match action {
             Action::Retry(message_id) => app.send_checked(id.clone(), PendingSend::Retry(message_id)),
+            Action::Toast(text) => app.toast(text),
             Action::Select(message_id) => {
                 if let Some(chat) = app.chat.as_mut() {
                     chat.selected = Some(vec![message_id]);
@@ -2228,9 +2231,14 @@ fn view_once_bubble(ui: &mut Ui, ctx: &Ctx<'_>, m: &Message, state: langis_store
         if r.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        let r = r.clone().on_hover_text(tr("Click to view"));
         if r.clicked() {
             actions.push(if downloaded { Action::ViewOnce(m.id) } else { Action::Fetch { message_id: m.id, index: 0 } });
         }
+    } else if r.clicked() {
+        // Desktop's toasts for one already gone.
+        let text = if outgoing { tr("View-once media is deleted after sending") } else { tr("You already viewed this message.") };
+        actions.push(Action::Toast(text));
     }
     if r.secondary_clicked() {
         actions.push(Action::Menu { message_id: m.id, at: r.interact_pointer_pos().unwrap_or(bubble.center()) });
