@@ -390,41 +390,41 @@ pub fn show(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
                 crate::voice::recording_bar(app, ui, palette, chat, c);
                 return;
             }
-            edit_bar(ui, palette, chat);
+            edit_escape(ui, chat);
             reply_bar(app, ui, palette, chat);
             take_dropped_and_pasted(app, ui, chat);
             media_editor(ui, chat);
-            if chat.staged.is_empty() {
-                preview_card(ui, palette, chat);
-            } else {
+            if !chat.staged.is_empty() {
                 staged_list(ui, palette, chat, c);
             }
             input_row(app, ui, palette, chat, c);
         });
 }
 
-fn edit_bar(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
-    if chat.editing.is_none() {
-        return;
-    }
-    let mut close = false;
-    egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let (icon, _) = ui.allocate_exact_size(Vec2::splat(18.), Sense::hover());
-            Icon::Edit.paint(ui, icon, 16., palette.text);
-            ui.label(RichText::new("Edit message").font(theme::semibold(13.)));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close = widgets::icon_button(ui, Icon::XCompact, 16., "Cancel editing").clicked();
-            });
-        });
-    });
-    if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) && chat.popup.is_none() {
+/// Escape stops editing (Desktop's edit has no close button of its own;
+/// the discard button by the input and Escape end it).
+fn edit_escape(ui: &Ui, chat: &mut ChatView) {
+    if chat.editing.is_some() && chat.popup.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         chat.editing = None;
         chat.composer.clear();
         chat.spans.clear();
         chat.preview.reset();
     }
-    ui.add_space(6.);
+}
+
+/// Desktop's `CompositionInput__editing-message`: a 16px edit icon and
+/// "Editing message" in bold, inside the input above the text.
+fn editing_line(ui: &mut Ui, palette: &Palette, chat: &ChatView) {
+    if chat.editing.is_none() {
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.;
+        let (icon, _) = ui.allocate_exact_size(Vec2::splat(16.), Sense::hover());
+        Icon::Edit.paint(ui, icon, 16., palette.text);
+        ui.label(RichText::new("Editing message").font(theme::semibold(13.)));
+    });
+    ui.add_space(4.);
 }
 
 /// Desktop's `Quote` in the composer (`quote--compose`): the chat's color
@@ -469,12 +469,15 @@ fn reply_bar(app: &App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
     ui.add_space(6.);
 }
 
-/// Desktop's `StagedLinkPreview` above the input.
+/// Desktop's `StagedLinkPreview`, inside the input above the text
+/// (`CompositionInput__link-preview`): radius 8 on gray-02 / gray-80, at
+/// least 74 tall.
 fn preview_card(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
+    let fill = if palette.dark { theme::rgb(0x2e2e2e) } else { theme::rgb(0xf6f6f6) };
     if let Some(url) = chat.preview.loading().map(str::to_owned) {
         let mut close = false;
-        egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.), Sense::hover());
+        egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 58.), Sense::hover());
             let color = if palette.dark { theme::rgb(0xbebebe) } else { theme::rgb(0x5e5e5e) };
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Loading Preview...", theme::regular(14.), color);
             let x = Rect::from_center_size(Pos2::new(rect.right() - 12., rect.center().y), Vec2::splat(24.));
@@ -489,7 +492,8 @@ fn preview_card(ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
     }
     let Some(p) = chat.preview.draft.clone() else { return };
     let mut close = false;
-    egui::Frame::new().fill(palette.bubble_in).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+    egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        ui.set_min_height(58.);
         ui.horizontal(|ui| {
             if let Some(image) = &p.image {
                 let uri = format!("bytes://link-preview/{}", p.url);
@@ -666,10 +670,14 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             .fill(palette.bubble_in)
             .corner_radius(CornerRadius::same(18))
             .inner_margin(egui::Margin::symmetric(12, 6))
-            .show(ui, |ui| {
+            .show(ui, |ui| ui.vertical(|ui| {
                 ui.set_width(width - 24.);
+                editing_line(ui, palette, chat);
+                if chat.staged.is_empty() {
+                    preview_card(ui, palette, chat);
+                }
                 let max_h = if chat.composer_large { (ui.ctx().content_rect().height() * 0.45).max(120.) } else { 60. };
-                egui::ScrollArea::vertical().max_height(max_h).min_scrolled_height(if chat.composer_large { max_h } else { 0. }).stick_to_bottom(true).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(max_h).min_scrolled_height(if chat.composer_large { max_h } else { 20. }).stick_to_bottom(true).show(ui, |ui| {
                     // The theme's 28px interact height would make one line
                     // taller than the input, and scroll it.
                     ui.spacing_mut().interact_size.y = 20.;
@@ -688,7 +696,7 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                     (output.response.clone(), output.galley.clone(), output.galley_pos)
                 })
                 .inner
-            });
+            }).inner);
         let (response, galley, galley_pos) = framed.inner;
         // Misspelled words get the browsers' red zigzag under them, drawn
         // here: the input's scroll area would clip an underline at its edge.
@@ -769,11 +777,16 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
         input_rect = framed.response.rect;
         // Desktop's expand toggle: centered over the input once it's more
         // than a line, and while large.
-        if chat.composer_large || input_rect.height() > 44. {
-            let toggle = Rect::from_center_size(Pos2::new(input_rect.center().x, input_rect.top() - 14.), Vec2::new(48., 24.));
+        // Desktop's expand toggle (`CompositionArea__toggle-large`): over the
+        // input once it's more than a line, shown while the pointer is on
+        // the input or the toggle; 48x24, top corners rounded, chevron-shallow
+        // in gray-45.
+        let toggle = Rect::from_center_size(Pos2::new(input_rect.center().x, input_rect.top() - 12.), Vec2::new(48., 24.));
+        let near = ui.rect_contains_pointer(input_rect.union(toggle));
+        if (chat.composer_large || input_rect.height() > 44.) && near {
             let r = ui.interact(toggle, ui.scope_id().with("toggle-large"), Sense::click());
-            ui.painter().rect_filled(toggle, CornerRadius::same(12), if r.hovered() { palette.fill_pressed } else { palette.fill });
-            theme::paint_symbol(ui.painter(), if chat.composer_large { "chevron-down" } else { "chevron-up" }, toggle.center(), 16., palette.text_secondary);
+            ui.painter().rect_filled(toggle, CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, if r.hovered() { palette.fill } else { palette.background });
+            theme::paint_symbol(ui.painter(), if chat.composer_large { "chevron-shallow-down" } else { "chevron-shallow-up" }, toggle.center(), 16., theme::rgb(0x878787));
             if r.on_hover_text(if chat.composer_large { "Make the composer smaller" } else { "Expand the composer" }).clicked() {
                 chat.composer_large = !chat.composer_large;
             }
