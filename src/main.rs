@@ -11,6 +11,7 @@ mod audio;
 mod blurhash;
 mod axo_list;
 mod avatar_editor;
+mod collisions;
 mod countries;
 mod media_editor;
 mod media_gallery;

@@ -96,6 +96,10 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's ContactSpoofingReviewDialog for this chat.
+    pub collision_review: Option<ConversationId>,
+    /// Chats whose same-name warning was closed.
+    pub collision_dismissed: std::collections::HashSet<ConversationId>,
     /// Desktop's AvatarLightbox: a photo's file, shown large.
     pub avatar_lightbox: Option<String>,
     /// Desktop's "Set up your username" megaphone.
@@ -439,6 +443,7 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     crate::stories::overlays(app, ui);
     size_limit_dialog(app, ui);
     avatar_lightbox(app, ui);
+    crate::collisions::review_dialog(app, ui);
 }
 
 /// Desktop's `AvatarLightbox`: the photo large over a dark window; a click

@@ -178,6 +178,10 @@ fn screenshots_panes() {
         harness.state_mut().open(request);
         wait(&mut harness, "request", |app| app.chat.as_ref().is_some_and(|c| c.loaded));
         save(&mut harness, "message-request");
+        harness.state_mut().panes.collision_review = harness.state().selected.clone();
+        wait(&mut harness, "collision review", |_| true);
+        save(&mut harness, "collision-review");
+        harness.state_mut().panes.collision_review = None;
     }
 
     // New chat, and a new group's second step.

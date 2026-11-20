@@ -394,6 +394,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if !crate::audio::mini_player(app, ui, &palette) {
         pinned_bar(app, ui, &palette, &mut chat);
     }
+    crate::collisions::bar(app, ui, &palette, &conversation);
     if chat.selected.is_some() {
         select_bar(app, ui, &palette, &mut chat);
     } else if !crate::panes::message_request_bar(app, ui, &palette, &conversation) {
