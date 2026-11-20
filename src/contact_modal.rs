@@ -95,6 +95,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
 
     let mut todo = None;
+    let mut lightbox: Option<String> = None;
     let fill = if palette.dark { Color32::from_rgb(0x32, 0x32, 0x32) } else { Color32::from_rgb(0xfa, 0xfa, 0xfa) };
     let modal = egui::Modal::new(egui::Id::unique("contact-modal"))
         .frame(egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(34)).inner_margin(egui::Margin { left: 0, right: 0, top: 12, bottom: 16 }))
@@ -118,7 +119,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             let (row, _) = ui.allocate_exact_size(Vec2::new(width, 80.), Sense::hover());
             let rect = Rect::from_center_size(row.center(), Vec2::splat(80.));
             match &person {
-                Some(p) => widgets::paint_avatar(ui, rect, &widgets::AvatarSpec::of(p)),
+                Some(p) => {
+                    widgets::paint_avatar(ui, rect, &widgets::AvatarSpec::of(p));
+                    if let Some(path) = p.avatar_path.clone().filter(|_| !p.avatar_withheld)
+                        && ui.interact(rect, ui.scope_id().with("contact-photo"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+                    {
+                        lightbox = Some(path);
+                    }
+                }
                 None => {
                     let color = aci.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
                     widgets::paint_avatar(ui, rect, &widgets::AvatarSpec::person(&name, color));
@@ -223,6 +231,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
     about_and_add(app, ctx, &aci, &name);
     let Some(todo) = todo else { return };
+    if lightbox.is_some() {
+        app.panes.avatar_lightbox = lightbox;
+    }
     match todo {
         Do::About => {
             if let Some(c) = app.panes.contact.as_mut() {

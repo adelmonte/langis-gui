@@ -250,6 +250,13 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         if let Some(badge) = c.id.as_direct().and_then(|sid| app.badge_for(sid)) {
             widgets::paint_badge(ui, photo.rect, badge);
         }
+        // Desktop's AvatarLightbox: a photo opens large.
+        if !c.avatar_withheld
+            && let Some(path) = c.avatar_path.clone()
+            && ui.interact(photo.rect, ui.scope_id().with("details-photo"), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+        {
+            app.panes.avatar_lightbox = Some(path);
+        }
         // A photo held back in a message request: Desktop's tap to download.
         if c.avatar_withheld {
             if photo.on_hover_text("Download photo").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {

@@ -96,6 +96,8 @@ pub struct Panes {
 
     // The account's alerts.
     pub megaphones: Vec<langis_core::megaphones::MegaphoneView>,
+    /// Desktop's AvatarLightbox: a photo's file, shown large.
+    pub avatar_lightbox: Option<String>,
     /// Desktop's "Set up your username" megaphone.
     pub username_megaphone: bool,
     pub server_alerts: langis_core::server_alerts::ServerAlerts,
@@ -436,6 +438,30 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     key_transparency_dialog(app, ui);
     crate::stories::overlays(app, ui);
     size_limit_dialog(app, ui);
+    avatar_lightbox(app, ui);
+}
+
+/// Desktop's `AvatarLightbox`: the photo large over a dark window; a click
+/// or Escape closes it.
+fn avatar_lightbox(app: &mut App, ui: &Ui) {
+    let Some(path) = app.panes.avatar_lightbox.clone() else { return };
+    let screen = ui.ctx().content_rect();
+    let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    egui::Area::new(egui::Id::unique("avatar-lightbox")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ui.ctx(), |ui| {
+        let (rect, hit) = ui.allocate_exact_size(screen.size(), Sense::click());
+        ui.painter().rect_filled(rect, 0, Color32::from_black_alpha(230));
+        let side = (screen.width().min(screen.height()) - 120.).clamp(120., 640.);
+        let r = Rect::from_center_size(screen.center(), Vec2::splat(side));
+        egui::Image::new(format!("file://{path}")).corner_radius(CornerRadius::same(8)).paint_at(ui, r);
+        let x = Rect::from_min_size(Pos2::new(screen.right() - 52., screen.top() + 12.), Vec2::splat(40.));
+        theme::paint_symbol(ui.painter(), "x", x.center(), 22., Color32::WHITE);
+        if hit.clicked() {
+            close = true;
+        }
+    });
+    if close {
+        app.panes.avatar_lightbox = None;
+    }
 }
 
 /// Desktop's left pane notices: megaphones and server alerts, above the
