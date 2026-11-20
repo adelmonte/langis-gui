@@ -24,7 +24,9 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
         .show(ui, |ui| {
             let full = ui.max_rect();
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
-            ui.add_space(12.);
+            // Desktop's NavTabs: no top padding on Linux, rows on a 44px
+            // pitch with nothing between them.
+            ui.spacing_mut().item_spacing.y = 0.;
             nav_toggle(app, ui, &palette);
             let chats = tab_item(ui, &palette, if app.tab == Tab::Chats { Icon::ChatFill } else { Icon::Chat }, app.tab == Tab::Chats, unread);
             if chats.on_hover_text("Chats").clicked() {
@@ -40,8 +42,9 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
             if stories.on_hover_text("Stories").clicked() {
                 app.tab = Tab::Stories;
             }
-            // Settings and our avatar sit at the bottom.
-            let bottom = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 100.), full.max);
+            // Settings is the last tab, at the bottom with 8px below it
+            // (the profile is in Settings, as in Desktop).
+            let bottom = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 52.), Pos2::new(full.right(), full.bottom() - 8.));
             ui.scope_builder(egui::UiBuilder::new().max_rect(bottom), |ui| {
                 let selected = app.tab == Tab::Settings;
                 let settings = tab_item(ui, &palette, if selected { Icon::SettingsFill } else { Icon::Settings }, selected, 0);
@@ -49,13 +52,6 @@ pub fn nav_tabs(app: &mut App, ui: &mut Ui) {
                     app.tab = Tab::Settings;
                     app.settings.stale = true;
                 }
-                ui.add_space(6.);
-                ui.vertical_centered(|ui| {
-                    let spec = widgets::AvatarSpec { name: &app.me.0, color: 0, photo: app.me.1.as_deref(), group: false, note_to_self: false };
-                    if widgets::avatar(ui, &spec, 28.).on_hover_text("Profile").clicked() {
-                        crate::profile::open(app);
-                    }
-                });
             });
         });
 }
@@ -67,7 +63,7 @@ fn nav_toggle(app: &mut App, ui: &mut Ui, palette: &Palette) {
     let (outer, response) = if app.nav_collapsed {
         ui.allocate_exact_size(Vec2::new(36., 36.), Sense::click())
     } else {
-        ui.allocate_exact_size(Vec2::new(80., 36.), Sense::click())
+        ui.allocate_exact_size(Vec2::new(80., 44.), Sense::click())
     };
     let rect = Rect::from_center_size(outer.center(), Vec2::splat(28.));
     if response.hovered() {
@@ -106,7 +102,9 @@ fn badge(ui: &Ui, palette: &Palette, rect: Rect, count: u32) {
     let text = if count > 99 { "99+".to_owned() } else { count.to_string() };
     let galley = ui.painter().layout_no_wrap(text, theme::regular(10.), egui::Color32::WHITE);
     let w = (galley.size().x + 4.).max(16.);
-    let at = Rect::from_min_size(Pos2::new(rect.center().x + 10. - 6. + 4., rect.center().y - 10. - 4.), Vec2::new(w, 16.));
+    // Desktop's NavTabs__ItemUnreadBadge: its end 6px past the 20px icon's,
+    // 4px above its top.
+    let at = Rect::from_min_size(Pos2::new(rect.center().x + 10. + 6. - w, rect.center().y - 10. - 4.), Vec2::new(w, 16.));
     ui.painter().rect_filled(at, CornerRadius::same(8), palette.destructive);
     ui.painter().galley(at.center() - galley.size() / 2., galley, egui::Color32::WHITE);
 }
