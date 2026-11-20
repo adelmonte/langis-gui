@@ -474,7 +474,7 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                             None => "You".to_owned(),
                             Some(a) => app.name(a),
                         };
-                        let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { m.body.clone() };
+                        let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { langis_store::hide_spoilers(&m.body, &m.styles) };
                         let response = egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
@@ -572,12 +572,13 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                 ui.add_space(12.);
                 egui::ScrollArea::vertical().max_height(460.).auto_shrink([false, true]).show(ui, |ui| {
                     // The current text, then the older versions.
-                    let mut versions: Vec<(String, i64)> = vec![(m.body.clone(), m.sent_at)];
+                    let current = langis_store::hide_spoilers(&m.body, &m.styles);
+                    let mut versions: Vec<(String, i64)> = vec![(current.clone(), m.sent_at)];
                     if let Some(details) = details {
-                        let mut older: Vec<_> = details.edits.iter().map(|e| (e.body.clone(), e.sent_at)).collect();
+                        let mut older: Vec<_> = details.edits.iter().map(|e| (langis_store::hide_spoilers(&e.body, &e.styles), e.sent_at)).collect();
                         older.sort_by(|a, b| b.1.cmp(&a.1));
                         let current_at = versions[0].1;
-                        versions.extend(older.into_iter().filter(|(body, at)| !(body == &m.body && *at == current_at)));
+                        versions.extend(older.into_iter().filter(|(body, at)| !(body == &current && *at == current_at)));
                     } else {
                         ui.spinner();
                     }
@@ -662,7 +663,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
     let preview = if m.deleted {
         "This message was deleted".to_owned()
     } else if !m.body.is_empty() {
-        m.body.clone()
+        langis_store::hide_spoilers(&m.body, &m.styles)
     } else {
         m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default()
     };
@@ -765,7 +766,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
             ui.add_space(4.);
             egui::Frame::new().fill(palette.fill).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new(&edit.body).font(theme::regular(14.)));
+                ui.label(RichText::new(langis_store::hide_spoilers(&edit.body, &edit.styles)).font(theme::regular(14.)));
                 ui.label(RichText::new(crate::format::message_time(edit.sent_at)).font(theme::regular(11.)).color(palette.text_secondary));
             });
         }

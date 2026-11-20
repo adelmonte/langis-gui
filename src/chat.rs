@@ -756,7 +756,7 @@ fn pinned_bar(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView
                 Some(a) => app.name(a),
             };
             ui.painter().text(Pos2::new(rect.left() + 56., rect.top() + 8.), Align2::LEFT_TOP, who, theme::semibold(13.), palette.text);
-            let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { crate::format::one_line(&m.body) };
+            let text = if m.body.is_empty() { m.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { crate::format::one_line(&langis_store::hide_spoilers(&m.body, &m.styles)) };
             let mut job = egui::text::LayoutJob::simple_singleline(text, theme::regular(13.), palette.text_secondary);
             job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 120.);
             let g = ui.fonts_mut(|f| f.layout_job(job));
