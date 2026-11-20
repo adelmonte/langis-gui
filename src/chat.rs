@@ -647,6 +647,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
     // The menu's "React" opens the reaction bar in its place.
     let mut replaced = false;
     let mut opened = None;
+    let mut safety_of: Option<String> = None;
     let mut asked = None;
     for (from_popup, d) in todo {
         match d {
@@ -698,6 +699,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
                 }
             }
             Do::OpenChat(to) => opened = Some(to),
+            Do::SafetyNumber(aci) => safety_of = Some(aci),
             Do::Ask(title, body, action, commands) => asked = Some((title, body, action, commands)),
             Do::Open(dialog) => {
                 if let crate::actions::Dialog::Info { message, .. } | crate::actions::Dialog::EditHistory { message, .. } = &dialog {
@@ -710,6 +712,9 @@ fn popups(app: &mut App, ui: &mut Ui) {
     app.chat = Some(chat);
     if let Some(to) = opened {
         app.open(to);
+    }
+    if let Some(aci) = safety_of {
+        crate::details::open_safety(app, langis_store::ConversationId::direct(&aci));
     }
     if let Some((title, body, action, commands)) = asked {
         let destructive = action != tr("Continue");

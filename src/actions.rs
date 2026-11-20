@@ -99,6 +99,8 @@ pub enum Do {
     Open(Dialog),
     /// Opens a chat (a shared contact's Send message).
     OpenChat(langis_store::ConversationId),
+    /// Someone's safety number (Message details' View Safety Number).
+    SafetyNumber(String),
     /// Asks first (title, text, action), then sends.
     Ask(String, String, String, Vec<Command>),
     /// Select mode, starting with this message.
@@ -1042,7 +1044,10 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                             ui.add_space(((ui.available_width() - width) / 2.).max(16.));
                             ui.vertical(|ui| {
                                 ui.set_width(width - 32.);
-                                info_body(app, ui, &palette, m, details.as_ref());
+                                if let Some(aci) = info_body(app, ui, &palette, m, details.as_ref()) {
+                                    out.push(Do::Close);
+                                    out.push(Do::SafetyNumber(aci));
+                                }
                                 // Desktop's MessageDetail actions.
                                 ui.add_space(16.);
                                 ui.horizontal(|ui| {
@@ -1190,7 +1195,10 @@ pub fn check_circle(ui: &Ui, center: Pos2, on: bool, palette: &Palette) {
     }
 }
 
-fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Option<&Details>) {
+/// Returns whose safety number was asked for (a recipient whose key
+/// changed).
+fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Option<&Details>) -> Option<String> {
+    let mut safety = None;
     // Desktop's `MessageDetail` opens with the message itself.
     let outgoing = m.direction == Direction::Outgoing;
     let preview = if m.deleted {
@@ -1243,7 +1251,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
     let Some(details) = details else {
         ui.add_space(8.);
         crate::widgets::spinner(ui, 24.);
-        return;
+        return None;
     };
     if m.direction == Direction::Outgoing && !details.states.is_empty() {
         let groups: [(&str, &dyn Fn(SendStatus) -> bool); 6] = [
@@ -1266,8 +1274,19 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
                     let name = app.name(&state.recipient);
                     let color = state.recipient.bytes().fold(0u8, |a, b| a.wrapping_add(b));
                     widgets::avatar(ui, &widgets::AvatarSpec::person(&name, color), 28.);
-                    ui.label(RichText::new(name).font(theme::regular(14.)));
+                    // Desktop's contact row: the name, and why it failed.
+                    let identity = state.error.as_deref() == Some(langis_store::SEND_ERROR_IDENTITY);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(name).font(theme::regular(14.)));
+                        if let Some(error) = &state.error {
+                            let text = if identity { tr("New safety number").to_owned() } else { error.clone() };
+                            ui.label(RichText::new(text).font(theme::regular(12.)).color(palette.destructive));
+                        }
+                    });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if identity && state.status == SendStatus::Failed && widgets::axo_button(ui, tr("View Safety Number"), widgets::Axo::SubtleSecondary).clicked() {
+                            safety = Some(state.recipient.clone());
+                        }
                         // Each person's status icon, as Desktop's contact rows have.
                         let status = match state.status {
                             SendStatus::Failed => Some(langis_store::DeliveryStatus::Failed),
@@ -1304,6 +1323,7 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
             });
         }
     }
+    safety
 }
 
 /// Loads a message's details for the info dialog.
