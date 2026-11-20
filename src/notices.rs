@@ -32,12 +32,14 @@ pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
         Notice::NumberChanged { who } => format!("{} changed their phone number", name(who)),
         // `icu:ChatRefresh--notification`.
         Notice::SessionRefreshed => "Chat session refreshed".into(),
-        Notice::JoinedSignal { who } => format!("{} is on Signal", name(who)),
+        // `icu:JoinedSignal--notification`.
+        Notice::JoinedSignal { .. } => "Contact joined Signal".into(),
         Notice::SessionEnded => "Secure session reset".into(),
         Notice::Merged { who, phone: Some(phone) } => format!("Your message history with {} and their number {phone} has been merged.", name(who)),
         Notice::Merged { who, phone: None } => format!("Your message history with {} and another chat that belonged to them has been merged.", name(who)),
         Notice::NumberIsTheirs { who, phone } => format!("{phone} belongs to {}", name(who)),
-        Notice::StartedWith { who, previous } => format!("You started this chat with {previous}, now {}", name(who)),
+        // `icu:TitleTransition--notification`.
+        Notice::StartedWith { previous, .. } => format!("You started this chat with {previous}"),
         // `icu:DeliveryIssue--notification`.
         Notice::DeliveryIssue { who } => format!("A message from {} couldn\u{2019}t be delivered", name(who)),
         // `icu:Message--unsupported-message` and `--from-me-unsupported-message`.
@@ -68,8 +70,6 @@ pub fn profile_change_text(old_name: &str, new_name: &str, sender: Option<&str>)
     }
 }
 
-/// The icon Desktop's `SystemMessage` shows beside a notice, for the
-/// notices that have one here.
 fn message_request_text(event: langis_store::MessageRequestEvent, group: bool, who: Option<&str>, name: impl Fn(&str) -> String) -> String {
     use langis_store::MessageRequestEvent;
     match (event, group, who) {
@@ -276,3 +276,74 @@ fn membership_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -
     }
 }
 
+
+/// Desktop's `SystemMessage` icons (`SystemMessage--icon-*`), 16px before
+/// a notice's text: their SVGs, by name.
+pub fn icon_source(name: &str) -> Option<(&'static str, &'static [u8])> {
+    macro_rules! icons {
+        ($($name:literal),* $(,)?) => {
+            match name {
+                $($name => Some((concat!("bytes://notice/", $name, ".svg"), include_bytes!(concat!("../assets/icons/notice/", $name, ".svg")).as_slice())),)*
+                _ => None,
+            }
+        };
+    }
+    icons!(
+        "phone-compact", "group-compact", "megaphone-compact", "person-plus-compact", "person-check-compact", "photo-square-compact",
+        "person-x-compact", "edit-compact", "leave-compact", "person-minus-compact", "info-compact", "group-x-inline", "person-compact",
+        "safety_number-compact", "refresh", "thread-compact", "timer-compact", "timer-slash-compact", "error-circle-compact", "video-compact",
+        "merge-compact", "spam", "block",
+    )
+}
+
+/// The icon a notice gets (Desktop's per-notification `icon=`), and
+/// whether it's drawn in the destructive color (`SystemMessage--danger`:
+/// missed and declined calls).
+pub fn notice_icon(notice: &Notice) -> (Option<&'static str>, bool) {
+    use langis_store::{CallOutcome, GroupCallStatus, MessageRequestEvent};
+    let icon = match notice {
+        Notice::Timer { seconds: 0, .. } => "timer-slash-compact",
+        Notice::Timer { .. } => "timer-compact",
+        Notice::Pinned { .. } | Notice::PollEnded { .. } => return (None, false),
+        Notice::Group { by, change } => match change {
+            GroupNotice::Title { .. } | GroupNotice::Description => "edit-compact",
+            GroupNotice::Avatar => "photo-square-compact",
+            GroupNotice::Added { .. } | GroupNotice::JoinedByLink { .. } | GroupNotice::AcceptedInvite { .. } | GroupNotice::Invited { .. } | GroupNotice::InvitedMany { .. } => "person-plus-compact",
+            GroupNotice::Removed { member } if member.as_deref() == by.as_deref() || (member.is_none() && by.is_none()) => "leave-compact",
+            GroupNotice::Removed { .. } => "person-minus-compact",
+            GroupNotice::Approved { .. } => "person-check-compact",
+            GroupNotice::RequestRemoved { .. } | GroupNotice::InviteRemoved { .. } | GroupNotice::InvitesRemoved { .. } => "person-x-compact",
+            GroupNotice::InfoAccess { .. } | GroupNotice::MemberAccess { .. } | GroupNotice::LabelAccess { .. } | GroupNotice::AnnouncementsOnly { .. } => "megaphone-compact",
+            GroupNotice::LinkOn { .. } | GroupNotice::LinkOff | GroupNotice::LinkReset | GroupNotice::LinkApproval { .. } => "megaphone-compact",
+            GroupNotice::Ended => "group-x-inline",
+            _ => "group-compact",
+        },
+        Notice::SafetyNumberChanged { .. } | Notice::Verified { .. } => "safety_number-compact",
+        Notice::Call { incoming, video, outcome, .. } => {
+            let danger = *incoming && matches!(outcome, CallOutcome::Missed | CallOutcome::Declined);
+            return (Some(if *video { "video-compact" } else { "phone-compact" }), danger);
+        }
+        notice @ Notice::GroupCall { status, .. } => {
+            let danger = notice.group_call_incoming() && matches!(status, Some(GroupCallStatus::Missed | GroupCallStatus::Declined));
+            return (Some("video-compact"), danger);
+        }
+        Notice::MessageRequest { event, .. } => match event {
+            MessageRequestEvent::Accept => "thread-compact",
+            MessageRequestEvent::Block | MessageRequestEvent::Unblock => "block",
+            MessageRequestEvent::Spam => "spam",
+        },
+        Notice::ProfileNameChanged { .. } => "person-compact",
+        Notice::NumberChanged { .. } => "phone-compact",
+        Notice::SessionRefreshed | Notice::SessionEnded => "refresh",
+        Notice::JoinedSignal { .. } | Notice::NumberIsTheirs { .. } | Notice::DeliveryIssue { .. } => "info-compact",
+        Notice::Merged { .. } => "merge-compact",
+        Notice::StartedWith { .. } => "thread-compact",
+        Notice::UnsupportedMessage { .. } => "error-circle-compact",
+    };
+    (Some(icon), false)
+}
+
+/// Notices Desktop follows with " · {time}" (calls, and a contact joining).
+pub fn shows_time(notice: &Notice) -> bool {
+    matches!(notice, Notice::Call { .. } | Notice::GroupCall { .. } | Notice::JoinedSignal { .. } | Notice::NumberChanged { .. })
+}

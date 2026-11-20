@@ -1117,14 +1117,36 @@ fn message(
     if let Some(notice) = &m.notice {
         let text = crate::notices::notice_text(notice, |sid| ctx.app.name(sid));
         let button = notice_button(ctx, m, notice);
+        // Desktop's SystemMessage: a 16px icon before 13px text on 16px
+        // lines, at most 400 wide, red for missed and declined calls,
+        // calls and joins followed by " · {time}", the button 12px below.
+        let (icon, danger) = crate::notices::notice_icon(notice);
+        let color = if danger { palette.destructive } else { palette.text_secondary };
+        let text = if crate::notices::shows_time(notice) { format!("{text} \u{b7} {}", crate::format::message_time(m.sent_at)) } else { text };
         ui.add_space(10.);
         ui.vertical_centered(|ui| {
-            ui.set_max_width((ctx.width - 80.).max(200.));
-            ui.label(RichText::new(text).font(theme::regular(13.)).color(palette.text_secondary));
+            let max_w = 400f32.min(ctx.width - 32.).max(160.);
+            let mut job = egui::text::LayoutJob::default();
+            let format = egui::TextFormat { font_id: theme::regular(13.), color, line_height: Some(16.), ..Default::default() };
+            // Room for the icon at the start of the first line.
+            job.append(&text, if icon.is_some() { 22. } else { 0. }, format);
+            job.wrap.max_width = max_w;
+            job.halign = egui::Align::Center;
+            let galley = ui.fonts_mut(|f| f.layout_job(job));
+            let (rect, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
+            if let Some(row) = galley.rows.first() {
+                if let Some((uri, bytes)) = icon.and_then(crate::notices::icon_source) {
+                    // A centered galley's rows sit around x = 0.
+                    let first = row.pos.x + row.glyphs.first().map_or(0., |g| g.pos.x);
+                    let at = Rect::from_min_size(Pos2::new(rect.center().x + first - 22., rect.top()), Vec2::splat(16.));
+                    egui::Image::new(egui::ImageSource::Bytes { uri: uri.into(), bytes: bytes.into() }).tint(color).fit_to_exact_size(Vec2::splat(16.)).paint_at(ui, at);
+                }
+            }
+            ui.painter().galley(Pos2::new(rect.center().x, rect.top()), galley, color);
             if let Some((label, action)) = button
                 && !ctx.selecting
             {
-                ui.add_space(6.);
+                ui.add_space(12.);
                 if widgets::pill_button(ui, label, false).clicked() {
                     actions.push(Action::Notice(action));
                 }
