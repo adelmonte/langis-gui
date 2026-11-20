@@ -354,6 +354,14 @@ fn screenshots_composer() {
     }
     wait(&mut harness, "staged", |_| true);
     save(&mut harness, "composer-staged");
+    // Desktop's media editor on the staged photo.
+    {
+        let chat = harness.state_mut().chat.as_mut().unwrap();
+        chat.media_editor = crate::media_editor::Editor::open(0, &chat.staged[0].bytes);
+    }
+    wait(&mut harness, "editor", |_| true);
+    save(&mut harness, "media-editor");
+    harness.state_mut().chat.as_mut().unwrap().media_editor = None;
     {
         let chat = harness.state_mut().chat.as_mut().unwrap();
         chat.staged.clear();
