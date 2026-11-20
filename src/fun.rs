@@ -66,7 +66,11 @@ pub struct Fun {
     gif_recents: bool,
     pub manager: Option<StickerManagerView>,
     pub manager_open: bool,
-    /// The manager's tab: Available (0) or Installed (1).
+    /// Desktop's sticker pack creator, while open.
+    pub creator: Option<crate::sticker_creator::Creator>,
+    /// Why an upload failed, for a toast.
+    pub creator_error: Option<String>,
+    /// The manager's tab: All (0) or My Stickers (1).
     manager_tab: usize,
     /// Desktop's "Sticker details" for one of a previewed pack's stickers.
     sticker_details: Option<(Vec<u8>, Vec<u8>, StickerView)>,
@@ -89,6 +93,11 @@ impl Fun {
             Event::FavoriteStickers(favorites) => self.favorites = favorites.clone(),
             Event::FavoriteStickerIds(ids) => self.favorite_ids = ids.clone(),
             Event::StickerManager(view) => self.manager = Some(view.clone()),
+            Event::StickerUpload(upload) => {
+                if let Some(why) = self.creator.as_mut().and_then(|c| c.on_upload(upload)) {
+                    self.creator_error = Some(why);
+                }
+            }
             Event::StickerPackPreview { id, result } => {
                 if let Some((open, _, slot)) = self.preview.as_mut()
                     && open == id

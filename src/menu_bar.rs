@@ -31,6 +31,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     egui::Panel::top("menu-bar").exact_size(26.).frame(egui::Frame::new().fill(palette.sidebar).inner_margin(egui::Margin::symmetric(6, 2))).show(ui, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             let r = ui.menu_button(tr("File"), |ui| {
+                if ui.button(tr("Create/upload sticker pack")).clicked() {
+                    app.fun.creator = Some(crate::sticker_creator::Creator::new());
+                    ui.close();
+                }
                 if ui.button(tr("Preferences…")).clicked() {
                     app.tab = Tab::Settings;
                     ui.close();

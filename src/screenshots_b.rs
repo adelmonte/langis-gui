@@ -209,6 +209,10 @@ fn screenshots_panes() {
             wait(&mut harness, "narrow pane", |_| true);
             save(&mut harness, "chat-list-narrow");
             harness.state_mut().left_width = 300.;
+            harness.state_mut().fun.creator = Some(crate::sticker_creator::Creator::new());
+            wait(&mut harness, "sticker creator", |_| true);
+            save(&mut harness, "sticker-creator");
+            harness.state_mut().fun.creator = None;
         }
     }
 

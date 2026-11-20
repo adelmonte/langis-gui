@@ -3,6 +3,7 @@
 
 mod actions;
 mod permissions;
+mod sticker_creator;
 mod anim;
 mod app;
 mod thumbs;

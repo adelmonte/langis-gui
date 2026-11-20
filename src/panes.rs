@@ -514,6 +514,10 @@ pub fn overlays(app: &mut App, ui: &mut Ui) {
     avatar_lightbox(app, ui);
     crate::collisions::review_dialog(app, ui);
     crate::permissions::popup(app, ui.ctx());
+    crate::sticker_creator::show(app, ui);
+    if let Some(why) = app.fun.creator_error.take() {
+        app.toast(why);
+    }
     pending_confirm(app, ui);
     admins_dialog(app, ui);
     accepted_options(app, ui);
