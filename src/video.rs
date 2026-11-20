@@ -187,6 +187,7 @@ impl Player {
             let stdout = decoder.stdout.take();
             if !run.load(Ordering::Relaxed) {
                 let _ = decoder.kill();
+                let _ = decoder.wait();
                 return;
             }
             children.lock().unwrap().push(decoder);
@@ -215,6 +216,14 @@ impl Player {
                     kids.push(sound);
                     if let Ok(out) = out {
                         kids.push(out);
+                    }
+                    // Paused or dropped while these started: they'd play on.
+                    if !run.load(Ordering::Relaxed) {
+                        for kid in kids.iter_mut() {
+                            let _ = kid.kill();
+                            let _ = kid.wait();
+                        }
+                        return;
                     }
                 }
             }

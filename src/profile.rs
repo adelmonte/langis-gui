@@ -144,7 +144,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     // the middle square, at most 512 pixels.
                     match square_photo(&bytes) {
                         Some(cropped) => {
-                            let preview = std::env::temp_dir().join(format!("langis-avatar-{}.jpg", std::process::id()));
+                            let preview = avatar_preview_path();
                             let _ = std::fs::write(&preview, &cropped);
                             ui.ctx().forget_image(&format!("file://{}", preview.display()));
                             e.photo = Some(preview.to_string_lossy().into_owned());
@@ -452,3 +452,13 @@ mod photo_tests {
         assert!(edge[2] > 200 && edge[0] < 60, "{edge:?}");
     }
 }
+
+/// Where a picked avatar waits to be shown before it's saved: a private
+/// (0700) folder of the app's own, not the shared /tmp.
+fn avatar_preview_path() -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+    let dir = dirs::runtime_dir().or_else(dirs::cache_dir).unwrap_or_else(std::env::temp_dir).join("langis-gui");
+    let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
+    dir.join("avatar-preview.jpg")
+}
+

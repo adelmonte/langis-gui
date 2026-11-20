@@ -50,7 +50,8 @@ impl Sound {
     /// directory the first time.
     fn path(self) -> Option<PathBuf> {
         let (name, bytes) = self.file();
-        let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("langis-gui").join("sounds");
+        // No shared /tmp fallback: another user could plant files there.
+        let dir = dirs::cache_dir()?.join("langis-gui").join("sounds");
         let path = dir.join(name);
         if std::fs::metadata(&path).map(|m| m.len() as usize) .ok() != Some(bytes.len()) {
             std::fs::create_dir_all(&dir).ok()?;

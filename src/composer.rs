@@ -1080,6 +1080,8 @@ pub struct Staged {
     pub kind: StagedKind,
     /// Its thumbnail's image uri, for photos.
     id: u64,
+    /// The bytes as egui shares them, copied once rather than each frame.
+    shared: std::sync::OnceLock<std::sync::Arc<[u8]>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1100,7 +1102,11 @@ impl Staged {
             "mp4" | "mov" | "m4v" | "webm" | "mkv" => StagedKind::Video,
             _ => StagedKind::File,
         };
-        Self { bytes: std::sync::Arc::new(bytes), name, kind, id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
+        Self { bytes: std::sync::Arc::new(bytes), name, kind, id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed), shared: Default::default() }
+    }
+
+    fn image_bytes(&self) -> egui::load::Bytes {
+        egui::load::Bytes::Shared(self.shared.get_or_init(|| self.bytes.as_slice().into()).clone())
     }
 
     fn uri(&self) -> String {
@@ -1242,7 +1248,7 @@ fn staged_list(ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_s
                         ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                         match s.kind {
                             StagedKind::Image => {
-                                egui::Image::new(egui::ImageSource::Bytes { uri: s.uri().into(), bytes: s.bytes.to_vec().into() })
+                                egui::Image::new(egui::ImageSource::Bytes { uri: s.uri().into(), bytes: s.image_bytes() })
                                     .corner_radius(CornerRadius::same(8))
                                     .fit_to_exact_size(rect.size())
                                     .paint_at(ui, rect);
