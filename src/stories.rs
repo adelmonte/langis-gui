@@ -676,10 +676,6 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
     }
 }
 
-/// Paints a story's content into `rect`.
-fn paint_story(ui: &Ui, s: &Story, rect: Rect) -> Option<Rect> {
-    paint_story_caption(ui, s, rect, true).0
-}
 
 /// A story, its caption at most three lines unless `expanded`; returns the
 /// link card, and the caption's rect when it was cut short (Desktop's Read

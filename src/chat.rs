@@ -12,7 +12,7 @@ use crate::app::{App, PendingSend};
 use crate::icons::Icon;
 use crate::theme::{self, Palette};
 use crate::widgets;
-use crate::i18n::tr;
+use crate::i18n::{tf, tr};
 
 /// Messages per page of the timeline.
 pub const PAGE: u32 = 60;
@@ -1764,7 +1764,10 @@ fn message(
 
     // Heights.
     let name_h = name_galley.as_ref().map(|g| g.size().y + 2.).unwrap_or(0.);
-    let quote_h = m.quote.as_ref().map(|q| quote_height(ui, q, bubble_w - pad.x * 2.) + 6.).unwrap_or(0.);
+    // A reaction to a story: the emoji, quoting the story, under Desktop's
+    // "Reacted to a story" line.
+    let story_reaction = m.quote.as_ref().is_some_and(|q| q.story) && m.attachments.is_empty() && langis_emoji::jumbo_count(&body_text) == Some(1);
+    let quote_h = m.quote.as_ref().map(|q| quote_height(ui, q, bubble_w - pad.x * 2.) + 6. + if story_reaction { 20. } else { 0. }).unwrap_or(0.);
     let media_h: f32 = if grid { grid_cells(images.len(), bubble_w).1 + 2. } else { images.iter().map(|(_, a)| media_size(a, Some(bubble_w)).y + 2.).sum() };
     // `MessageAudio`'s countdown shares the line with the time when the
     // audio is all there is.
@@ -1864,7 +1867,21 @@ fn message(
         y += name_h;
     }
     if let Some(q) = &m.quote {
-        let rect = Rect::from_min_size(Pos2::new(left, y), Vec2::new(bubble_w - pad.x * 2., quote_h - 6.));
+        let mut qy = y;
+        let mut qh = quote_h;
+        if story_reaction {
+            let label = match &q.author {
+                None => tr("Reacted to your story").to_owned(),
+                Some(a) => tf("icu:Quote__story-reaction", "Reacted to a story from {name}", &[("name", (&ctx.app.names.get(a).cloned().unwrap_or_else(|| q.author_name.clone())).into())]),
+            };
+            let mut job = egui::text::LayoutJob::simple_singleline(label, theme::regular(13.), meta_color);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(bubble_w - pad.x * 2.);
+            let g = ui.fonts_mut(|f| f.layout_job(job));
+            ui.painter().galley(Pos2::new(left, qy), g, meta_color);
+            qy += 20.;
+            qh -= 20.;
+        }
+        let rect = Rect::from_min_size(Pos2::new(left, qy), Vec2::new(bubble_w - pad.x * 2., qh - 6.));
         quote(ui, palette, outgoing, q, rect, ctx);
         if !q.story && ui.interact(rect, ui.scope_id().with(("quote", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             actions.push(Action::JumpToQuote { author: q.author.clone(), sent_at: q.sent_at });
@@ -2621,6 +2638,8 @@ fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, re
         theme::paint_symbol(ui.painter(), symbol, side.center(), 18., text_color);
     }
     let inner = rect.shrink2(Vec2::new(10., 6.));
+    // A story's quote: "{name} · Story".
+    let author = if q.story { format!("{author} · {}", tr("Story")) } else { author };
     ui.painter().text(Pos2::new(inner.left() + 2., inner.top()), Align2::LEFT_TOP, author, theme::semibold(13.), text_color);
     let galley = quote_body(ui, q, rect.width(), text_color);
     ui.painter().galley(Pos2::new(inner.left() + 2., inner.top() + 19.), galley, text_color);
