@@ -817,6 +817,9 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                         let label = if number.verified { tr("Clear verification") } else { tr("Mark as verified") };
                         if ui.add(egui::Button::new(RichText::new(label).font(theme::medium(14.)).color(egui::Color32::WHITE)).fill(egui::Color32::from_white_alpha(45)).corner_radius(CornerRadius::same(16))).clicked() {
                             app.send(Command::SetVerified { conversation: c.id.clone(), verified: !number.verified });
+                            if let Some(chat) = app.chat.as_mut().filter(|chat| chat.id == c.id) {
+                                chat.verified = !number.verified;
+                            }
                         }
                     });
                 });

@@ -1121,6 +1121,18 @@ impl App {
             self.load(move |db| async move { db.display_names(&members).await.ok().map(Loaded::Names) });
         }
         self.load_pinned(id.clone());
+        // Desktop's "Verified" under a 1:1's name.
+        if let Some(sid) = id.as_direct().map(str::to_owned) {
+            let chat_id = id.clone();
+            self.load(move |db| async move {
+                let verified = langis_core::contact_details(&db, &sid).await.verified;
+                Some(Loaded::Apply(Box::new(move |app: &mut App| {
+                    if let Some(chat) = app.chat.as_mut().filter(|c| c.id == chat_id) {
+                        chat.verified = verified;
+                    }
+                })))
+            });
+        }
         // Whether its group has a call going, for the call notices' Join.
         if self.conversation(&id).is_some_and(|c| c.kind == langis_store::ConversationKind::Group) {
             self.send(Command::PeekGroupCall { conversation: id.clone() });

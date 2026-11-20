@@ -83,6 +83,8 @@ pub struct ChatView {
     /// opened, the message the divider goes above, and whether the chat
     /// still has to scroll to it.
     pub unread_at_open: u32,
+    /// A 1:1 whose key we verified (Desktop's header "Verified").
+    pub verified: bool,
     /// Unread messages that mention us, oldest first: the @ button's.
     pub unread_mentions: Vec<i64>,
     pub unread_marker: Option<(i64, u32)>,
@@ -229,6 +231,7 @@ impl ChatView {
             want_newer: false,
             scroll_target: None,
             unread_at_open: 0,
+            verified: false,
             unread_mentions: Vec::new(),
             unread_marker: None,
             last_offset: 0.,
@@ -778,9 +781,11 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                     }
                 }
                 ui.add_space(4.);
+                let verified = app.chat.as_ref().is_some_and(|chat| chat.verified) && c.id.as_direct() != Some(langis_store::SIGNAL_ACI);
                 ui.vertical(|ui| {
-                    // Desktop's subtitle: only the timer (with its icon).
-                    ui.add_space(if c.expire_timer > 0 { 8. } else { 16. });
+                    // Desktop's subtitle: the timer (with its icon), and
+                    // "Verified".
+                    ui.add_space(if c.expire_timer > 0 || verified { 8. } else { 16. });
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.;
                         if ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(14.))).sense(egui::Sense::click())).clicked() {
@@ -795,13 +800,23 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                             theme::paint_symbol(ui.painter(), "check-circle-fill", at.center(), 15., palette.badge);
                         }
                     });
-                    if c.expire_timer > 0 {
+                    if c.expire_timer > 0 || verified {
                         ui.add_space(-4.);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.;
-                            let (at, _) = ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
-                            theme::paint_symbol(ui.painter(), "timer", at.center(), 14., palette.text_secondary);
-                            ui.label(RichText::new(crate::format::timer_long(c.expire_timer)).font(theme::regular(13.)).color(palette.text_secondary));
+                            if c.expire_timer > 0 {
+                                let (at, _) = ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
+                                theme::paint_symbol(ui.painter(), "timer", at.center(), 14., palette.text_secondary);
+                                ui.label(RichText::new(crate::format::timer_long(c.expire_timer)).font(theme::regular(13.)).color(palette.text_secondary));
+                            }
+                            if verified {
+                                if c.expire_timer > 0 {
+                                    ui.add_space(6.);
+                                }
+                                let (at, _) = ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
+                                theme::paint_symbol(ui.painter(), "shield-check", at.center(), 14., palette.text_secondary);
+                                ui.label(RichText::new(tr("Verified")).font(theme::regular(13.)).color(palette.text_secondary));
+                            }
                         });
                     }
                 });
