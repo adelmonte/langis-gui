@@ -68,6 +68,8 @@ pub struct Fun {
     pub manager_open: bool,
     /// The manager's tab: Available (0) or Installed (1).
     manager_tab: usize,
+    /// Desktop's "Sticker details" for one of a previewed pack's stickers.
+    sticker_details: Option<(Vec<u8>, Vec<u8>, StickerView)>,
     /// "Uninstall sticker pack?" for this pack (id, key).
     confirm_uninstall: Option<(Vec<u8>, Vec<u8>)>,
     /// A pack opened for its preview, and what came for it.
@@ -747,6 +749,8 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                     if !preview.pack.author.is_empty() {
                         ui.label(RichText::new(&preview.pack.author).color(palette.text_secondary));
                     }
+                    let n = preview.stickers.len();
+                    ui.label(RichText::new(crate::i18n::tf("icu:stickers--StickerPreview--StickerCount", &if n == 1 { "1 sticker".to_owned() } else { format!("{n} stickers") }, &[("count", crate::i18n::Arg::from(n))])).font(theme::regular(13.)).color(palette.text_secondary));
                     ui.add_space(10.);
                     let cell = (ui.available_width() / 5.).floor();
                     egui::ScrollArea::vertical().max_height(320.).auto_shrink([false, true]).show(ui, |ui| {
@@ -754,8 +758,15 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 0.;
                                 for s in row {
-                                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(cell), Sense::hover());
+                                    let (rect, hit) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+                                    if hit.hovered() {
+                                        ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
+                                    }
                                     sticker_image(ui, &s.path, rect.shrink(6.));
+                                    // Desktop's "See sticker details".
+                                    if hit.on_hover_text(tr("See sticker details")).clicked() {
+                                        app.fun.sticker_details = Some((preview.pack.id.clone(), preview.pack.key.clone(), s.clone()));
+                                    }
                                 }
                             });
                         }
@@ -767,17 +778,17 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                 if let Some(Ok(preview)) = &result {
                     let installed = preview.pack.installed || app.fun.packs.iter().any(|p| p.id == id);
                     if installed {
-                        if widgets::pill_button(ui, tr("Uninstall"), false).clicked() {
+                        if widgets::pill_button(ui, tr("Remove"), false).clicked() {
                             app.fun.confirm_uninstall = Some((id.clone(), key.clone()));
                         }
-                    } else if widgets::pill_button(ui, tr("Install"), true).clicked() {
+                    } else if widgets::pill_button(ui, tr("Add Stickers"), true).clicked() {
                         app.send(Command::InstallStickerPack { id: id.clone(), key: key.clone() });
                         close = true;
                     }
                     // Desktop's share menu's Copy link.
-                    if widgets::pill_button(ui, tr("Copy link"), false).clicked() {
+                    if widgets::pill_button(ui, tr("Link"), false).clicked() {
                         ui.ctx().copy_text(pack_link(&id, &key));
-                        app.toast("Link copied");
+                        app.toast(tr("Link copied"));
                     }
                 }
                 if widgets::pill_button(ui, tr("Close"), false).clicked() {
@@ -789,6 +800,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
             app.fun.preview = None;
         }
         uninstall_confirm(app, ui);
+        sticker_details(app, ui);
         return;
     }
     if !app.fun.manager_open {
@@ -819,7 +831,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         });
         ui.add_space(4.);
         let sections: Vec<(&str, &Vec<StickerPackSummary>, &str)> = if tab == 1 {
-            vec![("Installed stickers", &manager.installed, "No stickers installed")]
+            vec![(tr("My Stickers"), &manager.installed, tr("No sticker packs, add stickers to send to your friends."))]
         } else {
             vec![(tr("Signal Artist Series"), &manager.blessed, ""), ("Stickers you received", &manager.received, "Stickers from incoming messages will appear here")]
         };
@@ -883,6 +895,35 @@ enum PackAction {
     Copy,
 }
 
+/// Desktop's sticker details: the sticker large, its emoji, and the
+/// favorite button.
+fn sticker_details(app: &mut App, ui: &Ui) {
+    let Some((pack_id, pack_key, sticker)) = app.fun.sticker_details.clone() else { return };
+    let palette = Palette::of(ui.ctx());
+    let favorite = app.fun.favorite_ids.iter().any(|(p, s)| *p == pack_id && *s == sticker.id);
+    let mut toggle = false;
+    let closed = crate::panes::modal(ui, "sticker-details", 300., |ui| {
+        crate::panes::title(ui, tr("Sticker details"));
+        ui.vertical_centered(|ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(160.), Sense::hover());
+            sticker_image(ui, &sticker.path, rect);
+            if let Some(e) = &sticker.emoji {
+                let mut job = egui::text::LayoutJob::default();
+                crate::chat::append_with_emoji(&mut job, e, egui::TextFormat { font_id: theme::regular(28.), color: palette.text, ..Default::default() });
+                ui.label(job);
+            }
+            ui.add_space(8.);
+            toggle = widgets::pill_button(ui, if favorite { tr("Remove from Favorites") } else { tr("Add to Favorites") }, false).clicked();
+        });
+    });
+    if toggle {
+        app.send(Command::SetStickerFavorite { pack_id, pack_key, sticker_id: sticker.id, favorite: !favorite });
+    }
+    if closed || toggle {
+        app.fun.sticker_details = None;
+    }
+}
+
 /// A pack's signal.art link.
 fn pack_link(id: &[u8], key: &[u8]) -> String {
     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
@@ -896,7 +937,7 @@ fn uninstall_confirm(app: &mut App, ui: &Ui) {
         ui.ctx(),
         egui::Id::unique("sticker-uninstall"),
         "",
-        "You may not be able to reinstall this sticker pack if you no longer have the source message.",
+        tr("You may not be able to re-install this sticker pack if you no longer have the source message."),
         tr("Uninstall"),
         crate::dialog::Variant::StrongDestructive,
     ) {
