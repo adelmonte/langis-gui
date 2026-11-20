@@ -421,14 +421,15 @@ mod tests {
 
     #[test]
     fn every_locale_parses_and_resolves() {
-        for (code, ..) in LOCALES {
-            set_locale(code);
-            assert_eq!(locale(), *code);
+        // Parsed on their own: switching the app's language here would race
+        // the other tests, which run alongside.
+        for (code, _, _, json) in LOCALES {
+            let parsed: serde_json::Value = serde_json::from_str(json).unwrap_or_else(|e| panic!("{code}: {e}"));
+            assert!(parsed.get("plain").is_some_and(|p| p.is_object()), "{code}");
         }
         assert_eq!(resolve("de_AT.UTF-8"), "de");
         assert_eq!(resolve("pt_BR.UTF-8"), "pt-BR");
         assert_eq!(resolve("zh_TW.UTF-8"), "zh-Hant");
         assert_eq!(resolve("xx"), "en");
-        set_locale("en");
     }
 }
