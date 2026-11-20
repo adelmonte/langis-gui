@@ -79,6 +79,8 @@ pub enum Tab {
 pub struct Toast {
     pub text: String,
     pub until: Instant,
+    /// Desktop's toast button (Undo and the like): its label and what it sends.
+    pub action: Option<(String, langis_core::Command)>,
 }
 
 pub struct SafetyPrompt {
@@ -350,7 +352,24 @@ impl App {
     }
 
     pub fn toast(&mut self, text: impl Into<String>) {
-        self.toasts.push(Toast { text: text.into(), until: Instant::now() + Duration::from_secs(4) });
+        self.toasts.push(Toast { text: text.into(), until: Instant::now() + Duration::from_secs(4), action: None });
+    }
+
+    /// Archives or unarchives a chat, with Desktop's toast: "Chat archived"
+    /// with Undo, or "Chat returned to inbox".
+    pub fn set_archived(&mut self, conversation: ConversationId, archive: bool) {
+        use langis_core::{ChatChange, Command};
+        self.send(Command::SetChat { conversation: conversation.clone(), change: ChatChange::Archived(archive) });
+        if archive {
+            self.toast_action("Chat archived", "Undo", Command::SetChat { conversation, change: ChatChange::Archived(false) });
+        } else {
+            self.toast("Chat returned to inbox");
+        }
+    }
+
+    /// A toast with a button, e.g. "Undo", that sends `command`.
+    pub fn toast_action(&mut self, text: impl Into<String>, label: impl Into<String>, command: langis_core::Command) {
+        self.toasts.push(Toast { text: text.into(), until: Instant::now() + Duration::from_secs(6), action: Some((label.into(), command)) });
     }
 
     pub fn name(&self, service_id: &str) -> String {

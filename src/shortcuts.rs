@@ -3,7 +3,7 @@
 //! composer.
 
 use egui::{Align2, Color32, CornerRadius, Key, KeyboardShortcut, Modifiers, Pos2, Rect, Sense, Vec2};
-use langis_core::{CallStatus, ChatChange, Command};
+use langis_core::{CallStatus, Command};
 
 use crate::app::{App, Tab};
 use crate::theme::{self, Palette};
@@ -223,7 +223,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     }
     for (key, archive) in [(Key::A, true), (Key::U, false)] {
         if pressed(ctx, CTRL_SHIFT, key) && app.conversation(&id).is_some_and(|c| c.archived != archive) {
-            app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(archive) });
+            app.set_archived(id.clone(), archive);
         }
     }
     if pressed(ctx, CTRL_SHIFT, Key::C) {

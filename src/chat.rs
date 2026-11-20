@@ -2931,7 +2931,7 @@ fn header_menu(app: &mut App, ui: &Ui, more: &egui::Response, c: &langis_store::
             app.send(Command::SetPinned { conversation: id.clone(), pinned: !c.pinned });
         }
         if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { "Unarchive" } else { "Archive" }) {
-            app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(!c.archived) });
+            app.set_archived(id.clone(), !c.archived);
         }
         if !c.ended {
             if !c.blocked && m.item(Some("block"), "Block") {

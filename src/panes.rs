@@ -576,7 +576,7 @@ pub fn chat_menu(app: &mut App, m: &mut crate::menu::Menu, c: &Conversation) {
         app.send(Command::EditChatFolders(langis_store::ChatFolderEdit::ToggleChat { id: folder, chat: id.clone(), add: false }));
     }
     if m.item(Some(if c.archived { "archive-up" } else { "archive" }), if c.archived { "Unarchive" } else { "Archive" }) {
-        app.send(Command::SetChat { conversation: id.clone(), change: ChatChange::Archived(!c.archived) });
+        app.set_archived(id.clone(), !c.archived);
     }
     if m.item(Some("trash"), "Delete") {
         let member = c.kind == langis_store::ConversationKind::Group && !c.left && !c.ended;

@@ -59,14 +59,15 @@ pub fn paint_avatar(ui: &Ui, rect: Rect, spec: &AvatarSpec<'_>) {
     let (bg, fg) = theme::avatar_colors(if spec.note_to_self { 0 } else { spec.color });
     ui.painter().circle_filled(rect.center(), size / 2., bg);
     let initials = crate::format::initials(spec.name);
+    // Desktop's Avatar: icons at 62.5%, initials ceil(size * 0.45) regular.
     if spec.note_to_self {
-        Icon::Note.paint(ui, rect, size * 0.5, fg);
+        Icon::Note.paint(ui, rect, size * 0.625, fg);
     } else if spec.group {
-        Icon::Group.paint(ui, rect, size * 0.5, fg);
+        Icon::Group.paint(ui, rect, size * 0.625, fg);
     } else if initials.is_empty() {
-        Icon::Person.paint(ui, rect, size * 0.5, fg);
+        Icon::Person.paint(ui, rect, size * 0.625, fg);
     } else {
-        let font = theme::medium((size * 0.38).round());
+        let font = theme::regular((size * 0.45).ceil());
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, initials, font, fg);
     }
 }

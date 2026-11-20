@@ -168,23 +168,44 @@ fn share_picker(app: &mut App, ui: &mut Ui) {
     }
 }
 
-/// Desktop's toasts: dark pills at the bottom center.
+/// Desktop's toasts (`Toast`, `ToastManager`): gray-75 with gray-05
+/// body-2 text, at most 280 wide, 16px from the bottom left of the chat
+/// list, with a shadow and an optional bold button.
 fn toasts(app: &mut App, ui: &mut Ui) {
     let Some(toast) = app.toasts.last() else { return };
     let text = toast.text.clone();
+    let action = toast.action.clone();
+    let left = if app.nav_collapsed { 0. } else { 80. };
+    let mut clicked = false;
     egui::Area::new(egui::Id::unique("toast"))
-        .anchor(Align2::CENTER_BOTTOM, Vec2::new(0., -90.))
+        .anchor(Align2::LEFT_BOTTOM, Vec2::new(left + 16., -16.))
         .order(egui::Order::Tooltip)
         .show(ui.ctx(), |ui| {
             egui::Frame::new()
                 .fill(egui::Color32::from_rgb(0x3b, 0x3b, 0x3b))
                 .corner_radius(CornerRadius::same(8))
-                .inner_margin(egui::Margin::symmetric(16, 10))
+                .shadow(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: egui::Color32::from_black_alpha(77) })
                 .show(ui, |ui| {
-                    ui.set_max_width(420.);
-                    ui.label(RichText::new(text).color(egui::Color32::WHITE).font(theme::regular(14.)));
+                    ui.set_max_width(280.);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.;
+                        egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 13)).show(ui, |ui| {
+                            ui.set_max_width(if action.is_some() { 180. } else { 248. });
+                            ui.label(RichText::new(&text).color(egui::Color32::from_rgb(0xe9, 0xe9, 0xe9)).font(theme::regular(13.)));
+                        });
+                        if let Some((label, _)) = &action {
+                            let b = egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 13)).show(ui, |ui| {
+                                ui.add(egui::Label::new(RichText::new(label).color(egui::Color32::from_rgb(0xb0, 0xc8, 0xf9)).font(theme::semibold(13.))).sense(egui::Sense::click()))
+                            });
+                            clicked = b.inner.clicked();
+                        }
+                    });
                 });
         });
+    if clicked && let Some((_, command)) = action {
+        app.send(command);
+        app.toasts.pop();
+    }
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
 }
 

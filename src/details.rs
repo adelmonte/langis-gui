@@ -539,7 +539,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 confirm = Some(if c.blocked { ChatConfirm::Unblock } else { ChatConfirm::Block });
             }
             if axo_list::item(ui, Item::new(if c.archived { "Unarchive chat" } else { "Archive chat" }).symbol("archive"), End::Click).clicked() {
-                app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::Archived(!c.archived) });
+                app.set_archived(c.id.clone(), !c.archived);
             }
             if (c.ended || c.left) && axo_list::item(ui, red(Item::new("Delete chat").symbol("trash")), End::Click).clicked() {
                 app.panes.delete_chat = Some((c.id.clone(), false));
