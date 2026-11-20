@@ -220,7 +220,11 @@ pub fn paint(
         }
         ui.painter().galley(Pos2::new(x, row.top() + 4.), galley, text);
         let count = counts.get(i as usize).copied().unwrap_or(0);
-        ui.painter().text(Pos2::new(row.right(), row.top() + 4.), Align2::RIGHT_TOP, count.to_string(), theme::regular(13.), secondary);
+        let shown = ui.painter().text(Pos2::new(row.right(), row.top() + 4.), Align2::RIGHT_TOP, count.to_string(), theme::regular(13.), secondary);
+        // Desktop's "You voted" mark beside the count, once voting's over.
+        if chosen && !can_vote {
+            crate::icons::Icon::Check.paint(ui, Rect::from_center_size(Pos2::new(shown.left() - 10., shown.center().y), Vec2::splat(14.)), 12., secondary);
+        }
         // The bar: share of voters, the leader stronger once it's ended.
         let bar = Rect::from_min_size(Pos2::new(x, row.top() + 28.), Vec2::new(row.right() - x, 6.));
         ui.painter().rect_filled(bar, CornerRadius::same(3), if outgoing { Color32::from_white_alpha(60) } else { palette.fill_secondary });
@@ -276,8 +280,15 @@ pub fn votes_dialog(app: &crate::app::App, ui: &mut Ui, palette: &Palette, poll:
         for (i, option) in poll.options.iter().enumerate() {
             let who: Vec<Option<String>> = poll.votes.iter().filter(|v| v.options.contains(&(i as u32))).map(|v| v.author.clone()).collect();
             ui.add_space(16.);
+            let winning = poll.ended && !who.is_empty() && poll.options.iter().enumerate().all(|(k, _)| poll.votes.iter().filter(|v| v.options.contains(&(k as u32))).count() <= who.len());
             ui.horizontal(|ui| {
                 ui.label(RichText::new(option).font(theme::semibold(14.)));
+                // Desktop's Winning star on the leader of an ended poll.
+                if winning {
+                    let (at, _) = ui.allocate_exact_size(egui::vec2(16., 16.), egui::Sense::hover());
+                    theme::paint_symbol(ui.painter(), "star-fill", at.center(), 14., palette.badge);
+                    ui.label(RichText::new(tr("Winning")).font(theme::regular(12.)).color(palette.text_secondary));
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let count = if who.len() == 1 { "1 vote".to_owned() } else { format!("{} votes", who.len()) };
                     ui.label(RichText::new(count).font(theme::regular(13.)).color(palette.text_secondary));

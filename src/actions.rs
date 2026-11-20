@@ -472,17 +472,21 @@ pub fn show_dialog(app: &App, ui: &Ui, dialog: &mut Dialog, chat: &[Message], c:
                     egui::ScrollArea::vertical().max_height(320.).auto_shrink([false, true]).show(ui, |ui| {
                         for conv in app.conversations.iter().filter(|x| !x.left && !x.blocked && !x.ended && (q.is_empty() || x.title.to_lowercase().contains(&q))) {
                             let on = chosen.contains(&conv.id);
+                            // Desktop greys out a group only admins can post in.
+                            let closed = conv.group_state.announcements_only && !conv.admins.contains(&app.aci);
                             let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.), Sense::click());
+                            let r = if closed { r.on_hover_text(tr("You cannot send messages to that group.")) } else { r };
                             if r.hovered() {
                                 ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                             }
                             widgets::paint_avatar(ui, Rect::from_min_size(rect.min + Vec2::new(8., 8.), Vec2::splat(32.)), &widgets::AvatarSpec::of(conv));
-                            let mut job = egui::text::LayoutJob::simple_singleline(conv.title.clone(), theme::medium(14.), palette.text);
+                            let ink = if closed { palette.text_secondary } else { palette.text };
+                            let mut job = egui::text::LayoutJob::simple_singleline(conv.title.clone(), theme::medium(14.), ink);
                             job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 90.);
                             let g = ui.fonts_mut(|f| f.layout_job(job));
-                            ui.painter().galley(Pos2::new(rect.left() + 50., rect.center().y - g.size().y / 2.), g, palette.text);
+                            ui.painter().galley(Pos2::new(rect.left() + 50., rect.center().y - g.size().y / 2.), g, ink);
                             check_circle(ui, Pos2::new(rect.right() - 20., rect.center().y), on, &palette);
-                            if r.clicked() {
+                            if r.clicked() && !closed {
                                 if on {
                                     chosen.retain(|x| x != &conv.id);
                                 } else {
