@@ -161,6 +161,8 @@ enum Action {
     Extra(i64),
     /// "Retry failed delete?" for a delete for everyone that failed.
     RetryDelete(i64),
+    /// Desktop's failed edit: "This edit could not be sent", Send again.
+    RetryEdit(i64),
     /// Read more: 3000 more characters of a long message.
     ReadMore(i64),
     /// Play or pause a message's audio, or (at, 0 to 1) play from a point.
@@ -464,6 +466,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     }
                 }
             }
+            Action::RetryEdit(message_id) => crate::panes::ask(
+                app,
+                "",
+                tr("This edit could not be sent. Check your connection and try again"),
+                tr("Send again"),
+                false,
+                vec![Command::RetryEdit { message_id }],
+            ),
             Action::RetryDelete(message_id) => crate::panes::ask(
                 app,
                 tr("Retry failed delete?"),
@@ -2118,6 +2128,7 @@ fn message(
                 actions.push(match then {
                     Action::Retry(id) => Action::Retry(*id),
                     Action::RetryDelete(id) => Action::RetryDelete(*id),
+                    Action::RetryEdit(id) => Action::RetryEdit(*id),
                     _ => Action::Info(m.id),
                 });
             }
@@ -3058,7 +3069,7 @@ fn status_line(m: &Message) -> Option<(&'static str, Option<Action>)> {
     }
     match m.status {
         DeliveryStatus::Failed if m.deleted => Some((tr("Delete failed, click for details"), Some(Action::RetryDelete(m.id)))),
-        DeliveryStatus::Failed if m.edited => Some((tr("Edit failed, click for details"), Some(Action::Info(m.id)))),
+        DeliveryStatus::Failed if m.edited => Some((tr("Edit failed, click for details"), Some(Action::RetryEdit(m.id)))),
         DeliveryStatus::Failed => Some((tr("Send failed"), Some(Action::Retry(m.id)))),
         DeliveryStatus::PartialSent if m.deleted => Some((tr("Partially deleted, click for details"), Some(Action::Info(m.id)))),
         DeliveryStatus::PartialSent => Some((tr("Partially sent, click for details"), Some(Action::Info(m.id)))),
