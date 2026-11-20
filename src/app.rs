@@ -222,6 +222,9 @@ pub struct App {
     pub unread_mentions: std::collections::HashMap<ConversationId, u32>,
     /// The chat list shows only unread chats (Desktop's search filter).
     pub unread_only: bool,
+    /// The chat list's width as dragged (Desktop's preferred left pane
+    /// width); shown snapped.
+    pub left_width: f32,
     /// Emoji most recently used, newest first: the pickers' Recents.
     pub recent_emoji: Vec<String>,
     /// Stickers, GIFs and the sticker manager.
@@ -333,6 +336,7 @@ impl App {
             drops: crate::wayland_dnd::start(cc),
             input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None, spell: true },
             unread_only: false,
+            left_width: 300.,
             fun: Default::default(),
         };
         let dir = &app.data_dir;

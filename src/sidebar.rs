@@ -140,19 +140,52 @@ fn tab_item_error(ui: &mut Ui, palette: &Palette, icon: Icon, selected: bool, ba
     response
 }
 
+/// Desktop's left pane widths (`leftPaneWidth`): avatars only at 97,
+/// otherwise 280 to 380; dragged under 200 it snaps narrow.
+const NARROW_WIDTH: f32 = 97.;
+const SNAP_WIDTH: f32 = 200.;
+const MIN_FULL_WIDTH: f32 = 280.;
+const MAX_WIDTH: f32 = 380.;
+
+/// The width shown for `preferred` (Desktop's `getWidthFromPreferredWidth`).
+fn pane_width(preferred: f32, requires_full: bool) -> f32 {
+    let clamped = preferred.clamp(NARROW_WIDTH, MAX_WIDTH);
+    if requires_full || clamped >= SNAP_WIDTH { clamped.max(MIN_FULL_WIDTH) } else { NARROW_WIDTH }
+}
+
 pub fn chat_list(app: &mut App, ui: &mut Ui) {
     let palette = Palette::of(ui.ctx());
+    // Searching, composing and the archive need the full width.
+    let requires_full = !app.search.is_empty() || app.panes.compose.is_some() || app.panes.archived || app.message_search.within.is_some();
+    let width = pane_width(app.left_width, requires_full);
     egui::Panel::left("chat-list")
-        .resizable(true)
-        .default_size(300.)
-        .min_size(240.)
-        .max_size(420.)
+        .resizable(false)
+        .exact_size(width)
         .show_separator_line(false)
         .frame(egui::Frame::new().fill(palette.sidebar))
         .show(ui, |ui| {
             let full = ui.max_rect();
             ui.painter().vline(full.right() - 0.5, full.y_range(), Stroke::new(1., palette.border));
+            // The resize handle on the edge, snapping as Desktop's.
+            let handle = Rect::from_x_y_ranges(full.right() - 4.0..=full.right(), full.y_range());
+            let drag = ui.interact(handle, ui.scope_id().with("left-pane-resize"), Sense::drag());
+            if drag.hovered() || drag.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            if drag.drag_started() {
+                app.left_width = width;
+            }
+            if drag.dragged() {
+                app.left_width = (app.left_width + drag.drag_delta().x).clamp(NARROW_WIDTH, MAX_WIDTH);
+            }
+            if drag.drag_stopped() {
+                app.left_width = pane_width(app.left_width, false);
+            }
             if crate::panes::compose_pane(app, ui) {
+                return;
+            }
+            if width < MIN_FULL_WIDTH {
+                narrow_list(app, ui, &palette);
                 return;
             }
             // Header: "Chats", and the compose button.
@@ -584,5 +617,48 @@ pub fn status_icon(status: DeliveryStatus) -> Icon {
         DeliveryStatus::Delivered => Icon::MessagestatusDelivered,
         DeliveryStatus::Read | DeliveryStatus::Viewed => Icon::MessagestatusRead,
         DeliveryStatus::Failed => Icon::ErrorCircleCompact,
+    }
+}
+
+/// Desktop's narrow left pane: the compose button, then each chat as its
+/// avatar with its unread badge (its name on hover).
+fn narrow_list(app: &mut App, ui: &mut Ui, palette: &Palette) {
+    ui.add_space(12.);
+    ui.vertical_centered(|ui| {
+        if widgets::axo_icon_button_sm(ui, "compose", tr("New chat"), false).clicked() {
+            app.panes.compose = Some(crate::panes::Compose::Chat { query: String::new(), searching: false, found: None });
+        }
+    });
+    ui.add_space(8.);
+    let rows: Vec<Conversation> = app.conversations.iter().filter(|c| crate::panes::visible(app, c)).filter(|c| !app.unread_only || c.unread_count > 0 || c.marked_unread).cloned().collect();
+    let mut open = None;
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.;
+        for c in &rows {
+            let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 64.), Sense::click());
+            let row = rect.shrink2(Vec2::new(8., 2.));
+            let selected = app.selected.as_ref() == Some(&c.id);
+            if selected || r.hovered() {
+                ui.painter().rect_filled(row, CornerRadius::same(10), if selected { palette.fill_pressed } else { palette.fill });
+            }
+            let avatar = Rect::from_center_size(row.center(), Vec2::splat(48.));
+            widgets::paint_avatar(ui, avatar, &widgets::AvatarSpec::of(c));
+            let unread = c.unread_count + c.marked_unread as u32;
+            if unread > 0 {
+                let text = if c.marked_unread && c.unread_count == 0 { String::new() } else if unread > 99 { "99+".into() } else { unread.to_string() };
+                let g = ui.painter().layout_no_wrap(text, theme::semibold(11.), Color32::WHITE);
+                let w = (g.size().x + 10.).max(18.);
+                let at = Rect::from_min_size(Pos2::new(avatar.right() - w + 4., avatar.top() - 2.), Vec2::new(w, 18.));
+                ui.painter().rect_filled(at, CornerRadius::same(9), if c.muted { palette.text_secondary } else { palette.accent });
+                ui.painter().galley(at.center() - g.size() / 2., g, Color32::WHITE);
+            }
+            if r.on_hover_text(&c.title).clicked() {
+                open = Some(c.id.clone());
+            }
+        }
+    });
+    if let Some(id) = open {
+        app.panes.details = None;
+        app.open(id);
     }
 }

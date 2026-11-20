@@ -204,6 +204,11 @@ fn screenshots_panes() {
             save(&mut harness, "search-in-chat");
             harness.state_mut().search.clear();
             harness.state_mut().message_search.within = None;
+            // Desktop's narrow left pane, dragged under 200px.
+            harness.state_mut().left_width = 120.;
+            wait(&mut harness, "narrow pane", |_| true);
+            save(&mut harness, "chat-list-narrow");
+            harness.state_mut().left_width = 300.;
         }
     }
 
