@@ -85,10 +85,30 @@ fn screenshots_panes() {
         save(&mut harness, "story-viewer");
         harness.state_mut().panes.stories.viewer = None;
     }
-    harness.state_mut().panes.stories.composer = Some(crate::stories::Composer { text: "Trail run at 7?".into(), background: 2, media: None, targets: vec![langis_core::StoryTarget::MyStory] , font: langis_store::StoryFont::Bold, text_style: 0, preview: None, preview_for: None, new_group: None });
+    harness.state_mut().panes.stories.composer = Some(crate::stories::Composer { text: "Trail run at 7?".into(), background: 2, font: langis_store::StoryFont::Bold, ..Default::default() });
     wait(&mut harness, "story composer", |_| true);
     save(&mut harness, "story-composer");
+    harness.state_mut().panes.stories.composer = Some(crate::stories::Composer { text: "New trail map is up".into(), background: 10, link: Some("https://example.com/trails".into()), ..Default::default() });
+    wait(&mut harness, "story composer link", |_| true);
+    save(&mut harness, "story-composer-link");
+    harness.state_mut().panes.stories.composer.as_mut().unwrap().sending = true;
+    wait(&mut harness, "story send modal", |_| true);
+    save(&mut harness, "story-send");
     harness.state_mut().panes.stories.composer = None;
+    if harness.state().panes.stories.list.iter().any(|s| s.author.is_none()) {
+        harness.state_mut().panes.stories.my_stories = true;
+        wait(&mut harness, "my stories", |_| true);
+        save(&mut harness, "my-stories");
+        harness.state_mut().panes.stories.my_stories = false;
+        let mine = harness.state().panes.stories.list.iter().filter(|s| s.author.is_none()).count();
+        harness.state_mut().panes.stories.viewer = Some(("me".into(), mine - 1, Instant::now()));
+        let id = harness.state().panes.stories.list.iter().filter(|s| s.author.is_none()).max_by_key(|s| s.sent_at).map(|s| s.id);
+        harness.state_mut().panes.stories.views_of = id;
+        wait(&mut harness, "story views", |_| true);
+        save(&mut harness, "story-views");
+        harness.state_mut().panes.stories.views_of = None;
+        harness.state_mut().panes.stories.viewer = None;
+    }
     harness.state_mut().panes.stories.privacy = true;
     wait(&mut harness, "story privacy", |_| true);
     save(&mut harness, "story-privacy");

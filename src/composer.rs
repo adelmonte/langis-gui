@@ -1181,7 +1181,7 @@ fn attach(app: &mut App, chat: &mut ChatView, media: bool) {
 }
 
 /// Signal's attachment limit (Desktop's `getMaximumOutgoingAttachmentSizeInKb`, 100 MB).
-const MAX_FILE_BYTES: u64 = 100 * 1000 * 1000;
+pub const MAX_FILE_BYTES: u64 = 100 * 1000 * 1000;
 
 fn stage_path(app: &mut App, chat: &mut ChatView, path: &std::path::Path) {
     if chat.staged.len() >= MAX_STAGED {

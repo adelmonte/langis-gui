@@ -62,6 +62,8 @@ pub struct StoriesView {
     pub picker: Option<crate::emoji_picker::Picker>,
     /// Our story whose views and replies are listed.
     pub views_of: Option<i64>,
+    /// The views modal's tab: Views, or Replies.
+    pub views_tab: usize,
     /// Desktop's `StoryDetailsModal` (Info) for this story.
     pub info_of: Option<i64>,
     /// "Hide story?" waiting for this story's answer.
@@ -91,6 +93,34 @@ pub struct Composer {
     pub preview_for: Option<String>,
     /// Picking groups for New group story, with the search.
     pub new_group: Option<(Vec<ConversationId>, String)>,
+    /// The link added with the link button; else the text's first.
+    pub link: Option<String>,
+    /// The link button's field, while it's open.
+    pub link_field: Option<String>,
+    /// `SendStoryModal`, after Next.
+    pub sending: bool,
+    /// "Discard story?" waiting for an answer.
+    pub confirm_discard: bool,
+}
+
+impl Default for Composer {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            background: 0,
+            media: None,
+            targets: vec![StoryTarget::MyStory],
+            font: langis_store::StoryFont::Regular,
+            text_style: 0,
+            preview: None,
+            preview_for: None,
+            new_group: None,
+            link: None,
+            link_field: None,
+            sending: false,
+            confirm_discard: false,
+        }
+    }
 }
 
 /// Gradient backgrounds after the solid ones, top to bottom (ARGB).
@@ -221,8 +251,23 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             app.panes.stories.privacy = true;
                         }
                     });
-                    if !app.panes.stories.disabled && widgets::icon_button(ui, Icon::Plus, 20., "Add a story").clicked() {
-                        new_composer(app);
+                    if !app.panes.stories.disabled {
+                        // Desktop's StoriesAddStoryButton: a photo or video, or text.
+                        let add = widgets::icon_button(ui, Icon::Plus, 20., "Add a story");
+                        let mut pick = None;
+                        crate::menu::dropdown(ui, &add, egui::Id::unique("stories-add"), |m| {
+                            if m.item(Some("photo"), "Photo or video") {
+                                pick = Some(true);
+                            }
+                            if m.item(Some("text"), "Text story") {
+                                pick = Some(false);
+                            }
+                        });
+                        match pick {
+                            Some(true) => new_media_story(app),
+                            Some(false) => new_composer(app),
+                            None => {}
+                        }
                     }
                 });
             });
@@ -320,17 +365,29 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 }
 
 fn new_composer(app: &mut App) {
-    app.panes.stories.composer = Some(Composer {
-        text: String::new(),
-        background: 0,
-        media: None,
-        targets: vec![StoryTarget::MyStory],
-        font: langis_store::StoryFont::Regular,
-        text_style: 0,
-        preview: None,
-        preview_for: None,
-        new_group: None,
-    });
+    app.panes.stories.composer = Some(Composer::default());
+}
+
+/// Desktop's "Photo or video" story: a file picked, into the creator.
+fn new_media_story(app: &mut App) {
+    let Some(path) = rfd::FileDialog::new().add_filter("Media", &["png", "jpg", "jpeg", "webp", "gif", "mp4", "mov"]).pick_file() else { return };
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(u64::MAX);
+    if size > crate::composer::MAX_FILE_BYTES {
+        app.toast("That file is too large.");
+        return;
+    }
+    let Ok(bytes) = std::fs::read(&path) else { return };
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let content_type = match ext.as_str() {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        _ => "image/jpeg",
+    };
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    app.panes.stories.composer = Some(Composer { media: Some((std::sync::Arc::new(bytes), content_type.into(), name)), ..Composer::default() });
 }
 
 /// Someone's (or a group's) row: opens their stories; its menu hides or
@@ -405,8 +462,8 @@ fn story_thumb(ui: &Ui, s: &Story, rect: Rect) {
     }
     match &s.content {
         StoryContent::Text(t) => {
-            let small = TextStory { text: String::new(), ..t.clone() };
-            paint_text_story(ui, &small, rect);
+            let small = TextStory { text: String::new(), preview: None, ..t.clone() };
+            let _ = paint_text_story(ui, &small, rect, None);
         }
         StoryContent::Media { attachment, .. } => {
             ui.painter().rect_filled(rect, CornerRadius::same(6), Color32::BLACK);
@@ -439,8 +496,45 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
             ui.label(RichText::new("My Stories").font(theme::semibold(18.)));
         });
         ui.add_space(12.);
+        // Desktop's MyStories: a section for each list or group they went
+        // to, newest first in each (one sent to two lists is in both).
+        let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
+        for (i, s) in mine.iter().enumerate().rev() {
+            let mut names: Vec<String> = match &s.group {
+                Some(g) => vec![app.conversation(g).map(|c| c.title.clone()).unwrap_or_else(|| "Group".into())],
+                None => {
+                    let mut ids: Vec<&str> = s.recipients.iter().flat_map(|r| r.list_ids.iter().map(String::as_str)).collect();
+                    ids.sort();
+                    ids.dedup();
+                    ids.iter()
+                        .map(|id| match app.panes.stories.lists.iter().find(|l| l.id == *id) {
+                            Some(l) if l.is_my_story() => "My Story".to_owned(),
+                            Some(l) => l.name.clone(),
+                            None if *id == langis_core::MY_STORY_ID => "My Story".to_owned(),
+                            None => "Custom story".to_owned(),
+                        })
+                        .collect()
+                }
+            };
+            if names.is_empty() {
+                names.push("My Story".into());
+            }
+            names.dedup();
+            for name in names {
+                match sections.iter_mut().find(|(n, _)| *n == name) {
+                    Some((_, list)) => list.push(i),
+                    None => sections.push((name, vec![i])),
+                }
+            }
+        }
+        sections.sort_by_key(|(n, _)| n != "My Story");
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (i, s) in mine.iter().enumerate().rev() {
+            for (section, indices) in &sections {
+                ui.add_space(8.);
+                ui.label(RichText::new(section).font(theme::semibold(14.)).color(palette.text));
+                ui.add_space(4.);
+            for &i in indices {
+                let s = &mine[i];
                 let (row, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 84.), Sense::click());
                 if r.hovered() {
                     ui.painter().rect_filled(row, CornerRadius::same(12), palette.fill);
@@ -452,7 +546,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                 if r.clicked() {
                     view = Some(i);
                 }
-                let menu = egui::Id::unique(("my-story-menu", s.id));
+                let menu = egui::Id::unique(("my-story-menu", s.id, section.as_str()));
                 if r.secondary_clicked()
                     && let Some(at) = r.interact_pointer_pos()
                 {
@@ -473,6 +567,7 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
                     }
                 });
             }
+            }
         });
     });
     if let Some(i) = view {
@@ -485,9 +580,9 @@ fn my_stories(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec
 }
 
 /// Paints a story's content into `rect`.
-fn paint_story(ui: &Ui, s: &Story, rect: Rect) {
+fn paint_story(ui: &Ui, s: &Story, rect: Rect) -> Option<Rect> {
     match &s.content {
-        StoryContent::Text(t) => paint_text_story(ui, t, rect),
+        StoryContent::Text(t) => paint_text_story(ui, t, rect, None).card,
         StoryContent::Media { attachment, caption, .. } => {
             ui.painter().rect_filled(rect, CornerRadius::same(12), Color32::BLACK);
             match &attachment.local_path {
@@ -512,46 +607,135 @@ fn paint_story(ui: &Ui, s: &Story, rect: Rect) {
                 ui.painter().rect_filled(Rect::from_min_size(at - Vec2::splat(6.), galley.size() + Vec2::splat(12.)), CornerRadius::same(8), Color32::from_black_alpha(120));
                 ui.painter().galley(at, galley, Color32::WHITE);
             }
+            None
         }
     }
 }
 
-fn paint_text_story(ui: &Ui, t: &TextStory, rect: Rect) {
+/// A text story's link card: what it's titled, where it goes, and its
+/// picture (a sent story's file, or a draft's bytes).
+pub struct Card {
+    pub title: String,
+    pub url: String,
+    pub image: Option<egui::ImageSource<'static>>,
+}
+
+impl Card {
+    fn of_story(p: &langis_store::LinkPreview, ctx: &egui::Context) -> Self {
+        let image = p.image.as_ref().and_then(|i| i.local_path.as_deref()).map(|path| crate::thumbs::uri(ctx, path, Vec2::splat(96.)));
+        Self { title: p.title.clone().unwrap_or_default(), url: p.url.clone(), image: image.map(|u| egui::ImageSource::Uri(u.into())) }
+    }
+
+    fn of_draft(p: &langis_core::LinkPreviewDraft) -> Self {
+        let image = p.image.as_ref().map(|i| egui::ImageSource::Bytes { uri: format!("bytes://story-link/{}", p.url).into(), bytes: i.bytes.to_vec().into() });
+        Self { title: p.title.clone(), url: p.url.clone(), image }
+    }
+}
+
+fn domain(url: &str) -> String {
+    url.split("://").nth(1).and_then(|r| r.split(['/', '?', '#']).next()).unwrap_or(url).trim_start_matches("www.").to_owned()
+}
+
+/// A gradient over `rect` at a CSS angle (0 runs bottom to top, 90 left to
+/// right), from the first color to the last.
+fn paint_gradient(ui: &Ui, rect: Rect, colors: &[u32], angle: u32) {
+    let (from, to) = (argb(*colors.first().unwrap_or(&0xff000000)), argb(*colors.last().unwrap_or(&0xff000000)));
+    let a = (angle as f32).to_radians();
+    let dir = Vec2::new(a.sin(), -a.cos());
+    let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+    let along = corners.map(|p| (p - rect.center()).dot(dir));
+    let (lo, hi) = along.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+    let mut mesh = egui::Mesh::default();
+    for (p, v) in corners.iter().zip(along) {
+        let t = if hi > lo { (v - lo) / (hi - lo) } else { 0. };
+        mesh.colored_vertex(*p, from.lerp_to_gamma(to, t));
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().add(egui::Shape::mesh(mesh));
+}
+
+/// A text story's font at `size` (Desktop's five; the app's own faces stand
+/// in for its serif, script and condensed ones).
+fn story_font(font: langis_store::StoryFont, size: f32) -> egui::FontId {
+    match font {
+        langis_store::StoryFont::Bold | langis_store::StoryFont::Condensed => theme::semibold(size),
+        langis_store::StoryFont::Script | langis_store::StoryFont::Serif => theme::italic(size),
+        _ => theme::medium(size),
+    }
+}
+
+/// The text's size: Desktop shrinks it as it grows.
+fn text_size(text: &str, scale: f32) -> f32 {
+    let n = text.chars().count();
+    scale * if n < 50 { 28. } else if n < 200 { 22. } else { 16. }
+}
+
+/// Where a text story's text and link card were painted.
+#[derive(Default)]
+struct Painted {
+    text: Option<Rect>,
+    card: Option<Rect>,
+}
+
+/// Paints a text story into `rect`, its link card under the text (or alone
+/// in the middle).
+fn paint_text_story(ui: &Ui, t: &TextStory, rect: Rect, draft: Option<&langis_core::LinkPreviewDraft>) -> Painted {
     match &t.background {
         StoryBackground::Color(c) => {
             ui.painter().rect_filled(rect, CornerRadius::same(12), argb(*c));
         }
-        StoryBackground::Gradient { colors, .. } => {
-            // A top to bottom blend of the first and last colors.
-            let (top, bottom) = (argb(*colors.first().unwrap_or(&0xff000000)), argb(*colors.last().unwrap_or(&0xff000000)));
-            let mut mesh = egui::Mesh::default();
-            mesh.colored_vertex(rect.left_top(), top);
-            mesh.colored_vertex(rect.right_top(), top);
-            mesh.colored_vertex(rect.right_bottom(), bottom);
-            mesh.colored_vertex(rect.left_bottom(), bottom);
-            mesh.add_triangle(0, 1, 2);
-            mesh.add_triangle(0, 2, 3);
-            ui.painter().add(egui::Shape::mesh(mesh));
-        }
+        StoryBackground::Gradient { colors, angle, .. } => paint_gradient(ui, rect, colors, *angle),
     }
+    let scale = rect.width() / 360.;
+    let card = draft.map(Card::of_draft).or_else(|| t.preview.as_ref().map(|p| Card::of_story(p, ui.ctx())));
+    let card_size = Vec2::new(rect.width() - 48. * scale, 88. * scale);
     let color = t.foreground.map(argb).unwrap_or(Color32::WHITE);
-    let size = if t.text.chars().count() < 50 { 28. } else { 20. };
-    let font = match t.font {
-        langis_store::StoryFont::Bold | langis_store::StoryFont::Condensed => theme::semibold(size),
-        langis_store::StoryFont::Script | langis_store::StoryFont::Serif => theme::italic(size),
-        _ => theme::medium(size),
-    };
-    let mut job = egui::text::LayoutJob::default();
-    crate::chat::append_with_emoji(&mut job, &t.text, egui::TextFormat { font_id: font, color, ..Default::default() });
-    job.wrap.max_width = rect.width() - 48.;
-    job.halign = egui::Align::Center;
-    let galley = ui.fonts_mut(|f| f.layout_job(job));
-    let pos = Pos2::new(rect.center().x, rect.center().y - galley.size().y / 2.);
-    if let Some(bg) = t.text_background {
-        let r = Rect::from_center_size(rect.center(), galley.size() + Vec2::new(24., 16.));
-        ui.painter().rect_filled(r, CornerRadius::same(10), argb(bg));
+    let galley = (!t.text.is_empty()).then(|| {
+        let mut job = egui::text::LayoutJob::default();
+        crate::chat::append_with_emoji(&mut job, &t.text, egui::TextFormat { font_id: story_font(t.font, text_size(&t.text, scale)), color, ..Default::default() });
+        job.wrap.max_width = rect.width() - 48. * scale;
+        job.halign = egui::Align::Center;
+        ui.fonts_mut(|f| f.layout_job(job))
+    });
+    let gap = 16. * scale;
+    let total = galley.as_ref().map_or(0., |g| g.size().y) + card.as_ref().map_or(0., |_| card_size.y + if galley.is_some() { gap } else { 0. });
+    let mut y = rect.center().y - total / 2.;
+    let mut painted = Painted::default();
+    if let Some(galley) = galley {
+        let size = galley.size();
+        if let Some(bg) = t.text_background {
+            let r = Rect::from_center_size(Pos2::new(rect.center().x, y + size.y / 2.), size + Vec2::new(24., 16.) * scale);
+            ui.painter().rect_filled(r, CornerRadius::same((10. * scale) as u8), argb(bg));
+        }
+        painted.text = Some(galley.rect.translate(Vec2::new(rect.center().x, y)));
+        ui.painter().galley(Pos2::new(rect.center().x, y), galley, color);
+        y += size.y + gap;
     }
-    ui.painter().galley(pos, galley, color);
+    let Some(card) = card else { return painted };
+    let r = Rect::from_min_size(Pos2::new(rect.center().x - card_size.x / 2., y), card_size);
+    // Desktop's TextAttachment preview: white, the picture on the left.
+    ui.painter().rect_filled(r, CornerRadius::same((12. * scale) as u8), Color32::from_white_alpha(235));
+    let mut text_left = r.left() + 12. * scale;
+    if let Some(image) = card.image {
+        let pic = Rect::from_min_size(r.min + Vec2::splat(8. * scale), Vec2::splat(r.height() - 16. * scale));
+        egui::Image::new(image).corner_radius(CornerRadius::same((8. * scale) as u8)).fit_to_exact_size(pic.size()).paint_at(ui, pic);
+        text_left = pic.right() + 10. * scale;
+    }
+    let width = r.right() - 12. * scale - text_left;
+    if width > 8. {
+        let mut job = egui::text::LayoutJob::simple(card.title, theme::semibold(14. * scale), Color32::BLACK, width);
+        job.wrap.max_rows = 2;
+        let title = ui.fonts_mut(|f| f.layout_job(job));
+        let domain = ui.painter().layout_no_wrap(domain(&card.url), theme::regular(12. * scale), Color32::from_gray(90));
+        let h = title.size().y + 4. * scale + domain.size().y;
+        let top = r.center().y - h / 2.;
+        let below = top + title.size().y + 4. * scale;
+        ui.painter().galley(Pos2::new(text_left, top), title, Color32::BLACK);
+        ui.painter().galley(Pos2::new(text_left, below), domain, Color32::from_gray(90));
+    }
+    painted.card = Some(r);
+    painted
 }
 
 /// Desktop's `StoryViewer`, in the right pane.
@@ -601,7 +785,16 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
     let height = (full.height() - 140.).max(200.);
     let width = (height * 9. / 16.).min(full.width() - 120.);
     let rect = Rect::from_center_size(Pos2::new(full.center().x, full.top() + 24. + height / 2.), Vec2::new(width, height));
-    paint_story(ui, &story, rect);
+    // A text story's link opens from its card (Desktop's TextAttachment).
+    if let Some(card) = paint_story(ui, &story, rect)
+        && let StoryContent::Text(TextStory { preview: Some(p), .. }) = &story.content
+    {
+        let hit = ui.interact(card, ui.scope_id().with("story-link"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(domain(&p.url));
+        if hit.clicked() && !langis_core::link_preview::is_link_sneaky(&p.url) {
+            app.panes.stories.paused.get_or_insert_with(Instant::now);
+            crate::chat::open_link(app, &p.url);
+        }
+    }
     if let Some(player) = app.panes.stories.player.as_mut()
         && let Some(texture) = player.texture(ui.ctx())
     {
@@ -756,6 +949,7 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
                 let text = if receipts { format!("{views} views · {} replies", story.replies.len()) } else { format!("Views off · {} replies", story.replies.len()) };
                 // Desktop's `StoryViewsNRepliesModal`, from the count.
                 if ui.add(egui::Button::new(RichText::new(text).color(Color32::WHITE)).frame(false)).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    app.panes.stories.views_tab = if receipts { 0 } else { 1 };
                     app.panes.stories.views_of = Some(story.id);
                 }
 
@@ -784,18 +978,19 @@ fn viewer(app: &mut App, ui: &mut Ui, palette: &Palette, all: &[(String, Vec<Sto
                 }
             }
         });
-        // A group story's replies, under it; ours or theirs can go.
-        if story.group.is_some() && !story.replies.is_empty() {
-            egui::ScrollArea::vertical().max_height(120.).show(ui, |ui| {
-                for r in &story.replies {
-                    let who = if r.author.is_none() { "You".to_owned() } else { r.author_name.clone().unwrap_or_default() };
-                    let text = if r.deleted { "This message was deleted.".into() } else { r.emoji.clone().unwrap_or_else(|| r.body.clone()) };
-                    let label = ui.add(egui::Label::new(RichText::new(format!("{who}: {text}")).color(Color32::from_white_alpha(220))).sense(Sense::click()));
-                    if !r.deleted {
-                        reply_menu(app, &label, story.id, r);
-                    }
-                }
-            });
+        // A group story's replies open Desktop's modal from their count.
+        if !mine && story.group.is_some() {
+            let n = story.replies.len();
+            let text = match n {
+                0 => "Reply to Group".to_owned(),
+                1 => "1 reply".to_owned(),
+                n => format!("{n} replies"),
+            };
+            ui.add_space(6.);
+            if ui.add(egui::Button::new(RichText::new(text).font(theme::semibold(13.)).color(Color32::WHITE)).frame(false)).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                app.panes.stories.views_tab = 1;
+                app.panes.stories.views_of = Some(story.id);
+            }
         }
     });
     if open_picker {
@@ -927,28 +1122,60 @@ fn reply_menu(app: &mut App, label: &egui::Response, story: i64, r: &langis_stor
     }
 }
 
-/// Desktop's `StoryViewsNRepliesModal`: who viewed our story (when view
-/// receipts are on) and the replies to it.
+/// Desktop's `StoryViewsNRepliesModal`: for ours, Views and Replies tabs
+/// (Views only with view receipts on); for a group story, the replies with
+/// a field to add one.
 fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
     if app.panes.stories.views_of != Some(story.id) {
         return;
     }
     let palette = Palette::of(ui.ctx());
-    let mut done = false;
+    let mine = story.author.is_none();
     let receipts = app.panes.stories.receipts;
-    let closed = modal(ui, "story-views", 400., |ui| {
-        title(ui, if receipts { "Views and replies" } else { "Replies" });
-        egui::ScrollArea::vertical().max_height(420.).show(ui, |ui| {
-            if receipts {
-                ui.label(RichText::new(format!("Views ({})", story.views.len())).font(theme::semibold(14.)));
+    let views = mine && receipts;
+    let replies = story.group.is_some() || !story.replies.is_empty();
+    let tab = if !views { 1 } else if !replies { 0 } else { app.panes.stories.views_tab };
+    let closed = modal(ui, "story-views", 420., |ui| {
+        if views && replies {
+            // The tabs, as Desktop's `Tabs` (underlined, centered).
+            ui.horizontal(|ui| {
+                let half = (ui.available_width() - 28.) / 2.;
+                for (i, label) in ["Views", "Replies"].iter().enumerate() {
+                    let (r, hit) = ui.allocate_exact_size(Vec2::new(half, 32.), Sense::click());
+                    let on = tab == i;
+                    ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, *label, theme::semibold(14.), if on { palette.text } else { palette.text_secondary });
+                    if on {
+                        ui.painter().hline(r.x_range().shrink(half / 4.), r.bottom() - 1., Stroke::new(2., palette.text));
+                    }
+                    if hit.clicked() {
+                        app.panes.stories.views_tab = i;
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::icon_button(ui, Icon::X, 18., "Close").clicked() {
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("langis-modal-close"), true));
+                    }
+                });
+            });
+            ui.add_space(12.);
+        } else {
+            title(ui, if views { "Views" } else { "Replies" });
+        }
+        egui::ScrollArea::vertical().max_height(420.).min_scrolled_height(200.).auto_shrink([false, true]).show(ui, |ui| {
+            if tab == 0 {
                 if story.views.is_empty() {
-                    body(ui, &palette, "No views yet");
+                    ui.add_space(24.);
+                    ui.vertical_centered(|ui| body(ui, &palette, "No views yet"));
                 }
                 for v in &story.views {
                     ui.horizontal(|ui| {
+                        ui.set_min_height(44.);
                         let name = app.name(&v.viewer);
-                        let color = v.viewer.bytes().fold(0u8, |a, b| a.wrapping_add(b));
-                        widgets::avatar(ui, &widgets::AvatarSpec::person(&name, color), 28.);
+                        match app.conversation(&ConversationId::direct(&v.viewer)) {
+                            Some(c) => widgets::avatar(ui, &widgets::AvatarSpec::of(c), 36.),
+                            None => widgets::avatar(ui, &widgets::AvatarSpec::person(&name, v.viewer.bytes().fold(0u8, |a, b| a.wrapping_add(b))), 36.),
+                        };
+                        ui.add_space(4.);
                         ui.label(RichText::new(name).font(theme::regular(14.)));
                         if let Some(at) = v.at {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -957,27 +1184,71 @@ fn views_modal(app: &mut App, ui: &mut Ui, story: &Story) {
                         }
                     });
                 }
-                ui.add_space(12.);
             } else {
-                body(ui, &palette, "View receipts are off. Turn them on in Story privacy to see who viewed your stories.");
-                ui.add_space(8.);
-            }
-            ui.label(RichText::new(format!("Replies ({})", story.replies.len())).font(theme::semibold(14.)));
-            for r in &story.replies {
-                let who = if r.author.is_none() { "You".to_owned() } else { r.author_name.clone().unwrap_or_default() };
-                let text = if r.deleted { "This message was deleted.".into() } else { r.emoji.clone().unwrap_or_else(|| r.body.clone()) };
-                let label = ui.add(egui::Label::new(RichText::new(format!("{who}: {text}")).font(theme::regular(14.))).sense(Sense::click()));
-                if !r.deleted {
-                    reply_menu(app, &label, story.id, r);
+                if story.replies.is_empty() {
+                    ui.add_space(24.);
+                    ui.vertical_centered(|ui| body(ui, &palette, "No replies yet"));
+                }
+                for r in &story.replies {
+                    reply_row(app, ui, &palette, story.id, r);
                 }
             }
         });
-        if buttons(ui, &["Done"]).is_some() {
-            done = true;
+        // Desktop's reply composer, for a group story's replies.
+        if tab == 1 && story.group.is_some() && (story.allows_replies || mine) {
+            ui.add_space(10.);
+            ui.horizontal(|ui| {
+                let field = ui.add(egui::TextEdit::singleline(&mut app.panes.stories.reply).hint_text("Reply to Group").desired_width(ui.available_width() - 64.));
+                let send = widgets::pill_button(ui, "Send", true).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                if send && !app.panes.stories.reply.trim().is_empty() {
+                    let body = std::mem::take(&mut app.panes.stories.reply);
+                    app.send(Command::ReplyToStory { id: story.id, body: body.trim().to_owned(), emoji: None });
+                }
+            });
         }
     });
-    if done || closed {
+    if closed {
         app.panes.stories.views_of = None;
+    }
+}
+
+/// A reply in `StoryViewsNRepliesModal`: the avatar, the name in its color
+/// and the time, then the text (or "Reacted to the story" with the emoji).
+fn reply_row(app: &mut App, ui: &mut Ui, palette: &Palette, story: i64, r: &langis_store::StoryReply) {
+    let row = ui.horizontal_top(|ui| {
+        let (name, color) = match &r.author {
+            None => ("You".to_owned(), palette.text),
+            Some(a) => (r.author_name.clone().unwrap_or_else(|| app.name(a)), theme::name_color(a, palette.dark)),
+        };
+        match r.author.as_ref().and_then(|a| app.conversation(&ConversationId::direct(a))) {
+            Some(c) => widgets::avatar(ui, &widgets::AvatarSpec::of(c), 28.),
+            None if r.author.is_none() => widgets::avatar(ui, &widgets::AvatarSpec { photo: app.me.1.as_deref(), ..widgets::AvatarSpec::person(&app.me.0, 0) }, 28.),
+            None => widgets::avatar(ui, &widgets::AvatarSpec::person(&name, 0), 28.),
+        };
+        ui.add_space(4.);
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(name).font(theme::semibold(13.)).color(color));
+                ui.label(RichText::new(crate::format::short_timestamp(r.sent_at)).font(theme::regular(12.)).color(palette.text_secondary));
+            });
+            if r.deleted {
+                ui.label(RichText::new("This message was deleted.").font(theme::italic(14.)).color(palette.text_secondary));
+            } else if let Some(emoji) = &r.emoji {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Reacted to the story").font(theme::regular(14.)).color(palette.text_secondary));
+                    let mut job = egui::text::LayoutJob::default();
+                    crate::chat::append_with_emoji(&mut job, emoji, egui::TextFormat { font_id: theme::regular(20.), color: palette.text, ..Default::default() });
+                    ui.label(job);
+                });
+            } else {
+                ui.add(egui::Label::new(RichText::new(&r.body).font(theme::regular(14.))).wrap());
+            }
+        });
+    });
+    ui.add_space(8.);
+    if !r.deleted {
+        let hit = ui.interact(row.response.rect, ui.scope_id().with(("reply", r.sent_at)), Sense::click());
+        reply_menu(app, &hit, story, r);
     }
 }
 
@@ -996,14 +1267,17 @@ fn target_label(app: &App, t: &StoryTarget) -> String {
     }
 }
 
-/// Desktop's `TextStoryCreator` and media story sending, with where to send.
+/// Desktop's `TextStoryCreator` limit.
+const TEXT_MAX: usize = 700;
+
+/// Desktop's `StoryCreator`, over the whole window: the story large in the
+/// middle, typed on directly, with the font, text style, background and
+/// link buttons under it and Next, which opens `SendStoryModal`.
 fn composer(app: &mut App, ui: &mut Ui) {
     let Some(mut c) = app.panes.stories.composer.take() else { return };
-    let palette = Palette::of(ui.ctx());
-    let mut answer = None;
-    // A text story's first link gets its preview, as Desktop's does.
+    // A text story's link (added, or the text's first) gets its preview.
     if c.media.is_none() {
-        let link = langis_core::link_preview::first_previewable(&c.text);
+        let link = c.link.clone().or_else(|| langis_core::link_preview::first_previewable(&c.text));
         if link != c.preview_for {
             c.preview = None;
             c.preview_for = link.clone();
@@ -1012,169 +1286,290 @@ fn composer(app: &mut App, ui: &mut Ui) {
             }
         }
     }
-    let closed = modal(ui, "story-composer", 600., |ui| {
-        title(ui, "New story");
-        ui.horizontal(|ui| {
-            // The preview, 9:16.
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(200., 356.), Sense::hover());
-            match &c.media {
-                Some((bytes, content_type, name)) => {
-                    ui.painter().rect_filled(rect, CornerRadius::same(12), Color32::BLACK);
-                    if content_type.starts_with("image/") {
-                        egui::Image::new(egui::ImageSource::Bytes { uri: format!("bytes://story-media/{name}").into(), bytes: bytes.to_vec().into() })
-                            .corner_radius(CornerRadius::same(12))
-                            .fit_to_exact_size(rect.size())
-                            .paint_at(ui, rect);
-                    } else {
-                        theme::paint_symbol(ui.painter(), "videocamera", rect.center() - Vec2::new(0., 14.), 28., Color32::WHITE);
-                        ui.painter().text(rect.center() + Vec2::new(0., 16.), egui::Align2::CENTER_CENTER, name, theme::regular(12.), Color32::WHITE);
-                    }
-                    if !c.text.is_empty() {
-                        let g = ui.painter().layout(c.text.clone(), theme::regular(12.), Color32::WHITE, rect.width() - 20.);
-                        let at = Pos2::new(rect.left() + 10., rect.bottom() - g.size().y - 10.);
-                        ui.painter().rect_filled(Rect::from_min_size(at - Vec2::splat(4.), g.size() + Vec2::splat(8.)), CornerRadius::same(6), Color32::from_black_alpha(120));
-                        ui.painter().galley(at, g, Color32::WHITE);
+    let screen = ui.ctx().content_rect();
+    let mut close = false;
+    let empty = c.media.is_none() && c.text.trim().is_empty() && c.link.is_none();
+    egui::Area::new(egui::Id::unique("story-creator")).fixed_pos(screen.min).order(egui::Order::Middle).show(ui.ctx(), |ui| {
+        ui.set_min_size(screen.size());
+        ui.set_max_size(screen.size());
+        let full = screen;
+        // The whole window is the creator's: clicks don't reach what's under.
+        ui.interact(full, ui.scope_id().with("story-creator-bg"), Sense::click());
+        ui.painter().rect_filled(full, 0, Color32::from_gray(18));
+        let x = Rect::from_min_size(full.min + Vec2::splat(12.), Vec2::splat(40.));
+        let x_hit = ui.interact(x, ui.scope_id().with("story-creator-x"), Sense::click());
+        if x_hit.hovered() {
+            ui.painter().circle_filled(x.center(), 20., Color32::from_white_alpha(30));
+        }
+        theme::paint_symbol(ui.painter(), "x", x.center(), 22., Color32::WHITE);
+        let busy = c.sending || c.new_group.is_some() || c.link_field.is_some() || c.confirm_discard;
+        if x_hit.on_hover_text("Close").clicked() || (!busy && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+            close = true;
+        }
+        let height = (full.height() - 120.).max(240.);
+        let width = (height * 9. / 16.).min(full.width() - 120.);
+        let rect = Rect::from_center_size(Pos2::new(full.center().x, full.top() + 24. + height / 2.), Vec2::new(width, height));
+        match c.media.clone() {
+            Some((bytes, content_type, name)) => {
+                ui.painter().rect_filled(rect, CornerRadius::same(12), Color32::BLACK);
+                if content_type.starts_with("image/") {
+                    egui::Image::new(egui::ImageSource::Bytes { uri: format!("bytes://story-media/{name}").into(), bytes: bytes.to_vec().into() })
+                        .corner_radius(CornerRadius::same(12))
+                        .fit_to_exact_size(rect.size())
+                        .paint_at(ui, rect);
+                } else {
+                    theme::paint_symbol(ui.painter(), "videocamera", rect.center() - Vec2::new(0., 16.), 32., Color32::WHITE);
+                    ui.painter().text(rect.center() + Vec2::new(0., 18.), egui::Align2::CENTER_CENTER, name, theme::regular(14.), Color32::WHITE);
+                }
+                // The caption, along the bottom.
+                let field = Rect::from_min_max(Pos2::new(rect.left() + 12., rect.bottom() - 52.), Pos2::new(rect.right() - 12., rect.bottom() - 12.));
+                ui.painter().rect_filled(field, CornerRadius::same(20), Color32::from_black_alpha(140));
+                ui.put(
+                    field.shrink2(Vec2::new(14., 8.)),
+                    egui::TextEdit::singleline(&mut c.text).frame(egui::Frame::NONE).hint_text(RichText::new("Add a caption").color(Color32::from_white_alpha(160))).text_color(Color32::WHITE).font(theme::regular(14.)).char_limit(TEXT_MAX),
+                );
+            }
+            None => {
+                // The story as it'll look, its text laid out (unseen) for
+                // the pill and the card; the field types over it.
+                let shown = if c.text.is_empty() { " ".to_owned() } else { c.text.clone() };
+                let mut story = c.text_story(shown);
+                let color = story.foreground.map(argb).unwrap_or(Color32::WHITE);
+                story.foreground = Some(0);
+                let painted = paint_text_story(ui, &story, rect, c.preview.as_ref());
+                if let Some(text_rect) = painted.text {
+                    let scale = rect.width() / 360.;
+                    let font = story_font(c.font, text_size(&c.text, scale));
+                    let wrap = rect.width() - 48. * scale;
+                    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _: f32| {
+                        let mut job = egui::text::LayoutJob::default();
+                        crate::chat::append_with_emoji(&mut job, text.as_str(), egui::TextFormat { font_id: font.clone(), color, ..Default::default() });
+                        job.wrap.max_width = wrap;
+                        job.halign = egui::Align::Center;
+                        ui.fonts_mut(|f| f.layout_job(job))
+                    };
+                    let field = Rect::from_center_size(Pos2::new(rect.center().x, text_rect.center().y), Vec2::new(wrap, text_rect.height().max(font.size * 1.3)));
+                    let id = egui::Id::unique("story-creator-text");
+                    ui.put(
+                        field,
+                        egui::TextEdit::multiline(&mut c.text)
+                            .id(id)
+                            .frame(egui::Frame::NONE)
+                            .margin(0)
+                            .desired_rows(1)
+                            .align(egui::Align2::CENTER_TOP)
+                            .hint_text(RichText::new("Add text").font(font.clone()).color(color.gamma_multiply(0.6)))
+                            .char_limit(TEXT_MAX)
+                            .layouter(&mut layouter),
+                    );
+                    if !busy && !ui.memory(|m| m.has_focus(id)) && ui.memory(|m| m.focused().is_none()) {
+                        ui.memory_mut(|m| m.request_focus(id));
                     }
                 }
-                None => {
-                    let story = c.text_story(if c.text.is_empty() { "Add text".into() } else { c.text.clone() });
-                    paint_text_story(ui, &story, rect);
-                    if let Some(p) = &c.preview {
-                        // The link's card at the bottom (Desktop's TextAttachment).
-                        let card = Rect::from_min_size(Pos2::new(rect.left() + 10., rect.bottom() - 62.), Vec2::new(rect.width() - 20., 52.));
-                        ui.painter().rect_filled(card, CornerRadius::same(8), Color32::from_white_alpha(230));
-                        let mut job = egui::text::LayoutJob::simple_singleline(p.title.clone(), theme::semibold(11.), Color32::BLACK);
-                        job.wrap = egui::text::TextWrapping::truncate_at_width(card.width() - 16.);
-                        let g = ui.fonts_mut(|f| f.layout_job(job));
-                        ui.painter().galley(card.min + Vec2::new(8., 8.), g, Color32::BLACK);
-                        let domain = p.url.split("://").nth(1).and_then(|r| r.split('/').next()).unwrap_or(&p.url).to_owned();
-                        ui.painter().text(card.min + Vec2::new(8., 28.), egui::Align2::LEFT_TOP, domain, theme::regular(10.), Color32::from_gray(90));
+                // Desktop's counter, as the limit nears.
+                let left = TEXT_MAX.saturating_sub(c.text.chars().count());
+                if left <= 100 {
+                    ui.painter().text(rect.right_bottom() + Vec2::new(-12., -12.), egui::Align2::RIGHT_BOTTOM, left.to_string(), theme::regular(13.), if left <= 20 { theme::rgb(0xff4a3a) } else { Color32::from_white_alpha(200) });
+                }
+                // The card's X removes the link.
+                if let Some(card) = painted.card {
+                    let x = Rect::from_center_size(card.right_top() + Vec2::new(-4., 4.), Vec2::splat(22.));
+                    let hit = ui.interact(x, ui.scope_id().with("story-creator-unlink"), Sense::click());
+                    ui.painter().circle_filled(x.center(), 11., Color32::from_gray(if hit.hovered() { 70 } else { 40 }));
+                    theme::paint_symbol(ui.painter(), "x", x.center(), 14., Color32::WHITE);
+                    if hit.on_hover_text("Remove link").clicked() {
+                        c.link = None;
+                        c.preview = None;
+                        // A link in the text stays without its card.
+                        c.preview_for = langis_core::link_preview::first_previewable(&c.text);
                     }
                 }
             }
-            ui.add_space(12.);
-            ui.vertical(|ui| {
-                if c.media.is_none() {
-                    ui.add(egui::TextEdit::multiline(&mut c.text).hint_text("Add text").desired_rows(4).desired_width(340.));
-                    ui.add_space(6.);
-                    // The font and text style buttons.
-                    ui.horizontal(|ui| {
-                        let font_name = match c.font {
-                            langis_store::StoryFont::Bold => "Bold",
-                            langis_store::StoryFont::Serif => "Serif",
-                            langis_store::StoryFont::Script => "Script",
-                            langis_store::StoryFont::Condensed => "Condensed",
-                            _ => "Regular",
-                        };
-                        if widgets::pill_button(ui, &format!("Font: {font_name}"), false).clicked() {
-                            let i = FONTS.iter().position(|f| *f == c.font).unwrap_or(0);
-                            c.font = FONTS[(i + 1) % FONTS.len()];
-                        }
-                        let style = ["White text", "Black text", "On white", "On black"][c.text_style % 4];
-                        if widgets::pill_button(ui, style, false).clicked() {
-                            c.text_style = (c.text_style + 1) % 4;
-                        }
-                    });
-                    ui.add_space(6.);
-                    // Solid colors, then gradients.
-                    ui.horizontal_wrapped(|ui| {
-                        for i in 0..BACKGROUNDS.len() + GRADIENTS.len() {
-                            let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.), Sense::click());
-                            if i < BACKGROUNDS.len() {
-                                ui.painter().circle_filled(r.center(), 12., argb(BACKGROUNDS[i]));
-                            } else {
-                                let (a, b) = GRADIENTS[i - BACKGROUNDS.len()];
-                                ui.painter().circle_filled(r.center(), 12., argb(a));
-                                let half = Rect::from_min_max(Pos2::new(r.left(), r.center().y), r.max);
-                                ui.painter().with_clip_rect(half).circle_filled(r.center(), 12., argb(b));
-                            }
-                            if i == c.background {
-                                ui.painter().circle_stroke(r.center(), 13., Stroke::new(2., palette.text));
-                            }
-                            if resp.clicked() {
-                                c.background = i;
-                            }
-                        }
-                    });
-                    if c.preview.is_some() && ui.link("Remove link preview").clicked() {
-                        c.preview = None;
-                    }
+        }
+        // The buttons under the story: Desktop's TextStoryCreator toolbar,
+        // then Next.
+        let bar = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() + 16.), Pos2::new(rect.right(), rect.bottom() + 56.));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+            let round = |ui: &mut Ui, tip: &str, paint: &dyn Fn(&egui::Painter, Pos2)| {
+                let (r, hit) = ui.allocate_exact_size(Vec2::splat(36.), Sense::click());
+                ui.painter().circle_filled(r.center(), 18., Color32::from_white_alpha(if hit.hovered() { 45 } else { 25 }));
+                paint(ui.painter(), r.center());
+                hit.on_hover_text(tip)
+            };
+            if c.media.is_none() {
+                // Font: "Aa" in the font itself; a click moves to the next.
+                let font = c.font;
+                if round(ui, "Font", &|p, at| {
+                    p.text(at, egui::Align2::CENTER_CENTER, "Aa", story_font(font, 15.), Color32::WHITE);
+                })
+                .clicked()
+                {
+                    let i = FONTS.iter().position(|f| *f == c.font).unwrap_or(0);
+                    c.font = FONTS[(i + 1) % FONTS.len()];
                 }
-                ui.add_space(6.);
-                if ui.link(if c.media.is_some() { "Use text instead" } else { "Choose a photo or video" }).clicked() {
-                    if c.media.is_some() {
-                        c.media = None;
-                    } else if let Some(path) = rfd::FileDialog::new().add_filter("Media", &["png", "jpg", "jpeg", "webp", "gif", "mp4", "mov"]).pick_file()
-                        && let Ok(bytes) = std::fs::read(&path)
-                    {
-                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                        let content_type = match ext.as_str() {
-                            "png" => "image/png",
-                            "webp" => "image/webp",
-                            "gif" => "image/gif",
-                            "mp4" => "video/mp4",
-                            "mov" => "video/quicktime",
-                            _ => "image/jpeg",
-                        };
-                        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        c.media = Some((std::sync::Arc::new(bytes), content_type.into(), name));
+                // Text style: white, black, on white, on black.
+                let style = c.text_style % 4;
+                if round(ui, "Text style", &|p, at| {
+                    let (fg, bg) = [(Color32::WHITE, None), (Color32::BLACK, None), (Color32::BLACK, Some(Color32::WHITE)), (Color32::WHITE, Some(Color32::BLACK))][style];
+                    if let Some(bg) = bg {
+                        p.rect_filled(Rect::from_center_size(at, Vec2::new(22., 18.)), CornerRadius::same(4), bg);
+                    } else if fg == Color32::BLACK {
+                        p.circle_filled(at, 12., Color32::from_white_alpha(200));
                     }
+                    p.text(at, egui::Align2::CENTER_CENTER, "A", theme::semibold(14.), fg);
+                })
+                .clicked()
+                {
+                    c.text_style = (c.text_style + 1) % 4;
                 }
-                if c.media.is_some() {
-                    ui.add(egui::TextEdit::singleline(&mut c.text).hint_text("Add a caption").desired_width(340.));
-                }
-                ui.add_space(10.);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Send to").font(theme::semibold(13.)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Desktop's New group story.
-                        if ui.link("New group story").clicked() {
-                            c.new_group = Some((Vec::new(), String::new()));
+                // Background: its swatch; a click moves to the next.
+                let background = c.story_background();
+                if round(ui, "Background", &|p, at| {
+                    let r = Rect::from_center_size(at, Vec2::splat(20.));
+                    match &background {
+                        StoryBackground::Color(col) => {
+                            p.circle_filled(at, 10., argb(*col));
                         }
-                    });
-                });
-                // Groups offered: those added to stories (`Always`), and any
-                // with stories up now (`IfActive`), not removed (`Never`).
-                let modes = app.panes.stories.send_modes.clone();
-                let with_stories: Vec<ConversationId> = app.panes.stories.list.iter().filter_map(|s| s.group.clone()).collect();
-                let offered = |g: &langis_store::Conversation| match modes.iter().find(|(id, _)| *id == g.id).map(|(_, m)| *m) {
-                    Some(langis_store::StorySendMode::Always) => true,
-                    Some(langis_store::StorySendMode::Never) => false,
-                    _ => with_stories.contains(&g.id),
-                };
-                let mut options = vec![StoryTarget::MyStory];
-                options.extend(app.panes.stories.lists.iter().filter(|l| !l.is_my_story()).map(|l| StoryTarget::List(l.id.clone())));
-                let groups: Vec<ConversationId> = app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left && offered(g)).map(|g| g.id.clone()).collect();
-                options.extend(groups.iter().cloned().map(StoryTarget::Group));
-                let mut remove: Option<ConversationId> = None;
-                egui::ScrollArea::vertical().max_height(150.).show(ui, |ui| {
-                    for t in options {
-                        ui.horizontal(|ui| {
-                            let mut on = c.targets.contains(&t);
-                            if ui.checkbox(&mut on, target_label(app, &t)).changed() {
-                                if on {
-                                    c.targets.push(t.clone());
-                                } else {
-                                    c.targets.retain(|x| *x != t);
-                                }
-                            }
-                            // Desktop's Remove group story.
-                            if let StoryTarget::Group(g) = &t
-                                && ui.small_button("Remove").on_hover_text("Remove this group story").clicked()
-                            {
-                                remove = Some(g.clone());
-                            }
-                        });
+                        StoryBackground::Gradient { colors, .. } => {
+                            p.circle_filled(at, 10., argb(colors[0]));
+                            p.with_clip_rect(Rect::from_min_max(Pos2::new(r.left(), at.y), r.max)).circle_filled(at, 10., argb(*colors.last().unwrap_or(&colors[0])));
+                        }
                     }
-                });
-                if let Some(g) = remove {
-                    app.send(Command::SetStorySendMode { groups: vec![g.clone()], mode: langis_store::StorySendMode::Never });
-                    c.targets.retain(|t| *t != StoryTarget::Group(g.clone()));
-                    app.panes.stories.send_modes.retain(|(id, _)| *id != g);
-                    app.panes.stories.send_modes.push((g, langis_store::StorySendMode::Never));
+                    p.circle_stroke(at, 10., Stroke::new(2., Color32::WHITE));
+                })
+                .clicked()
+                {
+                    c.background = (c.background + 1) % (BACKGROUNDS.len() + GRADIENTS.len());
+                }
+                // Link: Desktop's popover to type or paste one.
+                let link = round(ui, "Add link", &|p, at| theme::paint_symbol(p, "link", at, 18., Color32::WHITE));
+                if link.clicked() {
+                    c.link_field = Some(c.link.clone().unwrap_or_default());
+                }
+            } else if widgets::pill_button(ui, "Use text instead", false).clicked() {
+                c.media = None;
+                c.text.clear();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let ready = !empty;
+                let next = ui.add_enabled(ready, egui::Button::new(RichText::new("Next").font(theme::medium(14.)).color(Color32::WHITE)).fill(theme::rgb(0x4655ff)).corner_radius(CornerRadius::same(18)).min_size(Vec2::new(80., 36.)));
+                if next.clicked() {
+                    c.sending = true;
                 }
             });
         });
+        // The link popover, above the bar.
+        if let Some(mut field) = c.link_field.take() {
+            let at = Pos2::new(bar.left(), bar.top() - 8.);
+            let mut keep = true;
+            egui::Area::new(egui::Id::unique("story-creator-link")).fixed_pos(at).pivot(egui::Align2::LEFT_BOTTOM).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+                egui::Frame::new().fill(Color32::from_gray(46)).corner_radius(CornerRadius::same(8)).inner_margin(12).show(ui, |ui| {
+                    ui.set_width(bar.width().max(280.) - 24.);
+                    let r = ui.add(egui::TextEdit::singleline(&mut field).hint_text("Type or paste a URL").text_color(Color32::WHITE).desired_width(f32::INFINITY));
+                    r.request_focus();
+                    ui.add_space(8.);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let done = ui.add(egui::Button::new(RichText::new("Done").color(Color32::WHITE)).fill(theme::rgb(0x4655ff)).corner_radius(CornerRadius::same(14))).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if done {
+                            let url = field.trim();
+                            let url = if url.is_empty() || url.contains("://") { url.to_owned() } else { format!("https://{url}") };
+                            c.link = (!url.is_empty() && !langis_core::link_preview::is_link_sneaky(&url)).then_some(url);
+                            if c.link.is_none() && !field.trim().is_empty() {
+                                app.toast("That link can't be previewed.");
+                            }
+                            keep = false;
+                        }
+                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            keep = false;
+                        }
+                    });
+                });
+            });
+            if keep {
+                c.link_field = Some(field);
+            }
+        }
+    });
+    if close {
+        if empty {
+            return;
+        }
+        c.confirm_discard = true;
+    }
+    if c.confirm_discard {
+        match crate::dialog::confirm(ui.ctx(), egui::Id::unique("discard-story"), "", "Are you sure you want to discard this story?", "Discard", crate::dialog::Variant::StrongDestructive) {
+            Some(crate::dialog::Choice::Action) => return,
+            Some(crate::dialog::Choice::Cancel) => c.confirm_discard = false,
+            None => {}
+        }
+    }
+    if c.sending && send_modal(app, ui, &mut c) {
+        return;
+    }
+    app.panes.stories.composer = Some(c);
+}
+
+/// Desktop's `SendStoryModal`: where the story goes (My Story, custom
+/// stories, group stories, with New group story), then Send story. True
+/// once it's sent.
+fn send_modal(app: &mut App, ui: &mut Ui, c: &mut Composer) -> bool {
+    let mut answer = None;
+    let closed = modal(ui, "story-send", 380., |ui| {
+        title(ui, "Send story");
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Send to").font(theme::semibold(13.)));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.link("New group story").clicked() {
+                    c.new_group = Some((Vec::new(), String::new()));
+                }
+            });
+        });
+        ui.add_space(6.);
+        // Groups offered: those added to stories (`Always`), and any with
+        // stories up now (`IfActive`), not removed (`Never`).
+        let modes = app.panes.stories.send_modes.clone();
+        let with_stories: Vec<ConversationId> = app.panes.stories.list.iter().filter_map(|s| s.group.clone()).collect();
+        let offered = |g: &langis_store::Conversation| match modes.iter().find(|(id, _)| *id == g.id).map(|(_, m)| *m) {
+            Some(langis_store::StorySendMode::Always) => true,
+            Some(langis_store::StorySendMode::Never) => false,
+            _ => with_stories.contains(&g.id),
+        };
+        let mut options = vec![StoryTarget::MyStory];
+        options.extend(app.panes.stories.lists.iter().filter(|l| !l.is_my_story()).map(|l| StoryTarget::List(l.id.clone())));
+        let groups: Vec<ConversationId> = app.conversations.iter().filter(|g| g.kind == langis_store::ConversationKind::Group && !g.left && offered(g)).map(|g| g.id.clone()).collect();
+        options.extend(groups.iter().cloned().map(StoryTarget::Group));
+        let mut remove: Option<ConversationId> = None;
+        egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
+            for t in options {
+                ui.horizontal(|ui| {
+                    let mut on = c.targets.contains(&t);
+                    if ui.checkbox(&mut on, target_label(app, &t)).changed() {
+                        if on {
+                            c.targets.push(t.clone());
+                        } else {
+                            c.targets.retain(|x| *x != t);
+                        }
+                    }
+                    if let StoryTarget::Group(g) = &t {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let more = widgets::icon_button(ui, Icon::More, 16., "More");
+                            crate::menu::dropdown(ui, &more, egui::Id::unique(("story-group-menu", g.0.as_str())), |m| {
+                                if m.item(Some("minus-circle"), "Remove group story") {
+                                    remove = Some(g.clone());
+                                }
+                            });
+                        });
+                    }
+                });
+            }
+        });
+        if let Some(g) = remove {
+            app.send(Command::SetStorySendMode { groups: vec![g.clone()], mode: langis_store::StorySendMode::Never });
+            c.targets.retain(|t| *t != StoryTarget::Group(g.clone()));
+            app.panes.stories.send_modes.retain(|(id, _)| *id != g);
+            app.panes.stories.send_modes.push((g, langis_store::StorySendMode::Never));
+        }
         answer = buttons(ui, &["Send story", "Cancel"]);
     });
     // New group story: pick groups, added for stories from now on.
@@ -1214,12 +1609,11 @@ fn composer(app: &mut App, ui: &mut Ui) {
         }
     }
     match answer {
+        Some(0) if c.targets.is_empty() => {
+            app.toast("Choose where to send your story.");
+            false
+        }
         Some(0) => {
-            if c.targets.is_empty() || (c.media.is_none() && c.text.trim().is_empty()) {
-                app.toast("Add some text or a photo, and choose where to send it.");
-                app.panes.stories.composer = Some(c);
-                return;
-            }
             let story = match c.media.take() {
                 Some((bytes, content_type, _)) => OutgoingStory::Media { bytes, content_type, caption: c.text.trim().to_owned(), styles: Vec::new() },
                 None => {
@@ -1227,11 +1621,18 @@ fn composer(app: &mut App, ui: &mut Ui) {
                     OutgoingStory::Text { story: Box::new(text), preview: c.preview.take() }
                 }
             };
-            app.send(Command::PostStory { story, targets: c.targets });
+            app.send(Command::PostStory { story, targets: std::mem::take(&mut c.targets) });
+            true
         }
-        Some(_) => {}
-        None if closed => {}
-        None => app.panes.stories.composer = Some(c),
+        Some(_) => {
+            c.sending = false;
+            false
+        }
+        None if closed => {
+            c.sending = false;
+            false
+        }
+        None => false,
     }
 }
 
