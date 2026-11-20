@@ -1475,8 +1475,20 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
             let q = query.trim().to_lowercase();
             let people: Vec<langis_store::Conversation> = app.conversations.iter().filter(|p| p.kind == ConversationKind::Direct && !p.blocked && (q.is_empty() || p.title.to_lowercase().contains(&q))).cloned().collect();
+            // Desktop's ChooseGroupMembersModal: someone not in the list, by
+            // their number or username.
+            let username = crate::panes::probably_username(&q);
+            let phone = !username && crate::panes::probably_phone(&q);
             egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
-                if people.is_empty() {
+                if username || phone {
+                    let shown = if username { query.trim().trim_start_matches('@').to_owned() } else { query.trim().to_owned() };
+                    if crate::panes::step_button(ui, palette, if username { "at" } else { "number" }, &shown) {
+                        let find = if username { format!("@{shown}") } else { crate::countries::with_code(crate::countries::of_number(app.phone.as_deref().unwrap_or_default()).unwrap_or("US"), &shown) };
+                        query = find.clone();
+                        app.send(Command::FindRecipient { query: find });
+                    }
+                }
+                if people.is_empty() && !(username || phone) {
                     ui.add_space(20.);
                     ui.vertical_centered(|ui| body(ui, palette, tr("No contacts found")));
                 }

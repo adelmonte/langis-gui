@@ -279,6 +279,23 @@ pub fn on_event(app: &mut App, event: Event) {
                     }
                     Err(why) => app.toast(why),
                 }
+            } else if let Some(d) = app.panes.details.as_mut()
+                && let Some((q, chosen)) = d.add_members.as_mut()
+                && q.trim() == query.trim()
+            {
+                // Add members' find by phone number or username.
+                match result {
+                    Ok(entry) => {
+                        if let Some(sid) = entry.id.as_direct()
+                            && !chosen.iter().any(|m| m == sid)
+                        {
+                            chosen.push(sid.to_owned());
+                            app.names.insert(sid.to_owned(), entry.title.clone());
+                        }
+                        q.clear();
+                    }
+                    Err(why) => app.toast(why),
+                }
             }
         }
         Event::GroupCreated(conversation) => {
@@ -1310,7 +1327,7 @@ fn message_request_confirms(app: &mut App, ctx: &egui::Context, c: &Conversation
 }
 
 /// Desktop's `isProbablyAUsername`.
-fn probably_username(text: &str) -> bool {
+pub fn probably_username(text: &str) -> bool {
     let t = text.trim();
     if t.starts_with('@') {
         return true;
@@ -1322,7 +1339,7 @@ fn probably_username(text: &str) -> bool {
     t.rsplit_once('.').is_some_and(|(name, digits)| !name.is_empty() && (2..=3).contains(&digits.len()) && digits.chars().all(|c| c.is_ascii_digit()))
 }
 
-fn probably_phone(text: &str) -> bool {
+pub fn probably_phone(text: &str) -> bool {
     let t = text.trim();
     let digits = t.chars().filter(|c| c.is_ascii_digit()).count();
     digits >= 3 && t.chars().all(|c| c.is_ascii_digit() || " -()+.".contains(c)) && !t[1..].contains('+')
@@ -1341,7 +1358,7 @@ fn tile(ui: &mut Ui, palette: &Palette, height: f32, id: egui::Id) -> (Rect, egu
 }
 
 /// `ComposeStepButton`: a 32px circle with a 20px symbol, and a title.
-fn step_button(ui: &mut Ui, palette: &Palette, symbol: &str, label: &str) -> bool {
+pub fn step_button(ui: &mut Ui, palette: &Palette, symbol: &str, label: &str) -> bool {
     let (inner, response) = tile(ui, palette, 48., egui::Id::unique("compose-step").with(label));
     let center = Pos2::new(inner.left() + 14. + 16., inner.center().y);
     let circle = if palette.dark { Color32::from_white_alpha(31) } else { Color32::from_black_alpha(15) };
