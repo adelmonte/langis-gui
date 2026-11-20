@@ -151,10 +151,12 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                 header_start(app, ui);
                 ui.label(RichText::new("Chats").font(theme::semibold(18.)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(14.);
-                    let more = widgets::icon_button(ui, Icon::More, 20., "More actions");
+                    // Desktop's LeftPane header: AxoIconButton sm, compose and more.
+                    ui.add_space(16.);
+                    ui.spacing_mut().item_spacing.x = 8.;
+                    let more = widgets::axo_icon_button_sm(ui, "more", "More actions", false);
                     crate::menu::dropdown(ui, &more, egui::Id::unique("chat-list-more"), |m| crate::panes::list_menu(app, m));
-                    if widgets::icon_button(ui, Icon::Edit, 20., "New chat").clicked() {
+                    if widgets::axo_icon_button_sm(ui, "compose", "New chat", false).clicked() {
                         app.panes.compose = Some(crate::panes::Compose::Chat { query: String::new(), searching: false, found: None });
                     }
                 });
@@ -279,25 +281,16 @@ pub fn search_id() -> egui::Id {
 }
 
 fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String, unread_only: &mut bool) {
-    let width = ui.available_width() - 16.;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::hover());
+    // Desktop's LeftPaneSearchInput: a 28px field, then the unread filter
+    // as its own small round button beside it.
+    ui.spacing_mut().item_spacing.x = 0.;
+    let width = ui.available_width() - 16. - 28. - 8.;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 28.), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
-    Icon::SearchCompactLight.paint(ui, Rect::from_min_size(rect.min, Vec2::new(32., 32.)), 16., palette.text_secondary);
-    // Desktop's unread filter, then (while there's text) its clear button.
-    let filter = Rect::from_center_size(Pos2::new(rect.right() - 16., rect.center().y), Vec2::splat(24.));
-    let fr = ui.interact(filter, ui.scope_id().with("unread-filter"), Sense::click());
-    if *unread_only {
-        ui.painter().rect_filled(filter, CornerRadius::same(6), palette.accent);
-    } else if fr.hovered() {
-        ui.painter().rect_filled(filter, CornerRadius::same(6), palette.fill_pressed);
-    }
-    theme::paint_symbol(ui.painter(), "filter", filter.center(), 16., if *unread_only { Color32::WHITE } else { palette.text_secondary });
-    if fr.on_hover_text(if *unread_only { "Show all chats" } else { "Show only unread chats" }).clicked() {
-        *unread_only = !*unread_only;
-    }
-    let mut end = filter.left() - 2.;
+    Icon::SearchCompactLight.paint(ui, Rect::from_min_size(rect.min, Vec2::new(30., 28.)), 16., palette.text_secondary);
+    let mut end = rect.right() - 4.;
     if !text.is_empty() {
-        let clear = Rect::from_center_size(Pos2::new(filter.left() - 14., rect.center().y), Vec2::splat(22.));
+        let clear = Rect::from_center_size(Pos2::new(rect.right() - 14., rect.center().y), Vec2::splat(20.));
         let cr = ui.interact(clear, ui.scope_id().with("clear-search"), Sense::click());
         theme::paint_symbol(ui.painter(), "x", clear.center(), 14., palette.text_secondary);
         if cr.on_hover_text("Clear search").clicked() {
@@ -305,15 +298,53 @@ fn search_field(ui: &mut Ui, palette: &Palette, text: &mut String, unread_only: 
         }
         end = clear.left() - 2.;
     }
-    let field = Rect::from_min_max(rect.min + Vec2::new(30., 7.), Pos2::new(end, rect.bottom() - 5.));
+    let field = Rect::from_min_max(rect.min + Vec2::new(30., 5.), Pos2::new(end, rect.bottom() - 5.));
+    let hint = if *unread_only { "Search unread chats" } else { "Search" };
     ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
-        ui.add(egui::TextEdit::singleline(text).hint_text("Search").frame(egui::Frame::NONE).desired_width(field.width()).id(search_id()));
+        ui.add(egui::TextEdit::singleline(text).hint_text(RichText::new(hint).font(theme::regular(13.))).font(theme::regular(13.)).frame(egui::Frame::NONE).desired_width(field.width()).id(search_id()));
     });
+    ui.add_space(8.);
+    let label = if *unread_only { "Show all chats" } else { "Show only unread chats" };
+    if widgets::axo_icon_button_sm(ui, "filter", label, *unread_only).clicked() {
+        *unread_only = !*unread_only;
+    }
 }
 
 /// Connection and history transfer, as Desktop's left pane dialogs.
 fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
     use langis_core::HistoryProgress as H;
+    // Desktop's DialogNetworkStatus: a yellow warning dialog the width of
+    // the pane, a 24px icon (a spinner while connecting), a bold title
+    // and a subtitle.
+    let network = match app.connection {
+        ConnectionState::Connecting => Some((None, "Connecting...", "Shouldn't be long")),
+        ConnectionState::Offline if !app.demo => Some((Some(Icon::WifiError), "Offline", "Check your network connection.")),
+        _ => None,
+    };
+    if let Some((icon, title, subtitle)) = network {
+        let black = Color32::BLACK;
+        egui::Frame::new().fill(Color32::from_rgb(0xff, 0xd6, 0x24)).inner_margin(egui::Margin { left: 16, right: 14, top: 12, bottom: 12 }).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_min_height(40.);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.;
+                let (at, _) = ui.allocate_exact_size(Vec2::splat(24.), Sense::hover());
+                match icon {
+                    Some(icon) => icon.paint(ui, at, 24., black),
+                    None => {
+                        ui.put(at.shrink(1.), egui::Spinner::new().size(22.).color(black));
+                    }
+                }
+                ui.add_space(18.);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.;
+                    ui.label(RichText::new(title).font(theme::semibold(13.)).color(black));
+                    ui.label(RichText::new(subtitle).font(theme::regular(13.)).color(black));
+                });
+            });
+        });
+        ui.add_space(6.);
+    }
     let text = match (&app.connection, &app.history) {
         (_, Some(H::Waiting)) => Some("Waiting for your phone to send your message history…".to_owned()),
         (_, Some(H::Downloading { done, total })) => Some(match total {
@@ -322,8 +353,6 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
         }),
         (_, Some(H::Importing { done, total })) if *total > 0 => Some(format!("Importing message history: {}%", done * 100 / total)),
         (_, Some(H::Failed(why))) => Some(format!("Message history transfer failed: {why}")),
-        (ConnectionState::Offline, _) if !app.demo => Some("Offline. Check your connection.".to_owned()),
-        (ConnectionState::Connecting, _) => Some("Connecting…".to_owned()),
         (ConnectionState::Syncing, _) => Some("Loading messages…".to_owned()),
         _ => None,
     };

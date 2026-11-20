@@ -9,6 +9,7 @@ pub enum Icon {
     Archive,
     ArrowDown,
     BellSlashBold,
+    WifiError,
     BellSlashFill,
     ChatFill,
     Chat,
@@ -120,6 +121,7 @@ impl Icon {
         match self {
             Icon::Archive => ("bytes://icon/archive.svg", include_bytes!("../assets/icons/archive.svg")),
             Icon::ArrowDown => ("bytes://icon/arrow-down.svg", include_bytes!("../assets/icons/arrow-down.svg")),
+            Icon::WifiError => ("bytes://icon/wifi-error.svg", include_bytes!("../assets/icons/wifi-error.svg")),
             Icon::BellSlashBold => ("bytes://icon/bell-slash-bold.svg", include_bytes!("../assets/icons/bell-slash-bold.svg")),
             Icon::BellSlashFill => ("bytes://icon/bell-slash-fill.svg", include_bytes!("../assets/icons/bell-slash-fill.svg")),
             Icon::ChatFill => ("bytes://icon/chat-fill.svg", include_bytes!("../assets/icons/chat-fill.svg")),

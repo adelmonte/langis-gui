@@ -98,6 +98,22 @@ pub fn axo_icon_button(ui: &mut Ui, symbol: &str, label: &str) -> Response {
     response.on_hover_text(label)
 }
 
+/// `AxoIconButton` size `sm`: an 18px symbol in a 28px circle; `pressed`
+/// (a toggle that's on) fills it with the accent.
+pub fn axo_icon_button_sm(ui: &mut Ui, symbol: &str, label: &str, pressed: bool) -> Response {
+    let palette = Palette::of(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.), Sense::click());
+    if pressed {
+        ui.painter().circle_filled(rect.center(), 14., palette.badge);
+    } else if response.is_pointer_button_down_on() {
+        ui.painter().circle_filled(rect.center(), 14., palette.fill_pressed);
+    } else if response.hovered() {
+        ui.painter().circle_filled(rect.center(), 14., palette.fill);
+    }
+    theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., if pressed { Color32::WHITE } else { palette.text });
+    response.on_hover_text(label)
+}
+
 /// Desktop's round button (`AxoButton`): accent-filled or quiet.
 pub fn pill_button(ui: &mut Ui, text: &str, primary: bool) -> Response {
     let palette = Palette::of(ui.ctx());
