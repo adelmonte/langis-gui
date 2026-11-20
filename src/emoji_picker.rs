@@ -44,6 +44,8 @@ pub struct Picker {
     tones_for: Option<Option<&'static Emoji>>,
     /// The emoji that asked for a default tone, picked in the tone chosen.
     then_pick: Option<&'static Emoji>,
+    /// Desktop's "This Message" section: the reactions a message has.
+    pub this_message: Vec<String>,
 }
 
 pub const CELL: f32 = 40.;
@@ -93,6 +95,10 @@ impl Picker {
             return vec![Section { title: tr("Search Results"), symbol: Some("search"), glyph: "", emoji: found }];
         }
         let mut out = Vec::new();
+        let here: Vec<&'static Emoji> = self.this_message.iter().filter_map(|e| langis_emoji::by_glyph(e).map(|(e, _)| e)).collect();
+        if !here.is_empty() {
+            out.push(Section { title: tr("This Message"), symbol: Some("heart"), glyph: "", emoji: keep(here) });
+        }
         let recents: Vec<&'static Emoji> = recent.iter().filter_map(|e| langis_emoji::by_glyph(e).map(|(e, _)| e)).collect();
         if !recents.is_empty() {
             out.push(Section { title: tr("Recently Used"), symbol: Some("recent"), glyph: "", emoji: keep(recents) });

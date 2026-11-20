@@ -320,6 +320,14 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
         Popup::Reactions { message, at, full, picker } => {
             let Some(m) = chat.iter().find(|m| m.id == *message) else { return vec![Do::Close] };
             let mine = m.reactions.iter().find(|r| r.author.is_none()).map(|r| r.emoji.clone());
+            // The full picker opens on the reactions this message has.
+            let mut here: Vec<String> = Vec::new();
+            for r in &m.reactions {
+                if !here.contains(&r.emoji) {
+                    here.push(r.emoji.clone());
+                }
+            }
+            picker.this_message = here;
             let id = *message;
             let react = |emoji: &str| {
                 let remove = mine.as_deref() == Some(emoji);
