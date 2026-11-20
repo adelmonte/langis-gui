@@ -39,6 +39,9 @@ pub struct Details {
     pub edit_info: Option<(String, String)>,
     pub nickname: Option<ContactNickname>,
     pub add_members: Option<(String, Vec<String>)>,
+    /// Desktop's GroupMembersSearchDialog: its search and filter (all,
+    /// admins, contacts).
+    pub member_search: Option<(String, usize)>,
     /// Automatic key verification: asked and waiting, and its explainer
     /// (verified or not) open.
     pub kt_running: bool,
@@ -76,6 +79,7 @@ impl Details {
             nickname: None,
             add_members: None,
             kt_running: false,
+            member_search: None,
             kt_popup: None,
             group_avatar: None,
             label: None,
@@ -517,13 +521,11 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             // list is long, and its first few until View all.
             const SHOWN: usize = 5;
             let long = everyone.len() > SHOWN;
-            if long && let Some(d) = app.panes.details.as_mut() {
-                ui.horizontal(|ui| {
-                    ui.add_space(12.);
-                    ui.set_width(ui.available_width() - 12.);
-                    widgets::text_field(ui, &mut d.member_query, tr("Search members"), false);
-                });
-                ui.add_space(4.);
+            // Desktop's search opens GroupMembersSearchDialog.
+            if long && axo_list::item(ui, Item::new(tr("Search members")).symbol("search"), End::Click).clicked()
+                && let Some(d) = app.panes.details.as_mut()
+            {
+                d.member_search = Some((String::new(), 0));
             }
             let (query, all) = app.panes.details.as_ref().map(|d| (d.member_query.trim().to_lowercase(), d.all_members)).unwrap_or_default();
             let names: Vec<(String, String)> = everyone.into_iter().map(|m| { let n = if m == me { tr("You").to_owned() } else { app.name(&m) }; (m, n) }).collect();
@@ -1229,6 +1231,74 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         }
         if open_avatar_editor {
             d.group_avatar = Some(crate::avatar_editor::AvatarEditor::new(c.avatar_path.clone(), &c.title));
+        }
+    }
+    // Desktop's GroupMembersSearchDialog.
+    if let Some((mut query, mut filter)) = d.member_search.take() {
+        let mut open_contact = None;
+        let mut add = false;
+        let mut invite = false;
+        let closed = modal(ui, "member-search", 400., |ui| {
+            title(ui, tr("Search members"));
+            ui.horizontal(|ui| {
+                let hint = [tr("Search"), tr("Search admins"), tr("Search contacts")][filter];
+                ui.add(egui::TextEdit::singleline(&mut query).hint_text(hint).desired_width(ui.available_width() - 110.));
+                let names = [tr("All members"), tr("Admins"), tr("Contacts")];
+                egui::ComboBox::from_id_salt("member-filter").selected_text(names[filter]).width(90.).show_ui(ui, |ui| {
+                    for (i, n) in names.iter().enumerate() {
+                        ui.selectable_value(&mut filter, i, *n);
+                    }
+                });
+            });
+            ui.add_space(8.);
+            let q = query.trim().to_lowercase();
+            let mut found: Vec<(String, String)> = c
+                .members
+                .iter()
+                .filter(|m| match filter {
+                    1 => c.admins.contains(m),
+                    2 => app.conversation(&ConversationId::direct(m)).is_some_and(|p| p.system_contact),
+                    _ => true,
+                })
+                .map(|m| (m.clone(), app.name(m)))
+                .filter(|(_, n)| q.is_empty() || n.to_lowercase().contains(&q))
+                .collect();
+            found.sort_by_key(|(_, n)| n.to_lowercase());
+            if !q.is_empty() && !found.is_empty() {
+                ui.label(RichText::new(tr("Search Results")).font(theme::semibold(13.)).color(palette.text_secondary));
+            }
+            egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
+                if found.is_empty() {
+                    ui.add_space(20.);
+                    let empty = if q.is_empty() { tr("No results").to_owned() } else { crate::i18n::tf("icu:GroupMembersSearchDialog__EmptyState__NoResults--WithSearchQuery", &format!("No results for \u{201c}{}\u{201d}", query.trim()), &[("searchQuery", crate::i18n::Arg::from(query.trim()))]) };
+                    ui.vertical_centered(|ui| body(ui, palette, &empty));
+                }
+                for (m, name) in &found {
+                    let p = app.conversation(&ConversationId::direct(m)).cloned();
+                    let r = member_row(ui, palette, name, None, p.as_ref().map(|p| p.color).unwrap_or(0), p.as_ref().and_then(|p| p.avatar_path.as_deref()), c.admins.contains(m).then_some(tr("Admin")));
+                    if r.clicked() {
+                        open_contact = Some(m.clone());
+                    }
+                }
+            });
+            ui.add_space(10.);
+            ui.horizontal(|ui| {
+                if c.can_add_members && widgets::axo_button(ui, tr("Add members"), widgets::Axo::SubtleSecondary).clicked() {
+                    add = true;
+                }
+                if c.admins.contains(&app.aci) && widgets::axo_button(ui, tr("Invite via group link"), widgets::Axo::SubtleSecondary).clicked() {
+                    invite = true;
+                }
+            });
+        });
+        if let Some(m) = open_contact {
+            crate::contact_modal::open(app, Some(c.id.clone()), m);
+        } else if add {
+            d.add_members = Some((String::new(), Vec::new()));
+        } else if invite {
+            d.page = Page::GroupLink;
+        } else if !closed {
+            d.member_search = Some((query, filter));
         }
     }
     // The group's AvatarEditor.
