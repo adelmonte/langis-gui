@@ -92,40 +92,67 @@ fn status_text(call: &CallUpdate) -> String {
 }
 
 /// Desktop's `IncomingCallBar`, along the top of the window.
+/// Desktop's `IncomingCallBar`: a 70px gray-75 bar (radius 8, at most 600
+/// wide, 22 from the top) with the 48px avatar, the chat's name and what's
+/// ringing, then Decline, Answer without video (for a video call) and
+/// Answer, 40px circles 24 apart.
 pub fn incoming_bar(app: &mut App, ui: &mut Ui) {
     let Some(call) = app.call.clone().filter(|c| c.incoming && c.status == CallStatus::Ringing) else { return };
     let palette = Palette::of(ui.ctx());
     let conversation = app.conversation(&call.conversation).cloned();
     let title = conversation.as_ref().map(|c| c.title.clone()).unwrap_or_default();
     let subtitle = match (&call.ringer, call.group) {
-        (Some(ringer), true) => format!("{} is calling you", app.name(ringer)),
-        _ => if call.video { "Signal video call" } else { "Signal voice call" }.into(),
+        (Some(ringer), true) => {
+            // `incomingGroupCall__ringing-*`: the ringer and up to two others.
+            let others: Vec<String> = conversation
+                .as_ref()
+                .map(|c| c.members.iter().filter(|m| *m != ringer && **m != app.aci).map(|m| app.name(m).split_whitespace().next().unwrap_or_default().to_owned()).collect())
+                .unwrap_or_default();
+            let who = app.name(ringer).split_whitespace().next().unwrap_or_default().to_owned();
+            match others.as_slice() {
+                [] => format!("{who} is calling you"),
+                [a] => format!("{who} is calling you and {a}"),
+                [a, b] => format!("{who} is calling you, {a}, and {b}"),
+                [a, b, _] => format!("{who} is calling you, {a}, {b}, and 1 other"),
+                [a, b, rest @ ..] => format!("{who} is calling you, {a}, {b}, and {} others", rest.len()),
+            }
+        }
+        _ => if call.video { "Incoming video call" } else { "Incoming voice call" }.into(),
     };
+    let width = (ui.ctx().content_rect().width() - 32.).min(600.);
     egui::Area::new(egui::Id::unique("incoming-call"))
-        .anchor(Align2::CENTER_TOP, Vec2::new(0., 12.))
+        .anchor(Align2::CENTER_TOP, Vec2::new(0., 22.))
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             egui::Frame::new()
-                .fill(palette.calling)
-                .corner_radius(CornerRadius::same(16))
-                .inner_margin(egui::Margin::symmetric(16, 12))
-                .shadow(egui::Shadow { offset: [0, 4], blur: 20, spread: 0, color: Color32::from_black_alpha(80) })
+                .fill(theme::rgb(0x3b3b3b))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(egui::Margin { left: 16, right: 16, top: 11, bottom: 11 })
+                .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(80) })
                 .show(ui, |ui| {
-                    ui.set_min_width(420.);
+                    ui.set_width(width - 32.);
                     ui.horizontal(|ui| {
                         if let Some(c) = &conversation {
-                            widgets::avatar(ui, &widgets::AvatarSpec::of(c), 40.);
+                            widgets::avatar(ui, &widgets::AvatarSpec::of(c), 48.);
                         }
+                        ui.add_space(4.);
                         ui.vertical(|ui| {
-                            ui.label(RichText::new(&title).font(theme::semibold(15.)).color(Color32::WHITE));
-                            ui.label(RichText::new(subtitle).font(theme::regular(13.)).color(Color32::from_white_alpha(200)));
+                            ui.add_space(4.);
+                            ui.label(RichText::new(&title).font(theme::semibold(14.)).color(Color32::WHITE));
+                            ui.label(RichText::new(subtitle).font(theme::regular(13.)).color(Color32::WHITE));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if call.video && round_button(ui, Icon::VideoFillLight, palette.green, "Accept with video").clicked() {
-                                app.call_view.video_on = Some(true);
-                                app.send(Command::AcceptCall { video: true });
-                            }
-                            if round_button(ui, Icon::PhoneFill, palette.green, "Accept").clicked() {
+                            ui.spacing_mut().item_spacing.x = 24.;
+                            if call.video {
+                                if round_button(ui, Icon::VideoFillLight, palette.green, "Answer call").clicked() {
+                                    app.call_view.video_on = Some(true);
+                                    app.send(Command::AcceptCall { video: true });
+                                }
+                                if round_button(ui, Icon::VideoSlashFillLight, theme::rgb(0x878787), "Answer call without video").clicked() {
+                                    app.call_view.video_on = Some(false);
+                                    app.send(Command::AcceptCall { video: false });
+                                }
+                            } else if round_button(ui, Icon::PhoneFill, palette.green, "Answer call").clicked() {
                                 app.call_view.video_on = Some(false);
                                 app.send(Command::AcceptCall { video: false });
                             }
@@ -143,7 +170,7 @@ fn round_button(ui: &mut Ui, icon: Icon, fill: Color32, tip: &str) -> egui::Resp
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(40.), Sense::click());
     let fill = if response.hovered() { fill.gamma_multiply(0.85) } else { fill };
     ui.painter().circle_filled(rect.center(), 20., fill);
-    icon.paint(ui, rect, 20., Color32::WHITE);
+    icon.paint(ui, rect, 24., Color32::WHITE);
     response.on_hover_text(tip)
 }
 
