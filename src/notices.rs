@@ -38,6 +38,11 @@ pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
         // `icu:JoinedSignal--notification`.
         Notice::JoinedSignal { .. } => tr("Contact joined Signal").into(),
         Notice::SessionEnded => tr("Secure session reset").into(),
+        Notice::UniversalTimer { seconds } => crate::i18n::tf(
+            "icu:UniversalTimerNotification__text",
+            &format!("The disappearing message time will be set to {} when you message them.", timer_long(*seconds)),
+            &[("timeValue", crate::i18n::Arg::from(&timer_long(*seconds)))],
+        ),
         Notice::Merged { who, phone: Some(phone) } => crate::i18n::tf("icu:ConversationMerge--notification--with-e164", &format!("Your message history with {} and their number {phone} has been merged.", name(who)), &[("conversationTitle", crate::i18n::Arg::from(&name(who))), ("obsoleteConversationNumber", crate::i18n::Arg::from(&phone))]),
         Notice::Merged { who, phone: None } => crate::i18n::tf("icu:ConversationMerge--notification--no-title", &format!("Your message history with {} and another chat that belonged to them has been merged.", name(who)), &[("conversationTitle", crate::i18n::Arg::from(&name(who)))]),
         Notice::NumberIsTheirs { who, phone } => crate::i18n::tf("icu:PhoneNumberDiscovery--notification--noSharedGroup", &format!("{phone} belongs to {}", name(who)), &[("phoneNumber", crate::i18n::Arg::from(&phone)), ("conversationTitle", crate::i18n::Arg::from(&name(who)))]),
@@ -374,7 +379,7 @@ pub fn notice_icon(notice: &Notice) -> (Option<&'static str>, bool) {
     use langis_store::{CallOutcome, GroupCallStatus, MessageRequestEvent};
     let icon = match notice {
         Notice::Timer { seconds: 0, .. } => "timer-slash-compact",
-        Notice::Timer { .. } => "timer-compact",
+        Notice::Timer { .. } | Notice::UniversalTimer { .. } => "timer-compact",
         Notice::Pinned { .. } | Notice::PollEnded { .. } => return (None, false),
         Notice::Group { by, change } => match change {
             GroupNotice::Title { .. } | GroupNotice::Description { .. } => "edit-compact",

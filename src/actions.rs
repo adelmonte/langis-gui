@@ -81,6 +81,9 @@ pub fn open_share_contact(app: &App, chat: &mut crate::chat::ChatView) {
 pub struct Details {
     pub states: Vec<SendState>,
     pub edits: Vec<langis_store::EditRevision>,
+    /// The account's "Show status icon" (sealed sender indicators), for
+    /// Desktop's `hasUnidentifiedDeliveryIndicators`.
+    pub sealed_icons: bool,
 }
 
 /// Desktop's pin durations (`PinMessageDialog`), in seconds.
@@ -1239,13 +1242,21 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
         };
         rows.push((tr("Disappears in").into(), text));
     }
-    for (label, value) in rows {
+    // The sender's row, as Desktop's contact row for an incoming message:
+    // the icon when it came by sealed sender (`unidentifiedDeliveryReceived`).
+    let from_sealed = m.direction == Direction::Incoming
+        && details.is_some_and(|d| d.sealed_icons)
+        && m.author.as_ref().is_some_and(|a| m.sealed_sender.contains(a));
+    for (i, (label, value)) in rows.into_iter().enumerate() {
         ui.horizontal(|ui| {
             ui.allocate_ui_with_layout(Vec2::new(110., 18.), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.set_min_width(110.);
                 ui.label(RichText::new(label).font(theme::medium(13.)).color(palette.text_secondary));
             });
             ui.label(RichText::new(value).font(theme::regular(13.)));
+            if i == 0 && from_sealed {
+                sealed_icon(ui, palette);
+            }
         });
     }
     let Some(details) = details else {
@@ -1306,6 +1317,11 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
                         if let Some(at) = state.updated_at {
                             ui.label(RichText::new(crate::format::short_timestamp(at)).font(theme::regular(12.)).color(palette.text_secondary));
                         }
+                        // Desktop's unidentified-delivery icon: it went to
+                        // them by sealed sender.
+                        if details.sealed_icons && m.sealed_sender.contains(&state.recipient) {
+                            sealed_icon(ui, palette);
+                        }
                     });
                 });
             }
@@ -1326,12 +1342,22 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
     safety
 }
 
+/// Desktop's `module-message-detail__contact__unidentified-delivery-icon`:
+/// 18px, in the text color.
+fn sealed_icon(ui: &mut Ui, palette: &Palette) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(18.), Sense::hover());
+    crate::icons::Icon::UnidentifiedDelivery.paint(ui, rect, 18., palette.text_secondary);
+    response.on_hover_text(tr("Sealed sender"));
+}
+
 /// Loads a message's details for the info dialog.
 pub fn load_details(app: &App, message: i64) {
     app.load(move |db| async move {
         let states = db.send_states(message).await.unwrap_or_default();
         let edits = db.edit_history(message).await.unwrap_or_default();
-        Some(Loaded::Chat(crate::chat::ChatLoaded::Details { message, details: Details { states, edits } }))
+        let setting = langis_core::AccountSetting::SealedSenderIndicators;
+        let sealed_icons = setting.is_on(db.setting(setting.key()).await.ok().flatten().as_deref());
+        Some(Loaded::Chat(crate::chat::ChatLoaded::Details { message, details: Details { states, edits, sealed_icons } }))
     });
 }
 

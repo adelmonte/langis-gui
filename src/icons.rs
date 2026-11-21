@@ -114,6 +114,7 @@ pub enum Icon {
     Messagetimer50,
     Messagetimer55,
     Messagetimer60,
+    UnidentifiedDelivery,
 }
 
 impl Icon {
@@ -138,6 +139,7 @@ impl Icon {
             Icon::HeartPlus => ("bytes://icon/heart-plus.svg", include_bytes!("../assets/icons/heart-plus.svg")),
             Icon::Info => ("bytes://icon/info.svg", include_bytes!("../assets/icons/info.svg")),
             Icon::Lock => ("bytes://icon/lock.svg", include_bytes!("../assets/icons/lock.svg")),
+            Icon::UnidentifiedDelivery => ("bytes://icon/unidentified-delivery-solid-20.svg", include_bytes!("../assets/icons/unidentified-delivery-solid-20.svg")),
             Icon::Menu => ("bytes://icon/menu.svg", include_bytes!("../assets/icons/menu.svg")),
             Icon::MessagestatusDelivered => ("bytes://icon/messagestatus-delivered.svg", include_bytes!("../assets/icons/messagestatus-delivered.svg")),
             Icon::MessagestatusRead => ("bytes://icon/messagestatus-read.svg", include_bytes!("../assets/icons/messagestatus-read.svg")),
