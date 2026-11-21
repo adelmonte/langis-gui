@@ -866,7 +866,12 @@ impl App {
                     self.send(Command::UnreadReminderShown { conversation });
                 }
             }
-            Event::CallQualitySurvey(_) => crate::call_survey::open(&self.ctx),
+            Event::CallQualitySurvey(call) => crate::call_survey::open(&self.ctx, call),
+            // Desktop's toasts after a submission.
+            Event::CallQualitySurveySent(result) => match result {
+                Ok(()) => self.toast(tr("Thanks for your feedback!")),
+                Err(_) => self.toast(tr("Failed to submit survey")),
+            },
             // Desktop's sticker pack toasts: hidden, with Undo; unhidden.
             Event::StickerPackHidden { id, key, hidden } => {
                 if hidden {

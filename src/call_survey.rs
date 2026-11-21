@@ -1,8 +1,9 @@
 //! Desktop's `CallQualitySurveyDialog`: "How was your call?", then the
 //! issues if there were some, then "Help us improve". langis decides when it
-//! shows (`Event::CallQualitySurvey`). Desktop submits the answers to
-//! Signal's gRPC call quality service, which langis can't reach, so nothing
-//! leaves this device and the last page says so.
+//! shows (`Event::CallQualitySurvey`) and sends the answers
+//! (`Command::SubmitCallQualitySurvey`), with the call's statistics, as
+//! Desktop's `submitCallQualitySurvey` does. Desktop can also attach a
+//! debug log; this doesn't offer that yet.
 
 use egui::Id;
 
@@ -27,6 +28,23 @@ pub enum Issue {
 }
 
 impl Issue {
+    /// Desktop's `CallQualitySurvey.Issue` value, the same on every client.
+    fn wire(self) -> &'static str {
+        match self {
+            Issue::Audio => "audio",
+            Issue::AudioStuttering => "audio_stuttering",
+            Issue::AudioLocalEcho => "audio_local_echo",
+            Issue::AudioRemoteEcho => "audio_remote_echo",
+            Issue::AudioDrop => "audio_drop",
+            Issue::Video => "video",
+            Issue::VideoNoCamera => "video_no_camera",
+            Issue::VideoLowQuality => "video_low_quality",
+            Issue::VideoLowResolution => "video_low_resolution",
+            Issue::CallDropped => "call_dropped",
+            Issue::Other => "other",
+        }
+    }
+
     fn label(self) -> &'static str {
         match self {
             Issue::Audio => tr("Audio issue"),
@@ -66,6 +84,8 @@ pub struct Survey {
     satisfied: bool,
     issues: Vec<Issue>,
     other: String,
+    /// The call asked about, sent with the answers.
+    call: Option<langis_core::call_survey::CallSurvey>,
 }
 
 impl Survey {
@@ -83,6 +103,17 @@ impl Survey {
     fn can_continue(&self) -> bool {
         !self.issues.is_empty() && (!self.issues.contains(&Issue::Other) || !self.other.trim().is_empty())
     }
+
+    /// The answers as Desktop sends them: no issues when it went well, and
+    /// the description only with "Something else".
+    fn answers(&self) -> (Vec<String>, Option<String>) {
+        if self.satisfied {
+            return (Vec::new(), None);
+        }
+        let issues = self.issues.iter().map(|i| i.wire().to_owned()).collect();
+        let other = self.issues.contains(&Issue::Other).then(|| self.other.trim().to_owned()).filter(|o| !o.is_empty());
+        (issues, other)
+    }
 }
 
 fn id() -> Id {
@@ -90,8 +121,8 @@ fn id() -> Id {
 }
 
 /// Opens the survey (from `Event::CallQualitySurvey`).
-pub fn open(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(id(), Survey::default()));
+pub fn open(ctx: &egui::Context, call: langis_core::call_survey::CallSurvey) {
+    ctx.data_mut(|d| d.insert_temp(id(), Survey { call: Some(call), ..Survey::default() }));
 }
 
 pub fn show(app: &mut crate::app::App, ctx: &egui::Context) {
@@ -163,14 +194,23 @@ pub fn show(app: &mut crate::app::App, ctx: &egui::Context) {
                 ctx,
                 id().with("confirm"),
                 tr("Help us improve"),
-                "Signal Desktop sends this feedback with diagnostic information about your call. langis can't reach Signal's survey service, so your answers stay on this device and aren't sent.",
+                tr("Information shared with us contains low level app information and does not include the contents of your calls."),
                 Some(tr("Cancel")),
                 &[(tr("Submit"), Variant::StrongPrimary)],
             );
             match answer {
                 Some(Answer::Cancel) => close = true,
                 Some(Answer::Action(_)) => {
-                    tracing::info!(satisfied = survey.satisfied, issues = ?survey.issues, "call quality survey answered (kept local)");
+                    if let Some(call) = survey.call.clone() {
+                        let (issues, description) = survey.answers();
+                        app.send(langis_core::Command::SubmitCallQualitySurvey {
+                            survey: call,
+                            satisfied: survey.satisfied,
+                            issues,
+                            description,
+                            debug_log_url: None,
+                        });
+                    }
                     close = true;
                 }
                 None => {}
@@ -204,5 +244,12 @@ mod tests {
         assert!(!s.can_continue());
         s.other = "robot voice".into();
         assert!(s.can_continue());
+        // Sent as Desktop's values; the description only with Other.
+        s.toggle(Issue::Video, true);
+        assert_eq!(s.answers(), (vec!["other".to_owned(), "video".to_owned()], Some("robot voice".to_owned())));
+        s.toggle(Issue::Other, false);
+        assert_eq!(s.answers().1, None);
+        s.satisfied = true;
+        assert_eq!(s.answers(), (Vec::new(), None));
     }
 }
