@@ -262,6 +262,13 @@ fn screenshots_panes() {
         wait(&mut harness, name, |app| app.settings.snapshot.is_some());
         save(&mut harness, name);
     }
+    // Settings > Backups: the demo's paid plan, and its details with the
+    // media download part way.
+    for (page, name) in [(Page::Backups, "settings-backups"), (Page::BackupsDetails, "settings-backups-details")] {
+        harness.state_mut().settings.page = page;
+        wait(&mut harness, name, |app| app.backups.status.is_some() && app.backups.download.is_some());
+        save(&mut harness, name);
+    }
     let params = langis_store::ChatFolderParams { name: "Family".into(), include_all_group_chats: true, included: harness.state().conversations.iter().take(2).map(|c| c.id.clone()).collect(), ..langis_store::ChatFolderParams::defaults() };
     harness.state_mut().settings.folder = Some((crate::settings::new_id(), false, params));
     wait(&mut harness, "folder page", |_| true);

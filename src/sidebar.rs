@@ -225,6 +225,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             ui.add_space(6.);
             status_banner(app, ui, &palette);
             username_banner(app, ui, &palette);
+            crate::backups::banner(app, ui);
             // Desktop's archive helper: what archived chats are.
             if app.panes.archived {
                 ui.horizontal(|ui| {
