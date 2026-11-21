@@ -1109,7 +1109,7 @@ impl App {
         }
         // Desktop's `maybeNotify`: quiet while a notification profile that
         // doesn't allow this chat (or mentions, for one) is on.
-        if crate::notification_profiles::silenced(self, conversation, false, for_me) {
+        if crate::notification_profiles::silenced(self, conversation, false, mentions_me || replies_to_me) {
             return;
         }
         if self.sound.notification {
