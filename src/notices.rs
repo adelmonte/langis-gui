@@ -309,6 +309,18 @@ fn membership_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -
         },
         GroupNotice::Requested { member: None } => tr("You sent a request to join the group.").into(),
         GroupNotice::Requested { member: Some(m) } => crate::i18n::tf("icu:GroupV2--admin-approval-add-one--other", &format!("{} requested to join via the group link.", name(m)), &[("joinerName", crate::i18n::Arg::from(&name(m)))]),
+        // Desktop's `admin-approval-bounce`: a second line while they're
+        // asking again.
+        GroupNotice::RequestBounce { member, times, pending } => {
+            let n = name(member);
+            let requests = if *times == 1 { "their request".to_owned() } else { format!("{times} requests") };
+            let text = crate::i18n::tf("icu:GroupV2--admin-approval-bounce--pluralized", &format!("{n} requested and canceled {requests} to join via the group link"), &[("joinerName", crate::i18n::Arg::from(&n)), ("numberOfRequests", crate::i18n::Arg::from(*times))]);
+            if !*pending {
+                return text;
+            }
+            let again = crate::i18n::tf("icu:GroupV2--admin-approval-add-one--other", &format!("{n} requested to join via the group link."), &[("joinerName", crate::i18n::Arg::from(&n))]);
+            format!("{text}\n{again}")
+        }
         GroupNotice::RequestRemoved { member: None } if by.is_none() => tr("You canceled your request to join the group.").into(),
         GroupNotice::RequestRemoved { member: None } => tr("Your request to join the group has been denied by an admin.").into(),
         GroupNotice::RequestRemoved { member: Some(m) } if by == Some(m.as_str()) => {
@@ -369,7 +381,8 @@ pub fn notice_icon(notice: &Notice) -> (Option<&'static str>, bool) {
             GroupNotice::Removed { member } if member.as_deref() == by.as_deref() || (member.is_none() && by.is_none()) => "leave-compact",
             GroupNotice::Removed { .. } => "person-minus-compact",
             GroupNotice::Approved { .. } => "person-check-compact",
-            GroupNotice::RequestRemoved { .. } | GroupNotice::InviteRemoved { .. } | GroupNotice::InvitesRemoved { .. } => "person-x-compact",
+            // Desktop's `group-decline`, its default when one's still asking.
+            GroupNotice::RequestBounce { pending: false, .. } | GroupNotice::RequestRemoved { .. } | GroupNotice::InviteRemoved { .. } | GroupNotice::InvitesRemoved { .. } => "person-x-compact",
             GroupNotice::InfoAccess { .. } | GroupNotice::MemberAccess { .. } | GroupNotice::LabelAccess { .. } | GroupNotice::AnnouncementsOnly { .. } => "megaphone-compact",
             GroupNotice::LinkOn { .. } | GroupNotice::LinkOff | GroupNotice::LinkReset | GroupNotice::LinkApproval { .. } => "megaphone-compact",
             GroupNotice::Ended => "group-x-inline",
