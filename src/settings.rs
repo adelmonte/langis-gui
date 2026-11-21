@@ -142,6 +142,8 @@ pub struct Snapshot {
     /// langis's image optimization (`max`, `fast` or `off`) and Giphy key.
     pub optimization: String,
     pub giphy_key: String,
+    /// Desktop's "Sent media quality": High, else Standard.
+    pub media_high: bool,
 }
 
 /// A question the page is asking.
@@ -242,6 +244,7 @@ fn load(app: &App) {
             username: None,
             optimization: get(langis_core::SETTING_IMAGE_OPTIMIZATION).await.unwrap_or_else(|| "max".into()),
             giphy_key: get(langis_core::SETTING_GIPHY_API_KEY).await.unwrap_or_default(),
+            media_high: get(langis_core::SETTING_SENT_MEDIA_QUALITY).await.as_deref() == Some("high"),
         };
         Some(Loaded::Settings(Box::new(snapshot)))
     });
@@ -1768,6 +1771,19 @@ fn data_usage(app: &mut App, ui: &mut Ui, s: &Snapshot) {
             snapshot.auto_download = auto;
         }
     }
+    // Desktop's "Sent media quality".
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        let item = Item::new(tr("Sent media quality")).description(tr("Sending high quality media will use more data."));
+        let chosen = Some(usize::from(s.media_high));
+        if let Some(i) = axo_list::select(ui, egui::Id::unique("settings").with("media-quality"), item, &[tr("Standard"), tr("High")], chosen) {
+            let high = i == 1;
+            write(app, langis_core::SETTING_SENT_MEDIA_QUALITY, if high { "high" } else { "standard" }.into());
+            if let Some(snapshot) = app.settings.snapshot.as_mut() {
+                snapshot.media_high = high;
+            }
+        }
+    });
 }
 
 /// The open question's dialog, and what its answer does.
