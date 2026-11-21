@@ -194,6 +194,20 @@ pub fn in_contacts_icon(ui: &mut Ui) {
     r.on_hover_text("This person is in your contacts.");
 }
 
+/// Desktop's `OfficialChatInlineBadge` after the Signal chat's name: the
+/// accent `seal-check-fill` on a white dot (its check is see-through).
+pub fn paint_official_badge(painter: &egui::Painter, center: egui::Pos2, size: f32) {
+    let palette = Palette::of(painter.ctx());
+    painter.circle_filled(center, size / 4., Color32::WHITE);
+    theme::paint_symbol(painter, "seal-check-fill", center, size, palette.badge);
+}
+
+/// The official badge as a widget, `size` square.
+pub fn official_badge(ui: &mut Ui, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    paint_official_badge(ui.painter(), rect.center(), size);
+}
+
 /// `AxoButton` variants used outside dialogs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Axo {

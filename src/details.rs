@@ -305,6 +305,12 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         }
         ui.add_space(10.);
         let name = ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(20.))).sense(egui::Sense::click()));
+        // Desktop's OfficialChatInlineBadge after the Signal chat's name and
+        // Note to Self's (`ConversationDetailsHeader`).
+        let official = c.id.is_signal() || c.kind == ConversationKind::NoteToSelf;
+        if official {
+            widgets::paint_official_badge(ui.painter(), egui::pos2(name.rect.right() + 4. + 9., name.rect.center().y), 18.);
+        }
         // Desktop's InContactsIcon after the name.
         if !group && c.system_contact {
             let at = egui::Rect::from_min_size(egui::pos2(name.rect.right() + 6., name.rect.center().y - 7.), egui::vec2(14., 14.));
@@ -312,8 +318,9 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             theme::paint_symbol(ui.painter(), "person-circle", at.center(), 14., color);
             ui.interact(at, ui.scope_id().with("in-contacts"), egui::Sense::hover()).on_hover_text("This person is in your contacts.");
         }
-        // A person's name opens Desktop's AboutContactModal (its chevron).
-        if !group && c.kind == ConversationKind::Direct {
+        // A person's name opens Desktop's AboutContactModal (its chevron);
+        // the Signal chat's opens nothing.
+        if !group && c.kind == ConversationKind::Direct && !official {
             let at = egui::pos2(name.rect.right() + if c.system_contact { 26. } else { 10. }, name.rect.center().y);
             crate::icons::Icon::ChevronRight.paint(ui, egui::Rect::from_center_size(at, egui::vec2(16., 16.)), 16., palette.text_secondary);
             if name.clone().on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
@@ -377,7 +384,32 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     use crate::axo_list::{self, End, Item};
 
+    // Desktop's rows for the Signal chat: what it is, and Help; none of a
+    // person's (`ConversationDetails`'s `isSignalConversation`).
+    let signal = c.id.is_signal();
+    if signal {
+        axo_list::list(ui, None, None, |ui| {
+            axo_list::item(ui, Item::new(tr("This is the official and only chat from Signal")).symbol("seal-check"), End::None);
+            axo_list::item(ui, Item::new(tr("Keep up to date with news and release notes.")).symbol("bell"), End::None);
+        });
+        axo_list::gap(ui);
+        axo_list::list(ui, Some(tr("Help")), None, |ui| {
+            if axo_list::item(ui, Item::new(tr("Support Center")).symbol("question-circle"), End::External).clicked() {
+                crate::chat::open_externally("https://support.signal.org");
+            }
+            if axo_list::item(ui, Item::new(tr("Contact Us")).symbol("invite"), End::External).clicked() {
+                crate::chat::open_externally("https://support.signal.org/hc/requests/new?desktop");
+            }
+            // Desktop goes to its donation flow; langis has none, so
+            // Signal's donate page.
+            if axo_list::item(ui, Item::new(tr("Donate to Signal")).symbol("heart"), End::Click).clicked() {
+                crate::chat::open_externally("https://signal.org/donate/");
+            }
+        });
+    }
+
     // Disappearing messages, nickname, chat color, media, safety number.
+    if !signal {
     axo_list::list(ui, None, None, |ui| {
         let info = if group {
             tr("When enabled, messages sent and received in this group will disappear after they've been seen.")
@@ -435,8 +467,9 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
         }
     });
 
+    }
     // Desktop's Notifications row: its own page.
-    {
+    if !signal {
         axo_list::gap(ui);
         let state = if !c.muted {
             tr("Not muted").to_owned()
@@ -454,6 +487,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
 
     // `ConversationDetailsGroups`: the groups they're in with us.
     if c.kind == ConversationKind::Direct
+        && !signal
         && let Some(them) = c.id.as_direct()
     {
         let common: Vec<Conversation> = app.conversations.iter().filter(|g| g.kind == ConversationKind::Group && !g.left && g.members.iter().any(|m| m == them)).cloned().collect();
@@ -649,7 +683,7 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                     app.panes.delete_chat = Some((c.id.clone(), false));
                 }
             }
-            if !c.blocked && axo_list::item(ui, red(Item::new(tr("Report spam")).symbol("error-octagon")), End::Click).clicked() {
+            if !c.blocked && !signal && axo_list::item(ui, red(Item::new(tr("Report spam")).symbol("error-octagon")), End::Click).clicked() {
                 confirm = Some(ChatConfirm::ReportSpam);
             }
         });
@@ -723,7 +757,7 @@ fn header_buttons(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversatio
     if app.panes.details.as_ref().is_some_and(|d| d.calls.is_some()) {
         buttons.push(("message", "Message"));
     }
-    if c.kind != ConversationKind::NoteToSelf && !c.ended {
+    if c.kind != ConversationKind::NoteToSelf && !c.ended && !c.id.is_signal() {
         buttons.push(("videocamera", "Video"));
         if !group {
             buttons.push(("phone", "Audio"));

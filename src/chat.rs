@@ -814,9 +814,8 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                             widgets::in_contacts_icon(ui);
                         }
                         // Desktop's OfficialChatInlineBadge.
-                        if c.id.as_direct() == Some(langis_store::SIGNAL_ACI) {
-                            let (at, _) = ui.allocate_exact_size(Vec2::splat(16.), Sense::hover());
-                            theme::paint_symbol(ui.painter(), "check-circle-fill", at.center(), 15., palette.badge);
+                        if c.id.is_signal() {
+                            widgets::official_badge(ui, 16.);
                         }
                     });
                     if c.expire_timer > 0 || verified {

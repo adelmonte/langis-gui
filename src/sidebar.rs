@@ -275,7 +275,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     } else if pinned_header && !c.pinned && rows[i - 1].pinned {
                         heading(ui, tr("Chats"));
                     }
-                    let typing = app.typing.get(&c.id).is_some_and(|t| !t.is_empty());
+                    let typing = !c.id.is_signal() && app.typing.get(&c.id).is_some_and(|t| !t.is_empty());
                     let selected = app.selected.as_ref() == Some(&c.id);
                     let mentions = app.unread_mentions.get(&c.id).copied().unwrap_or(0);
                     let badge = c.id.as_direct().and_then(|sid| app.badge_for(sid)).map(str::to_owned);
@@ -534,10 +534,16 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
     let time_pos = Pos2::new(right - time.size().x, inner.top() + 2.);
     let title_max = (time_pos.x - 6. - left).max(20.);
     let mut title_job = egui::text::LayoutJob::simple_singleline(c.title.clone(), theme::semibold(14.), palette.text);
-    title_job.wrap = egui::text::TextWrapping::truncate_at_width(title_max - if c.muted { 22. } else { 0. });
+    // The Signal chat's name ends in Desktop's official badge (`ContactName`).
+    let official = c.id.is_signal();
+    title_job.wrap = egui::text::TextWrapping::truncate_at_width(title_max - if c.muted { 22. } else { 0. } - if official { 18. } else { 0. });
     let title = ui.fonts_mut(|f| f.layout_job(title_job));
-    let title_w = title.size().x;
+    let mut title_w = title.size().x;
     painter.galley(Pos2::new(left, inner.top()), title, palette.text);
+    if official {
+        widgets::paint_official_badge(&painter, Pos2::new(left + title_w + 4. + 7., inner.top() + 9.), 14.);
+        title_w += 18.;
+    }
     if c.muted {
         // Desktop's bell-slash-bold, 14px, 8px after the name.
         Icon::BellSlashBold.paint(ui, Rect::from_min_size(Pos2::new(left + title_w + 8., inner.top() + 2.), Vec2::splat(14.)), 14., palette.text_secondary);

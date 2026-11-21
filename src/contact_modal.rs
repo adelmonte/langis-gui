@@ -55,6 +55,12 @@ pub fn confirm_member(app: &mut App, group: ConversationId, aci: String, admin: 
 }
 
 pub fn open(app: &mut App, group: Option<ConversationId>, aci: String) {
+    // Signal isn't a person: Desktop has no ContactModal or About for its
+    // chat, whose name opens the chat's details.
+    if aci == langis_store::SIGNAL_ACI {
+        crate::details::open(app, ConversationId::signal());
+        return;
+    }
     if aci == app.aci {
         // Desktop's About You.
         app.panes.contact = Some(Contact { group, aci: aci.clone(), confirm: None, confirm_only: false, about: None, about_open: true, add_to_group: None, label_info: false, own: None });

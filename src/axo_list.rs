@@ -135,6 +135,8 @@ pub enum End<'a> {
     Action(&'a str, bool),
     /// A swatch (the chat color), then the chevron.
     Swatch(crate::chat_colors::Bubble),
+    /// `AxoClickableItem` with `arrow="external-link"`: opens a web page.
+    External,
 }
 
 /// What happened to an item this frame.
@@ -181,6 +183,7 @@ pub fn item(ui: &mut Ui, item: Item<'_>, end: End<'_>) -> ItemResponse {
             (12. + (g.size().x + 24.).max(56.), 30., Some(g))
         }
         End::Swatch(_) => (12. + 20. + 6. + 14., 20., None),
+        End::External => (6. + 14., 18., None),
     };
     let text_w = (width - 24. - leading - end_w).max(80.);
     let label = painter.layout(item.label.to_owned(), theme::regular(13.), primary, text_w);
@@ -188,7 +191,7 @@ pub fn item(ui: &mut Ui, item: Item<'_>, end: End<'_>) -> ItemResponse {
     let text_h = label.size().y.max(18.) + desc.as_ref().map(|d| 2. + d.size().y).unwrap_or(0.);
     let height = 8. + text_h.max(end_h) + 8.;
     let (rect, row) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
-    let whole_row = matches!(end, End::Click | End::Arrow(_) | End::Switch(_) | End::Swatch(_));
+    let whole_row = matches!(end, End::Click | End::Arrow(_) | End::Switch(_) | End::Swatch(_) | End::External);
     let row = if item.disabled || !whole_row { ui.interact(rect, row.id, Sense::hover()) } else { row };
     if whole_row && !item.disabled && row.hovered() {
         painter.rect_filled(rect, CornerRadius::same(14), item_fill(&palette, row.is_pointer_button_down_on()));
@@ -215,6 +218,7 @@ pub fn item(ui: &mut Ui, item: Item<'_>, end: End<'_>) -> ItemResponse {
             let g = end_text.unwrap();
             painter.galley(Pos2::new(right - g.size().x, mid - g.size().y / 2.), g, secondary);
         }
+        End::External => theme::paint_symbol(&painter, "open", Pos2::new(right - 7., mid), 14., placeholder(&palette)),
         End::Arrow(_) => {
             theme::paint_symbol(&painter, "chevron-[end]", Pos2::new(right - 7., mid), 14., placeholder(&palette));
             if let Some(g) = end_text {

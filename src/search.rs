@@ -150,7 +150,11 @@ pub fn message_results(app: &App, ui: &mut Ui, palette: &Palette) -> Option<(Con
             let sid = p.id.as_direct().unwrap_or_default();
             let color = sid.bytes().fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b));
             widgets::paint_avatar(ui, Rect::from_min_size(Pos2::new(row.left() + 14., row.center().y - 18.), Vec2::splat(36.)), &widgets::AvatarSpec::person(&p.title, color));
-            ui.painter().text(Pos2::new(row.left() + 62., row.center().y - 1.), egui::Align2::LEFT_BOTTOM, &p.title, theme::semibold(14.), palette.text);
+            let name = ui.painter().text(Pos2::new(row.left() + 62., row.center().y - 1.), egui::Align2::LEFT_BOTTOM, &p.title, theme::semibold(14.), palette.text);
+            // Desktop's ContactListItem: the official badge for Signal.
+            if p.id.is_signal() {
+                widgets::paint_official_badge(ui.painter(), Pos2::new(name.right() + 4. + 7., name.center().y), 14.);
+            }
             if let Some(phone) = &p.phone {
                 ui.painter().text(Pos2::new(row.left() + 62., row.center().y + 1.), egui::Align2::LEFT_TOP, phone, theme::regular(13.), palette.text_secondary);
             }
