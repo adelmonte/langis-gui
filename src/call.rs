@@ -396,6 +396,7 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
         crate::menu::open_at(ui.ctx(), menu, at);
     }
     let mut chosen = None;
+    let link_admin = app.call.as_ref().is_some_and(|c| c.conversation.as_call_link().is_some() && c.link.as_ref().is_some_and(|l| l.admin));
     crate::menu::show(ui.ctx(), menu, |m| {
         if p.audio && m.item(Some("mic-slash"), tr("Mute audio")) {
             chosen = Some(0);
@@ -405,6 +406,10 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
         }
         if m.item(Some("message"), tr("Go to chat")) {
             chosen = Some(2);
+        }
+        // A call link we administer: Desktop's Remove from call.
+        if link_admin && m.item(Some("minus-circle"), tr("Remove from call")) {
+            chosen = Some(3);
         }
     });
     match chosen {
@@ -417,6 +422,7 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
             app.call_view.pip = true;
             app.open(langis_store::ConversationId::direct(&p.aci));
         }
+        Some(3) => crate::contact_modal::confirm_remove_from_call(app, p.aci.clone(), p.demux_id),
         _ => {}
     }
     // Desktop's speaking indicator: an outline while they're heard.

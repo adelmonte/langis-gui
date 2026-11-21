@@ -463,6 +463,61 @@ fn link_name_dialog(app: &mut App, ui: &mut Ui, room: &str, current: &str) {
     }
 }
 
+/// Desktop's `CallingAdhocCallInfo` for a call link we haven't joined
+/// (`isUnknownContactDiscrete` false): those we know by name, sorted by it,
+/// and how many others there are, who show as one row.
+pub fn known_and_unknown(app: &App, users: &[String]) -> (Vec<String>, usize) {
+    let (mut known, unknown): (Vec<String>, Vec<String>) = users.iter().cloned().partition(|u| *u == app.aci || app.names.contains_key(u));
+    known.sort_by_key(|u| if *u == app.aci { String::new() } else { app.name(u).to_lowercase() });
+    (known, unknown.len())
+}
+
+/// Desktop's `UnknownContacts` row: up to three blank avatars, "N people"
+/// (or "+N more" after people we know), and an info button; true when the
+/// button was clicked.
+pub fn unknown_row(ui: &mut Ui, count: usize, after_known: bool, color: egui::Color32) -> bool {
+    let label = if after_known {
+        crate::i18n::tf("icu:CallingAdhocCallInfo__UnknownContactLabel--in-addition", &format!("+{count} more"), &[("count", crate::i18n::Arg::from(count))])
+    } else {
+        crate::i18n::tf("icu:CallingAdhocCallInfo__UnknownContactLabel", &if count == 1 { "1 person".to_owned() } else { format!("{count} people") }, &[("count", crate::i18n::Arg::from(count))])
+    };
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.), Sense::hover());
+    let shown = count.min(3);
+    let size = match shown { 1 => 32., 2 => 28., _ => 24. };
+    for i in 0..shown {
+        let at = Rect::from_min_size(Pos2::new(rect.left() + i as f32 * size * 0.6, rect.center().y - size / 2.), Vec2::splat(size));
+        widgets::paint_avatar(ui, at, &widgets::AvatarSpec::person("", i as u8 * 3));
+    }
+    let text_x = rect.left() + (shown as f32 - 1.) * size * 0.6 + size + 10.;
+    ui.painter().text(Pos2::new(text_x, rect.center().y), egui::Align2::LEFT_CENTER, label, theme::regular(14.), color);
+    let info = Rect::from_center_size(Pos2::new(rect.right() - 14., rect.center().y), Vec2::splat(24.));
+    theme::paint_symbol(ui.painter(), "info", info.center(), 18., color);
+    ui.interact(info, ui.scope_id().with("unknown-info"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+/// Desktop's info dialog from that row, while `open` (an egui temp flag).
+pub fn unknown_info_dialog(ctx: &egui::Context, open: egui::Id) {
+    if !ctx.data(|d| d.get_temp::<bool>(open).unwrap_or(false)) {
+        return;
+    }
+    let body = tr("Before joining a call you can only see the names of phone contacts, people you\u{2019}re in a group with, or people you\u{2019}ve chatted with 1:1. You\u{2019}ll see all names and photos once you\u{2019}ve joined the call.");
+    if crate::dialog::alert(ctx, egui::Id::unique("adhoc-unknown-info"), "", body, tr("OK")) {
+        ctx.data_mut(|d| d.remove::<bool>(open));
+    }
+}
+
+/// Peeks a link's call every 10 seconds while its details are open, so
+/// they show who's in it.
+fn peek_link(app: &mut App, ctx: &egui::Context, room: &str) {
+    let id = egui::Id::unique(("link-details-peek", room));
+    let now = ctx.input(|i| i.time);
+    if ctx.data(|d| d.get_temp::<f64>(id)).is_none_or(|at| now - at > 10.) {
+        ctx.data_mut(|d| d.insert_temp(id, now));
+        app.send(Command::PeekGroupCall { conversation: ConversationId::call_link(room) });
+    }
+    ctx.request_repaint_after(std::time::Duration::from_secs(10));
+}
+
 fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
     let Some(link) = app.panes.links.iter().find(|l| l.room_id == room).cloned() else {
         ui.centered_and_justified(|ui| {
@@ -473,6 +528,9 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
     let admin = link.admin_key.is_some();
     let url = langis_core::call_link_url(&link.root_key).unwrap_or_default();
     link_name_dialog(app, ui, room, &link.name);
+    peek_link(app, ui.ctx(), room);
+    let info_open = egui::Id::unique("link-details-unknown-info");
+    unknown_info_dialog(ui.ctx(), info_open);
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: 40, right: 40, top: 32, bottom: 32 }).show(ui, |ui| {
             ui.set_max_width(560.);
@@ -494,6 +552,33 @@ fn link_details(app: &mut App, ui: &mut Ui, palette: &Palette, room: &str) {
                 });
             });
             ui.add_space(20.);
+            // Who's in its call now, as Desktop's call link info lists them
+            // before joining: people we know, then "+N more".
+            let users = app.panes.active_calls.get(&ConversationId::call_link(room)).cloned().unwrap_or_default();
+            if !users.is_empty() {
+                let (known, unknown) = known_and_unknown(app, &users);
+                egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(12)).inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let n = users.len();
+                    let title = crate::i18n::tf("icu:calling__in-this-call", &if n == 1 { "In this call \u{b7} 1 person".to_owned() } else { format!("In this call \u{b7} {n} people") }, &[("people", crate::i18n::Arg::from(n))]);
+                    ui.label(RichText::new(title).font(theme::semibold(14.)));
+                    ui.add_space(6.);
+                    for u in &known {
+                        ui.horizontal(|ui| {
+                            match app.conversation(&ConversationId::direct(u)) {
+                                Some(c) => widgets::avatar(ui, &widgets::AvatarSpec::of(c), 32.),
+                                None => widgets::avatar(ui, &widgets::AvatarSpec::person(&app.name(u), 0), 32.),
+                            };
+                            ui.label(RichText::new(if *u == app.aci { tr("You").to_owned() } else { app.name(u) }).font(theme::regular(14.)));
+                        });
+                        ui.add_space(4.);
+                    }
+                    if unknown > 0 && unknown_row(ui, unknown, !known.is_empty(), palette.text) {
+                        ui.ctx().data_mut(|d| d.insert_temp(info_open, true));
+                    }
+                });
+                ui.add_space(12.);
+            }
             egui::Frame::new().fill(palette.popover).corner_radius(CornerRadius::same(12)).inner_margin(8).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 // While its call goes on, Desktop's settings and Delete wait.
