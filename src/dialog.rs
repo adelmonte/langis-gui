@@ -74,6 +74,8 @@ pub fn show_with(ctx: &egui::Context, id: Id, title: &str, description: &str, ca
         buttons.push((cancel, None));
     }
     buttons.extend(actions.iter().map(|(label, v)| (*label, Some(*v))));
+    // Modal, as egui's Modal is: Tab and clicks stay in the dialog.
+    ctx.memory_mut(|m| m.set_modal_layer(egui::LayerId::new(Order::Tooltip, id.with("dialog"))));
     let shown = egui::Area::new(id.with("dialog")).order(Order::Tooltip).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::new().fill(fill).corner_radius(CornerRadius::same(34)).shadow(shadow).show(ui, |ui| {
             ui.set_width(width);
