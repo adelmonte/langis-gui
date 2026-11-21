@@ -3,6 +3,7 @@
 
 use egui::{Align, Color32, ColorImage, CornerRadius, Layout, RichText, TextureHandle, TextureOptions, Ui, Vec2};
 use langis_core::keys::KeySource;
+use langis_core::LinkError;
 
 use crate::app::{App, Phase};
 use crate::theme::{self, Palette};
@@ -118,8 +119,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }),
         Phase::Linking { url, error, qr } => {
             let mut retry = false;
-            linking(ui, &palette, url.is_some(), qr.as_ref(), error.as_deref(), &mut retry);
-            if retry {
+            let mut quit = false;
+            match *error {
+                Some(kind @ (LinkError::ConnectionFailed | LinkError::TooManyDevices | LinkError::TooOld)) => error_step(ui, kind, &mut retry, &mut quit),
+                _ => linking(ui, &palette, url.is_some(), qr.as_ref(), *error, &mut retry),
+            }
+            if quit {
+                let ctx = ui.ctx().clone();
+                app.quit(&ctx);
+            } else if retry {
                 *error = None;
                 *url = None;
                 app.send(langis_core::Command::Link);
@@ -173,10 +181,51 @@ fn syncing(ui: &mut Ui, palette: &Palette) {
 
 const SUPPORT_PAGE: &str = "https://support.signal.org/hc/articles/360007320551-Linked-Devices";
 
+/// Desktop's `InstallScreenErrorStep`: "Something went wrong!", what, and
+/// its button, with Quit beside it when trying again won't help.
+fn error_step(ui: &mut Ui, kind: LinkError, retry: &mut bool, quit: &mut bool) {
+    egui::CentralPanel::no_frame().show(ui, |ui| {
+        let page = install_page(ui);
+        ui.painter().rect_filled(ui.max_rect(), 0, page);
+        let palette = Palette::of(ui.ctx());
+        ui.with_layout(Layout::top_down(Align::Center), |ui| {
+            ui.add_space((ui.available_height() / 2. - 80.).max(24.));
+            ui.set_max_width(480.);
+            ui.label(RichText::new(tr("Something went wrong!")).font(theme::semibold(24.)));
+            ui.add_space(12.);
+            let (body, update) = match kind {
+                LinkError::TooManyDevices => (tr("Sorry, you have too many devices linked already. Try removing some."), false),
+                LinkError::TooOld => (tr("Update Signal on this device to link your phone."), true),
+                _ => (tr("Failed to connect to server."), false),
+            };
+            ui.add(egui::Label::new(RichText::new(body).font(theme::regular(16.)).color(palette.text_secondary)).wrap());
+            ui.add_space(16.);
+            // Desktop's Update goes to signal.org/download; a newer langis
+            // comes from its own releases.
+            let width = if update { 180. } else { 120. };
+            ui.allocate_ui_with_layout(Vec2::new(width, 32.), Layout::left_to_right(Align::Center), |ui| {
+                if update {
+                    if widgets::pill_button(ui, tr("Update"), true).clicked() {
+                        crate::chat::open_externally(RELEASES_PAGE);
+                    }
+                    ui.add_space(8.);
+                    if widgets::pill_button(ui, tr("Quit"), false).clicked() {
+                        *quit = true;
+                    }
+                } else if widgets::pill_button(ui, tr("Try again"), true).clicked() {
+                    *retry = true;
+                }
+            });
+        });
+    });
+}
+
+const RELEASES_PAGE: &str = "https://github.com/adelmonte/langis-gui/releases";
+
 /// Desktop's `InstallScreenQrCodeNotScannedStep`: one white card (radius 8,
 /// padding 22, 44 in dark) holding the 256px code and, beside it, the
 /// title, the numbered steps and "Need help?", all in black.
-fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHandle>, error: Option<&str>, retry: &mut bool) {
+fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHandle>, error: Option<LinkError>, retry: &mut bool) {
     let _ = palette;
     egui::CentralPanel::no_frame().show(ui, |ui| {
         let page = install_page(ui);
@@ -191,20 +240,41 @@ fn linking(ui: &mut Ui, palette: &Palette, has_url: bool, qr: Option<&TextureHan
         ui.painter().rect_filled(rect, CornerRadius::same(8), Color32::WHITE);
         let code = egui::Rect::from_min_size(rect.min + Vec2::new(pad + 8., pad + 8.), Vec2::splat(256.));
         match (qr, has_url, error) {
-            (_, _, Some(why)) => {
-                // `__qr-code--load-failed`: a gray-05 outline, the red error
-                // icon, what happened, and Retry.
-                ui.painter().rect_stroke(code, CornerRadius::same(10), egui::Stroke::new(1.5, theme::rgb(0xe9e9e9)), egui::StrokeKind::Inside);
+            (_, _, Some(kind)) => {
+                // `__qr-code--load-failed`: a gray-05 outline and, by kind,
+                // what happened and a way to retry
+                // (`InstallScreenQrCodeNotScannedStep`'s `InstallScreenQrCode`).
+                if kind != LinkError::Expired {
+                    ui.painter().rect_stroke(code, CornerRadius::same(10), egui::Stroke::new(1.5, theme::rgb(0xe9e9e9)), egui::StrokeKind::Inside);
+                }
                 ui.scope_builder(egui::UiBuilder::new().max_rect(code.shrink(24.)), |ui| {
                     ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                        ui.add_space(40.);
-                        theme::paint_symbol(ui.painter(), "error-circle", egui::Pos2::new(ui.max_rect().center().x, ui.cursor().top() + 11.), 22., theme::rgb(0xe51d0e));
-                        ui.add_space(30.);
-                        ui.label(RichText::new("An unexpected error occurred.").font(theme::regular(13.)).color(theme::rgb(0x5e5e5e)))
-                            .on_hover_text(why);
-                        ui.label(RichText::new("Please try again.").font(theme::regular(13.)).color(theme::rgb(0x5e5e5e)));
+                        let gray = theme::rgb(0x5e5e5e);
+                        let text = |ui: &mut Ui, t: &str| {
+                            ui.add(egui::Label::new(RichText::new(t).font(theme::regular(13.)).color(gray)).wrap());
+                        };
+                        let button = match kind {
+                            // Max rotations: only a button, in the middle.
+                            LinkError::Expired => {
+                                ui.add_space(ui.available_height() / 2. - 10.);
+                                tr("Refresh code")
+                            }
+                            LinkError::Timeout => {
+                                ui.add_space(60.);
+                                text(ui, tr("The QR code couldn't load. Check your connection and try again."));
+                                tr("Retry")
+                            }
+                            _ => {
+                                ui.add_space(40.);
+                                theme::paint_symbol(ui.painter(), "error-circle", egui::Pos2::new(ui.max_rect().center().x, ui.cursor().top() + 11.), 22., theme::rgb(0xe51d0e));
+                                ui.add_space(30.);
+                                text(ui, tr("An unexpected error occurred."));
+                                text(ui, tr("Please try again."));
+                                tr("Retry")
+                            }
+                        };
                         ui.add_space(16.);
-                        let r = ui.add(egui::Label::new(RichText::new("\u{21bb} Retry").font(theme::semibold(13.)).color(blue)).sense(egui::Sense::click()));
+                        let r = ui.add(egui::Label::new(RichText::new(format!("\u{21bb} {button}")).font(theme::semibold(13.)).color(blue)).sense(egui::Sense::click()));
                         if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             *retry = true;
                         }

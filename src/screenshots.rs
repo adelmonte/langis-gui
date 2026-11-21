@@ -148,7 +148,7 @@ fn screenshots() {
     harness.state_mut().phase = Phase::Linking { url: Some("demo".into()), error: None, qr };
     wait(&mut harness, "link screen", |_| true);
     save(&mut harness, "link");
-    harness.state_mut().phase = Phase::Linking { url: None, error: Some("demo failure".into()), qr: None };
+    harness.state_mut().phase = Phase::Linking { url: None, error: Some(langis_core::LinkError::Unknown), qr: None };
     wait(&mut harness, "link error", |_| true);
     save(&mut harness, "link-error");
     harness.state_mut().phase = Phase::Syncing;

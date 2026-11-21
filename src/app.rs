@@ -25,7 +25,7 @@ pub enum Phase {
     /// The key is being made or derived and the backend started.
     Starting,
     /// No account yet: the QR code to scan, once it's here.
-    Linking { url: Option<String>, error: Option<String>, qr: Option<egui::TextureHandle> },
+    Linking { url: Option<String>, error: Option<langis_core::LinkError>, qr: Option<egui::TextureHandle> },
     /// The phone scanned the code: the first sync runs until `Ready`.
     Syncing,
     Ready,
@@ -602,9 +602,9 @@ impl App {
                 self.phase = Phase::Linking { url: Some(url.to_string()), error: None, qr };
             }
             Event::Linked => self.phase = Phase::Syncing,
-            Event::LinkFailed(why) => {
+            Event::LinkFailed { error: kind, .. } => {
                 if let Phase::Linking { error, .. } = &mut self.phase {
-                    *error = Some(why);
+                    *error = Some(kind);
                 }
             }
             Event::Ready { aci, phone } => {
