@@ -130,7 +130,12 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     if let Some(call) = app.call.clone() {
         let ringing = call.incoming && call.status == CallStatus::Ringing;
         if ringing {
-            if pressed(ctx, ALT_SHIFT, Key::V) {
+            // A call the notification profile hides has no bar, and so
+            // none of its keys (Desktop's `IncomingCallBar` holds them).
+            let shown = crate::call::ringing_shown(app).is_some();
+            if !shown {
+                // Nothing to answer from.
+            } else if pressed(ctx, ALT_SHIFT, Key::V) {
                 if crate::permissions::allowed(app, crate::permissions::Need::Answer(true)) {
                     app.send(Command::AcceptCall { video: true });
                 }
