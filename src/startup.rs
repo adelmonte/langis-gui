@@ -124,7 +124,25 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 Some(kind @ (LinkError::ConnectionFailed | LinkError::TooManyDevices | LinkError::TooOld)) => error_step(ui, kind, &mut retry, &mut quit),
                 _ => linking(ui, &palette, url.is_some(), qr.as_ref(), *error, &mut retry),
             }
-            if quit {
+            // Desktop's data deletion confirmation
+            // (`InstallScreenQrCodeNotScannedStep`): Cancel starts over with
+            // a new code, Continue deletes the data here.
+            let mut answer = None;
+            if app.link_other_account {
+                *url = None;
+                answer = crate::dialog::show(
+                    ui.ctx(),
+                    egui::Id::unique("link-delete-data"),
+                    tr("Delete all data?"),
+                    &tr("You\u{2019}re attempting to link a different Signal account to this desktop. If you continue, all data currently in Signal Desktop will be deleted.").replace("Signal Desktop", "langis"),
+                    Some(tr("Cancel")),
+                    &[(tr("Continue"), crate::dialog::Variant::StrongDestructive)],
+                );
+            }
+            if let Some(answer) = answer {
+                app.link_other_account = false;
+                app.send(langis_core::Command::ContinueLink { delete_data: answer != crate::dialog::Answer::Cancel });
+            } else if quit {
                 let ctx = ui.ctx().clone();
                 app.quit(&ctx);
             } else if retry {

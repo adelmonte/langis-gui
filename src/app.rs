@@ -143,6 +143,9 @@ pub struct App {
     pub menu_open: bool,
     /// This device was unlinked: Desktop's DialogRelink, until clicked.
     pub unlinked: bool,
+    /// The phone linked another account than the data here's: Desktop's
+    /// "Delete all data?" over the link screen, until answered.
+    pub link_other_account: bool,
     pub history: Option<HistoryProgress>,
     pub tab: Tab,
     pub conversations: Vec<Conversation>,
@@ -291,6 +294,7 @@ impl App {
             hide_menu_bar: false,
             menu_open: false,
             unlinked: false,
+            link_other_account: false,
             history: None,
             tab: Tab::Chats,
             conversations: Vec::new(),
@@ -602,6 +606,13 @@ impl App {
                 self.phase = Phase::Linking { url: Some(url.to_string()), error: None, qr };
             }
             Event::Linked => self.phase = Phase::Syncing,
+            Event::LinkedOtherAccount => {
+                self.link_other_account = true;
+                // Asked at a start, before any link screen.
+                if !matches!(self.phase, Phase::Linking { .. }) {
+                    self.phase = Phase::Linking { url: None, error: None, qr: None };
+                }
+            }
             Event::LinkFailed { error: kind, .. } => {
                 if let Phase::Linking { error, .. } = &mut self.phase {
                     *error = Some(kind);
