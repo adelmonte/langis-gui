@@ -936,6 +936,8 @@ pub enum ChatConfirm {
     End,
     /// Desktop asks a second time before ending a group.
     EndForSure,
+    /// Desktop's `ContactListItem` "Remove": hides a person.
+    Remove,
 }
 
 /// The open chat confirmation, and what its answer does.
@@ -969,9 +971,21 @@ pub fn chat_confirm_dialog(app: &mut App, ctx: &egui::Context) {
             vec![(tr("End group"), Variant::StrongDestructive)],
         ),
         ChatConfirm::EndForSure => (tr("This will end the group permanently. Are you sure you want to proceed?").into(), "", vec![(tr("End group"), Variant::StrongDestructive)]),
+        // Someone in the phone's contacts can only be removed there.
+        ChatConfirm::Remove if c.system_contact => (
+            crate::i18n::tf("icu:ContactListItem__remove-system--title", &format!("Unable to remove {name}"), &[("title", crate::i18n::Arg::from(&name))]),
+            tr("This person is saved to your device\u{2019}s Contacts. Delete them from your Contacts on your mobile device and try again."),
+            vec![(tr("OK"), Variant::StrongPrimary)],
+        ),
+        ChatConfirm::Remove => (
+            crate::i18n::tf("icu:ContactListItem__remove--title", &format!("Remove {name}?"), &[("title", crate::i18n::Arg::from(&name))]),
+            tr("You won\u{2019}t see this person when searching. You\u{2019}ll get a message request if they message you in the future."),
+            vec![(tr("Remove"), Variant::StrongDestructive)],
+        ),
     };
     let key = egui::Id::unique("chat-confirm").with((&id.0, which as u8));
-    let Some(answer) = dialog::show(ctx, key, &title, body, Some(tr("Cancel")), &actions) else { return };
+    let cancel = if matches!(which, ChatConfirm::Remove) && c.system_contact { None } else { Some(tr("Cancel")) };
+    let Some(answer) = dialog::show(ctx, key, &title, body, cancel, &actions) else { return };
     app.panes.chat_confirm = None;
     let Answer::Action(index) = answer else { return };
     let conversation = id.clone();
@@ -985,6 +999,11 @@ pub fn chat_confirm_dialog(app: &mut App, ctx: &egui::Context) {
         }
         ChatConfirm::End => app.panes.chat_confirm = Some((id, ChatConfirm::EndForSure)),
         ChatConfirm::EndForSure => app.send(Command::EndGroup { conversation }),
+        ChatConfirm::Remove if c.system_contact => {}
+        ChatConfirm::Remove => {
+            app.send(Command::SetChat { conversation, change: langis_core::ChatChange::Removed(true) });
+            app.toast(crate::i18n::tf("icu:Toast--ConversationRemoved", &format!("{name} has been removed."), &[("title", crate::i18n::Arg::from(&name))]));
+        }
     }
 }
 
@@ -1167,7 +1186,9 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
             });
         return true;
     }
-    if c.accepted && !blocked && !c.left && !c.ended {
+    // Desktop's `CompositionArea`: someone we removed keeps the composer
+    // until they message us (`removalStage !== 'justNotification'`).
+    if (c.accepted || c.removal_stage == Some(langis_store::RemovalStage::JustNotification)) && !blocked && !c.left && !c.ended {
         return false;
     }
     // Left and ended groups: what happened, and Delete.
@@ -1209,6 +1230,7 @@ pub fn message_request_bar(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Co
                 let name = c.title.clone();
                 let text = match (group, blocked) {
                     (false, true) => crate::i18n::tf("icu:MessageRequests--message-direct-blocked", &format!("Let {name} message you and share your name and photo with them? You won't receive any messages until you unblock them."), &[("name", crate::i18n::Arg::from(&name))]),
+                    (false, false) if c.removal_stage.is_some() => crate::i18n::tf("icu:MessageRequests--message-direct-hidden", &format!("Let {name} message you and share your name and photo with them? You have removed this person in the past."), &[("name", crate::i18n::Arg::from(&name))]),
                     (false, false) => format!("Let {name} message you and share your name and photo with them? They won\u{2019}t know you\u{2019}ve seen their messages until you accept."),
                     (true, true) => tr("Unblock this group and share your name and photo with its members? You won't receive any messages until you unblock them.").into(),
                     (true, false) => tr("Join this group and share your name and photo with its members? They won\u{2019}t know you\u{2019}ve seen their messages until you accept.").into(),
@@ -1437,6 +1459,9 @@ fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_s
             if m.item(Some("videocamera"), tr("Video call")) {
                 action = Some(2);
             }
+            if m.item(Some("minus-circle"), tr("Remove")) {
+                action = Some(4);
+            }
             if m.item(Some("block"), tr("Block")) {
                 action = Some(3);
             }
@@ -1447,6 +1472,7 @@ fn conversation_tile(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_s
                 open_lobby(app, c.id.clone(), n == 2);
                 app.panes.compose = None;
             }
+            Some(4) => app.panes.chat_confirm = Some((c.id.clone(), ChatConfirm::Remove)),
             Some(_) => app.panes.chat_confirm = Some((c.id.clone(), ChatConfirm::Block)),
             None => {}
         }
@@ -1611,7 +1637,7 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
     let username = probably_username(&q);
     let phone = !username && probably_phone(&q);
     let now = chrono::Utc::now().timestamp_millis();
-    let mut people: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Direct && !c.blocked && !c.unregistered(now) && (q.is_empty() || c.title.to_lowercase().contains(&q))).cloned().collect();
+    let mut people: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Direct && !c.blocked && !c.unregistered(now) && c.removal_stage.is_none() && (q.is_empty() || c.title.to_lowercase().contains(&q))).cloned().collect();
     people.sort_by_key(|c| c.title.to_lowercase());
     let footer = 64.;
     let body_h = (ui.available_height() - footer).max(0.);
@@ -1780,7 +1806,7 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             // Desktop's `getAllComposableConversations`: not someone found
             // unregistered in the last six hours.
             let now = chrono::Utc::now().timestamp_millis();
-            let mut contacts: Vec<_> = app.conversations.iter().filter(|c| c.kind != ConversationKind::Group && !c.blocked && !c.unregistered(now) && matches(c)).cloned().collect();
+            let mut contacts: Vec<_> = app.conversations.iter().filter(|c| c.kind != ConversationKind::Group && !c.blocked && !c.unregistered(now) && c.removal_stage.is_none() && matches(c)).cloned().collect();
             contacts.sort_by_key(|c| c.title.to_lowercase());
             let mut groups: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Group && !c.left && !c.ended && matches(c)).cloned().collect();
             groups.sort_by_key(|c| c.title.to_lowercase());

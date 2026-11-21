@@ -580,7 +580,7 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
         // `__blocked`: the 16px block icon, 4px, then the text.
         Icon::Block.paint(ui, Rect::from_center_size(Pos2::new(left + 8., inner.top() + 29.), Vec2::splat(16.)), 16., palette.text_secondary);
         job.append(tr("Blocked"), 20., body(palette.text_secondary));
-    } else if !c.accepted {
+    } else if !c.accepted && c.removal_stage != Some(langis_store::RemovalStage::JustNotification) {
         job.append("Message request", 0., egui::TextFormat { font_id: theme::semibold(13.), ..body(palette.text_secondary) });
     } else if typing {
         dots = true;
