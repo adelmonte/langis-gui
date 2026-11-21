@@ -439,10 +439,17 @@ fn editing_line(ui: &mut Ui, palette: &Palette, chat: &ChatView) {
 /// with its bar, the author, up to 2 lines and the thumbnail, and a close
 /// button.
 fn reply_bar(app: &App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView) {
-    let Some(q) = chat.quote.and_then(|id| chat.messages.iter().find(|m| m.id == id)).cloned() else { return };
+    let private = chat.private_quote.clone().filter(|(m, _)| Some(m.id) == chat.quote);
+    let here = chat.quote.and_then(|id| chat.messages.iter().find(|m| m.id == id)).cloned();
+    let Some(q) = here.or_else(|| private.as_ref().map(|(m, _)| m.clone())) else { return };
     let who = match &q.author {
         None => tr("You").to_owned(),
         Some(a) => app.name(a),
+    };
+    // A private reply names the group (Desktop's composer quote).
+    let who = match private.as_ref().filter(|(m, _)| m.conversation_id != chat.id) {
+        Some((_, group)) => format!("{who} · {group}"),
+        None => who,
     };
     let text = if q.body.is_empty() { q.attachments.first().map(|a| langis_store::attachment_preview(a).to_owned()).unwrap_or_default() } else { crate::format::one_line(&q.body) };
     let thumb = q.attachments.iter().find(|a| !a.sticker && (a.content_type.starts_with("image/") || a.content_type.starts_with("video/")))
