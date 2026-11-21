@@ -867,6 +867,14 @@ impl App {
                 }
             }
             Event::CallQualitySurvey(_) => crate::call_survey::open(&self.ctx),
+            // Desktop's sticker pack toasts: hidden, with Undo; unhidden.
+            Event::StickerPackHidden { id, key, hidden } => {
+                if hidden {
+                    self.toast_action(tr("Sticker pack hidden"), tr("Undo"), Command::SetStickerPackHidden { id, key, hidden: false });
+                } else {
+                    self.toast(tr("Sticker pack unhidden"));
+                }
+            }
             Event::Error(text) => {
                 // A new group that failed: Desktop's error dialog instead.
                 if self.panes.creating_group && text.contains("group") {

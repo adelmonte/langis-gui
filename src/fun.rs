@@ -61,6 +61,8 @@ pub struct Fun {
     forget_recent: Option<(Vec<u8>, u32)>,
     /// The Favorites button was clicked with none: Desktop's hint toast.
     favorites_hint: bool,
+    /// "Hide sticker pack?" for this received pack (id, key).
+    confirm_hide: Option<(Vec<u8>, Vec<u8>)>,
     /// GIFs sent lately, newest first (Desktop's Recents), kept in the
     /// `ui.recent_gifs` setting.
     pub recent_gifs: Vec<(Gif, PathBuf)>,
@@ -874,10 +876,13 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                     ui.label(RichText::new(empty).font(theme::regular(13.)).color(palette.text_secondary));
                 }
                 let installed_list = std::ptr::eq(packs, &manager.installed);
+                // Desktop's Hide, for packs shared with us (commits 5edf85d87,
+                // 8049395d9).
+                let hideable = std::ptr::eq(packs, &manager.received) && langis_core::remote_config::current().sticker_pack_hiding();
                 let mut rows = Vec::new();
                 for (i, pack) in packs.iter().enumerate() {
                     let top = ui.cursor().top();
-                    let action = pack_row(ui, &palette, pack, title, (false, false));
+                    let action = pack_row(ui, &palette, pack, title, (false, false), hideable);
                     rows.push(Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top()));
                     if let Some(action) = action {
                         match action {
@@ -889,6 +894,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                             PackAction::Open => open = Some((pack.id.clone(), pack.key.clone())),
                             PackAction::Install => app.send(Command::InstallStickerPack { id: pack.id.clone(), key: pack.key.clone() }),
                             PackAction::Uninstall => app.fun.confirm_uninstall = Some((pack.id.clone(), pack.key.clone())),
+                            PackAction::Hide => app.fun.confirm_hide = Some((pack.id.clone(), pack.key.clone())),
                             PackAction::Copy => {
                                 ui.ctx().copy_text(pack_link(&pack.id, &pack.key));
                                 app.toast("Link copied");
@@ -915,10 +921,11 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         });
     });
     app.fun.manager_tab = tab;
-    if (close || modal.should_close()) && app.fun.confirm_uninstall.is_none() {
+    if (close || modal.should_close()) && app.fun.confirm_uninstall.is_none() && app.fun.confirm_hide.is_none() {
         app.fun.manager_open = false;
     }
     uninstall_confirm(app, ui);
+    hide_confirm(app, ui);
     if let Some((id, key)) = open {
         app.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
         app.fun.preview = Some((id, key, None));
@@ -931,6 +938,27 @@ enum PackAction {
     Install,
     Uninstall,
     Copy,
+    Hide,
+}
+
+/// Desktop's `HidePackDialog` before a received pack is hidden.
+fn hide_confirm(app: &mut App, ui: &Ui) {
+    let Some((id, key)) = app.fun.confirm_hide.clone() else { return };
+    match crate::dialog::confirm(
+        ui.ctx(),
+        egui::Id::unique("sticker-hide"),
+        tr("Hide Sticker Pack?"),
+        tr("This will remove the sticker pack. You can't add it again without a link or sticker message."),
+        tr("Hide"),
+        crate::dialog::Variant::SubtleDestructive,
+    ) {
+        Some(crate::dialog::Choice::Action) => {
+            app.fun.confirm_hide = None;
+            app.send(Command::SetStickerPackHidden { id, key, hidden: true });
+        }
+        Some(crate::dialog::Choice::Cancel) => app.fun.confirm_hide = None,
+        None => {}
+    }
 }
 
 /// Desktop's sticker details: the sticker large, its emoji, and the
@@ -1003,7 +1031,7 @@ fn uninstall_confirm(app: &mut App, ui: &Ui) {
     }
 }
 
-fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: &str, moves: (bool, bool)) -> Option<PackAction> {
+fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: &str, moves: (bool, bool), hideable: bool) -> Option<PackAction> {
     let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.), Sense::click());
     if r.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
@@ -1055,14 +1083,20 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
     {
         crate::menu::open_at(ui.ctx(), menu, at);
     }
-    let mut copy = false;
+    let (mut copy, mut hide) = (false, false);
     crate::menu::show(ui.ctx(), menu, |m| {
         if m.item(Some("link"), tr("Copy link")) {
             copy = true;
         }
+        if hideable && m.item(Some("visible-slash"), tr("Hide")) {
+            hide = true;
+        }
     });
     if copy {
         return Some(PackAction::Copy);
+    }
+    if hide {
+        return Some(PackAction::Hide);
     }
     r.clicked().then_some(PackAction::Open)
 }
