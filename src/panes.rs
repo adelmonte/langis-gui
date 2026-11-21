@@ -271,7 +271,9 @@ pub fn on_event(app: &mut App, event: Event) {
             }
         }
         Event::RecipientFound { query, result } => {
-            if let Some(Compose::Chat { query: q, searching, found } | Compose::Find { query: q, searching, found, .. }) = app.panes.compose.as_mut()
+            if crate::handoff::found(app, &query, &result) {
+                // A signal.me link's chat, opened.
+            } else if let Some(Compose::Chat { query: q, searching, found } | Compose::Find { query: q, searching, found, .. }) = app.panes.compose.as_mut()
                 && q.trim() == query.trim()
             {
                 *searching = false;

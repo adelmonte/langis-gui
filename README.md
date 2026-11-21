@@ -40,8 +40,6 @@ marked (langis) need backend work first.
   notices aren't made at all.
 - Files from transferred history download without progress.
 - Dropping files on the window may not work on Wayland (winit's support).
-- Signal links from other apps aren't handed over (paste them into New
-  chat).
 
 Calls work on Linux in real use. Not yet tried on a real account: sounds,
 paste and drag-and-drop, chat export, notification profiles, the sticker
@@ -68,6 +66,13 @@ cargo run --release -- --demo   # made-up chats, no account
 ```
 
 Your data lives in `~/.local/share/langis-gui`, encrypted.
+
+The installed launcher entry opens `sgnl://` and `signalcaptcha://` links
+(install.sh makes langis their default handler, in place of Signal
+Desktop). Browsers keep https signal.me, signal.group, signal.link and
+signal.art links for themselves, but `langis-gui <link>` opens those too.
+As in Signal Desktop, one copy runs per account: launching it again shows
+the running window and hands it the link.
 
 ## License
 

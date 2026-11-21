@@ -35,6 +35,7 @@ mod glyphs;
 mod i18n;
 mod i18n_locales;
 mod icons;
+mod handoff;
 mod lightbox;
 mod menu;
 mod menu_bar;
@@ -91,12 +92,20 @@ pub struct Args {
     /// Start in the background (Desktop's "Start minimized to tray", used
     /// when opened at login).
     pub minimized: bool,
+    /// A Signal link to open (`sgnl://`, `signalcaptcha://`, or an https
+    /// signal.me, signal.group, signal.link or signal.art link), as the
+    /// launcher entry passes them.
+    pub link: Option<String>,
 }
 
 impl Args {
     fn parse() -> Result<Self, String> {
+        Self::parse_from(std::env::args().skip(1))
+    }
+
+    fn parse_from(from: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut args = Self::default();
-        let mut it = std::env::args().skip(1);
+        let mut it = from.into_iter();
         while let Some(arg) = it.next() {
             match arg.as_str() {
                 "--demo" => args.demo = true,
@@ -104,11 +113,19 @@ impl Args {
                 "--minimized" => args.minimized = true,
                 "-h" | "--help" => {
                     println!(
-                        "langis-gui [--demo] [--data-dir DIR] [--minimized]\n\n  --demo          made-up chats in a scratch directory, no network\n  --data-dir DIR  where the account lives (default ~/.local/share/langis-gui)\n  --minimized     start minimized"
+                        "langis-gui [--demo] [--data-dir DIR] [--minimized] [LINK]\n\n  --demo          made-up chats in a scratch directory, no network\n  --data-dir DIR  where the account lives (default ~/.local/share/langis-gui)\n  --minimized     start minimized\n  LINK            a Signal link to open (sgnl://, signalcaptcha://, signal.me,\n                  signal.group, signal.link, signal.art); a copy already\n                  running for the account opens it instead"
                     );
                     std::process::exit(0);
                 }
-                other => return Err(format!("unknown argument {other}")),
+                other if other.starts_with('-') => return Err(format!("unknown argument {other}")),
+                // Desktop takes the first argument that's a Signal link
+                // (`maybeGetIncomingSignalRoute`) and passes over the rest.
+                link if langis_core::routes::parse(link).is_some() => {
+                    if args.link.is_none() {
+                        args.link = Some(link.to_owned());
+                    }
+                }
+                other => eprintln!("ignoring {other}: not a Signal link"),
             }
         }
         Ok(args)
@@ -157,6 +174,19 @@ fn main() -> eframe::Result {
         }
     };
     init_logging(&args);
+    // One copy per account: a running one takes the link (or just shows
+    // its window), as Desktop's `second-instance` does.
+    if !args.demo {
+        let data_dir = args.data_dir.clone().unwrap_or_else(app::default_data_dir);
+        let request = handoff::Request {
+            url: args.link.clone(),
+            token: std::env::var("XDG_ACTIVATION_TOKEN").ok().filter(|t| !t.is_empty()),
+        };
+        if handoff::send(&handoff::socket_for(&data_dir), &request).is_ok() {
+            tracing::info!("handed over to the running copy");
+            return Ok(());
+        }
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("langis")
@@ -177,4 +207,38 @@ fn window_icon() -> std::sync::Arc<egui::IconData> {
         Ok(rgba) => egui::IconData { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() },
         Err(_) => egui::IconData::default(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+
+    fn parse(args: &[&str]) -> Result<Args, String> {
+        Args::parse_from(args.iter().map(|a| a.to_string()))
+    }
+
+    #[test]
+    fn takes_the_first_signal_link() {
+        let args = parse(&["--data-dir", "/tmp/x", "sgnl://signal.group/#abc", "https://signal.me/#p/+14155550123"]).unwrap();
+        assert_eq!(args.link.as_deref(), Some("sgnl://signal.group/#abc"));
+        assert_eq!(args.data_dir.as_deref(), Some(std::path::Path::new("/tmp/x")));
+        for link in [
+            "https://signal.me/#p/+14155550123",
+            "https://signal.link/call/#key=bcdf-ghkm",
+            "signalcaptcha://signal-hcaptcha.abc",
+            "sgnl://addstickers/?pack_id=00&pack_key=11",
+        ] {
+            assert_eq!(parse(&[link]).unwrap().link.as_deref(), Some(link), "{link}");
+        }
+    }
+
+    #[test]
+    fn passes_over_other_words_but_not_unknown_flags() {
+        let args = parse(&["https://example.com/", "--minimized", "notes.txt"]).unwrap();
+        assert!(args.link.is_none());
+        assert!(args.minimized);
+        assert!(parse(&["--nope"]).is_err());
+        assert!(parse(&["--data-dir"]).is_err());
+        assert!(parse(&[]).unwrap().link.is_none());
+    }
 }

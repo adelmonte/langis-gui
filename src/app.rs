@@ -190,6 +190,19 @@ pub struct App {
     /// Files dropped on the window under Wayland (winit gives egui only
     /// X11's); `None` on X11.
     pub drops: Option<crate::wayland_dnd::Drops>,
+    /// Signal links and Show from later launches (`handoff`); `None` for
+    /// the demo, or when another copy has the socket.
+    handoff: Option<crate::handoff::Inbox>,
+    /// Brings the window forward on Wayland; `None` elsewhere.
+    activator: Option<crate::handoff::Activator>,
+    /// A launch's activation token, used the frame after the window is
+    /// shown (`Some(None)`: ask for one of our own).
+    activate: Option<Option<String>>,
+    /// A Signal link from the command line or a later launch, opened once
+    /// the account is ready.
+    pub pending_link: Option<String>,
+    /// The signal.me link being looked up, to open its chat when found.
+    pub link_lookup: Option<String>,
     /// Attachments downloading: (message id, index) to bytes received and
     /// the total, from langis's DownloadProgress.
     pub downloads: std::collections::HashMap<(i64, usize), (u64, u64)>,
@@ -266,6 +279,7 @@ impl App {
         crate::i18n::set_locale(crate::i18n::resolve(&crate::i18n::saved()));
         crate::theme::install(&ctx);
         let (loaded_tx, loaded) = channel();
+        let link = args.link.clone();
         let (data_dir, scratch) = if args.demo {
             sweep_demo_dirs();
             let dir = tempfile::Builder::new().prefix("langis-gui-demo-").tempdir().expect("a scratch directory for the demo");
@@ -348,6 +362,11 @@ impl App {
             downloads: Default::default(),
             unavailable: Default::default(),
             drops: crate::wayland_dnd::start(cc),
+            handoff: None,
+            activator: crate::handoff::Activator::new(cc),
+            activate: None,
+            pending_link: link,
+            link_lookup: None,
             input: InputPrefs { auto_convert: true, formatting: true, skin_tone: None, spell: true },
             unread_only: false,
             left_width: 300.,
@@ -367,6 +386,15 @@ impl App {
             ));
         } else {
             app.phase = Phase::Setup { passphrase: false, first: String::new(), second: String::new(), error: None };
+        }
+        // Later launches for this account hand their links here, unless
+        // another copy has it (an older one, without the socket).
+        if !app.demo && !matches!(&app.phase, Phase::Failed(why) if why == ALREADY_RUNNING) {
+            let ctx = app.ctx.clone();
+            match crate::handoff::listen(&crate::handoff::socket_for(&app.data_dir), move || ctx.request_repaint()) {
+                Ok(inbox) => app.handoff = Some(inbox),
+                Err(error) => tracing::warn!(%error, "not listening for links from other launches"),
+            }
         }
         app
     }
@@ -580,6 +608,32 @@ impl App {
         }
         let now = Instant::now();
         self.toasts.retain(|t| t.until > now);
+        self.take_handoffs();
+    }
+
+    /// Later launches: each shows the window (Desktop's `second-instance`)
+    /// and may bring a link; links open once the account is ready.
+    fn take_handoffs(&mut self) {
+        if let Some(token) = self.activate.take()
+            && let Some(activator) = self.activator.as_mut()
+        {
+            activator.activate(token.as_deref());
+        }
+        let requests: Vec<_> = self.handoff.as_ref().map(|inbox| inbox.requests.try_iter().collect()).unwrap_or_default();
+        for request in requests {
+            let ctx = self.ctx.clone();
+            self.show_window(&ctx);
+            self.activate = Some(request.token);
+            ctx.request_repaint();
+            if request.url.is_some() {
+                self.pending_link = request.url;
+            }
+        }
+        if matches!(self.phase, Phase::Ready)
+            && let Some(url) = self.pending_link.take()
+        {
+            crate::handoff::open(self, &url);
+        }
     }
 
     fn attach(&mut self, backend: Backend, mut events: futures::channel::mpsc::UnboundedReceiver<Event>) {
