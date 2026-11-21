@@ -34,7 +34,7 @@ Everything a linked Signal Desktop does, with its layout and wording
 - Settings: profile and username, privacy, notifications and notification
   profiles, per-chat mute options, chat colors, appearance, 51 languages,
   backups (Signal Secure Backups status, and Desktop backups to a folder),
-  linked device info, debug log.
+  sent media quality, linked device info, debug log.
 - Sticker pack creator, media editor, photo and video viewer, all media.
 - System tray, Desktop's keyboard shortcuts (Ctrl+/ lists them), Signal
   links from other apps, one copy per account.
@@ -46,8 +46,7 @@ Everything a linked Signal Desktop does, with its layout and wording
 
 - Desktop backups work, but no backup made here has been restored on a
   phone yet.
-- Sent media quality (Standard/High) is left out by design, and donations
-  on purpose.
+- Donations are left out on purpose.
 - Languages written right to left, and others that need complex text
   shaping, aren't offered: egui can't draw them yet. Chinese, Japanese and
   Korean need a system font.
@@ -55,9 +54,9 @@ Everything a linked Signal Desktop does, with its layout and wording
   and dropping files on the window may not either (winit's support).
 
 Calls work on Linux in real use. Not yet tried on a real account: sounds,
-paste and drag-and-drop, chat export, notification profiles, backups, the
-sticker pack creator, linking errors and relinking, removing a contact, and
-opening links from other apps.
+paste and drag-and-drop, chat export, notification profiles, backups, sent
+media quality, the sticker pack creator, linking errors and relinking,
+removing a contact, and opening links from other apps.
 
 </details>
 
