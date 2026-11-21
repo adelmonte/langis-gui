@@ -83,6 +83,8 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, tip: &str) -> Response {
         ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
     }
     icon.paint(ui, rect, size, palette.text);
+    // Its name for screen readers, as Desktop's `aria-label`.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     response.on_hover_text(tip)
 }
 
@@ -97,6 +99,8 @@ pub fn axo_icon_button(ui: &mut Ui, symbol: &str, label: &str) -> Response {
         ui.painter().circle_filled(rect.center(), 16., palette.fill);
     }
     theme::paint_symbol(ui.painter(), symbol, rect.center(), 20., palette.text);
+    // Its name for screen readers, as Desktop's `aria-label`.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     response.on_hover_text(label)
 }
 
@@ -113,6 +117,8 @@ pub fn axo_icon_button_sm(ui: &mut Ui, symbol: &str, label: &str, pressed: bool)
         ui.painter().circle_filled(rect.center(), 14., palette.fill);
     }
     theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., if pressed { Color32::WHITE } else { palette.text });
+    // Its name for screen readers, as Desktop's `aria-label`.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     response.on_hover_text(label)
 }
 
@@ -237,6 +243,7 @@ pub fn axo_button(ui: &mut Ui, label: &str, variant: Axo) -> Response {
     };
     ui.painter().rect_filled(rect, CornerRadius::same(15), fill);
     ui.painter().galley(rect.center() - galley.size() / 2., galley, text);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     response
 }
 
@@ -253,6 +260,7 @@ pub fn pill_button(ui: &mut Ui, text: &str, primary: bool) -> Response {
     }
     ui.painter().rect_filled(rect, CornerRadius::same(16), fill);
     ui.painter().galley(rect.center() - galley.size() / 2., galley, text_color);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text));
     response
 }
 
