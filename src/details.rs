@@ -26,6 +26,8 @@ pub enum Page {
     ChatColor,
     AllMedia,
     Notifications,
+    /// Desktop's `WhileMutedSettings`, under Notifications.
+    WhileMuted,
 }
 
 pub struct Details {
@@ -216,7 +218,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         }
                         _ => {
                             if let Some(d) = app.panes.details.as_mut() {
-                                d.page = Page::Main;
+                                d.page = if page == Page::WhileMuted { Page::Notifications } else { Page::Main };
                             }
                             app.send(Command::CancelKeyTransparency);
                         }
@@ -237,6 +239,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Page::ChatColor => tr("Chat Color"),
                     Page::AllMedia => "",
                     Page::Notifications => tr("Notifications"),
+                    Page::WhileMuted => tr("While muted"),
                 };
                 ui.label(RichText::new(heading).font(theme::semibold(14.)));
                 if page == Page::AllMedia
@@ -257,6 +260,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Page::Main => main(app, ui, &palette, &c),
                     Page::Safety => safety(app, ui, &palette, &c),
                     Page::Notifications => notifications_page(app, ui, &c),
+                    Page::WhileMuted => while_muted_page(app, ui, &c),
                     Page::GroupLink => group_link(app, ui, &palette, &c),
                     Page::Requests => requests(app, ui, &palette, &c),
                     Page::Permissions => permissions(app, ui, &palette, &c),
@@ -917,16 +921,61 @@ fn notifications_page(app: &mut App, ui: &mut Ui, c: &Conversation) {
                 crate::panes::mute_items(app, m, &c.id);
             }
         });
-        // Desktop's "Mentions" for a group: while muted, notify for
-        // mentions anyway or not.
-        if c.kind == ConversationKind::Group {
-            let options = ["Always notify", "Don't notify"];
-            let item = Item::new(tr("Mentions")).symbol("at").description("Receive notifications when you're mentioned in muted chats");
-            if let Some(i) = axo_list::select(ui, egui::Id::unique(("details-mentions", c.id.0.as_str())), item, &options, Some(c.dont_notify_mentions as usize)) {
-                let off = i == 1;
-                if off != c.dont_notify_mentions {
-                    app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::DontNotifyMentions(off) });
-                }
+        // Desktop's "While muted": what still notifies, summarized; mentions
+        // and replies only for groups.
+        use langis_store::ChatNotifyKind as K;
+        let group = c.kind == ConversationKind::Group;
+        let shown: Vec<&str> = [(K::Calls, tr("Calls")), (K::Mentions, tr("Mentions")), (K::Replies, tr("Replies"))]
+            .into_iter()
+            .filter(|(k, _)| (group || *k == K::Calls) && app.chat_notify_on(c, *k))
+            .map(|(_, label)| label)
+            .collect();
+        let summary = if shown.is_empty() {
+            tr("None").to_owned()
+        } else {
+            let mut s = shown.join(", ");
+            if let Some((first, rest)) = s.split_once(", ") {
+                s = format!("{first}, {}", rest.to_lowercase());
+            }
+            s
+        };
+        let item = Item::new(tr("While muted")).symbol("bell-badge").description(tr("Choose notifications to show while this chat is muted."));
+        if axo_list::item(ui, item, End::Arrow(Some(&summary))).clicked() {
+            set_page(app, Page::WhileMuted);
+        }
+    });
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        use langis_store::ChatNotifyKind as K;
+        let item = Item::new(tr("Unread reminders"))
+            .symbol("arrow-clockwise")
+            .description(tr("Occasionally notify when there are unread messages while this chat is muted."));
+        let mut on = app.chat_notify_on(c, K::UnreadReminders);
+        if axo_list::switch(ui, item, &mut on) {
+            app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::Notify(K::UnreadReminders, Some(on)) });
+        }
+    });
+}
+
+/// Desktop's `WhileMutedSettings`: a chat's own switches, each set
+/// explicitly once flipped.
+fn while_muted_page(app: &mut App, ui: &mut Ui, c: &Conversation) {
+    use crate::axo_list::{self, Item};
+    use langis_store::ChatNotifyKind as K;
+    let rows = [
+        (K::Calls, "phone", tr("Calls"), tr("Ring or notify when a call is started while this chat is muted.")),
+        (K::Mentions, "at", tr("Mentions"), tr("Notify when you are @mentioned while this chat is muted.")),
+        (K::Replies, "reply", tr("Replies"), tr("Notify when someone replies to your message while this chat is muted.")),
+    ];
+    let group = c.kind == ConversationKind::Group;
+    axo_list::list(ui, None, None, |ui| {
+        for (kind, symbol, label, description) in rows {
+            if !group && kind != K::Calls {
+                continue;
+            }
+            let mut on = app.chat_notify_on(c, kind);
+            if axo_list::switch(ui, Item::new(label).symbol(symbol).description(description), &mut on) {
+                app.send(Command::SetChat { conversation: c.id.clone(), change: ChatChange::Notify(kind, Some(on)) });
             }
         }
     });

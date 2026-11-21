@@ -1467,10 +1467,15 @@ fn reset_notifications(app: &mut App) {
             write(app, SETTING_NOTIFICATIONS, "true".into());
             write(app, SETTING_NOTIFICATION_CONTENT, "all".into());
             app.notify = (true, "all".into());
-            // Desktop's reset takes chats' own settings back too.
-            let custom: Vec<_> = app.conversations.iter().filter(|c| c.dont_notify_mentions).map(|c| c.id.clone()).collect();
-            for conversation in custom {
-                app.send(Command::SetChat { conversation, change: ChatChange::DontNotifyMentions(false) });
+            // Desktop's reset takes chats' own settings back too
+            // (`resetNotificationSettings`: while muted, unread reminders).
+            let custom: Vec<_> = app
+                .conversations
+                .iter()
+                .flat_map(|c| langis_store::ChatNotifyKind::ALL.into_iter().filter(|k| c.notify.get(*k).is_some()).map(|k| (c.id.clone(), k)))
+                .collect();
+            for (conversation, kind) in custom {
+                app.send(Command::SetChat { conversation, change: ChatChange::Notify(kind, None) });
             }
             app.badge_prefs = Default::default();
             write(app, SETTING_BADGE_CHATS, "false".into());
