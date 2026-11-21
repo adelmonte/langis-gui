@@ -59,6 +59,10 @@ pub struct Fun {
     sticker_query: String,
     /// A sticker taken out of Recents from its menu, to save.
     forget_recent: Option<(Vec<u8>, u32)>,
+    /// The Favorites button was clicked with none: Desktop's hint toast.
+    favorites_hint: bool,
+    /// "Hide sticker pack?" for this received pack (id, key).
+    confirm_hide: Option<(Vec<u8>, Vec<u8>)>,
     /// GIFs sent lately, newest first (Desktop's Recents), kept in the
     /// `ui.recent_gifs` setting.
     pub recent_gifs: Vec<(Gif, PathBuf)>,
@@ -179,7 +183,11 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
     }
     let manager = fun.manager_open;
     let forget = fun.forget_recent.take();
+    let hint = std::mem::take(&mut fun.favorites_hint);
     app.fun = fun;
+    if hint {
+        app.toast(tr("Right click a sticker to add to Favorites"));
+    }
     if let Some((pack, sticker)) = forget {
         app.fun.recent_stickers.retain(|(p, s)| !(*p == pack && *s == sticker));
         save_recent_stickers(app);
@@ -441,7 +449,9 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                 (pack, f.sticker.clone())
             })
             .collect();
-        if !favorites.is_empty() {
+        // Desktop keeps the Favorites button while favorites are on, empty
+        // or not (`FunPanelStickers`, commit 5b083e565).
+        if !favorites.is_empty() || langis_core::remote_config::current().sticker_favorites() {
             sections.push((tr("Favorites").to_owned(), None, "star", favorites));
         }
         for p in &fun.packs {
@@ -479,7 +489,11 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                             None => theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., palette.text),
                         }
                         if r.on_hover_text(title.as_str()).clicked() {
-                            jump = Some(i);
+                            if *symbol == "star" && sections[i].3.is_empty() {
+                                fun.favorites_hint = true;
+                            } else {
+                                jump = Some(i);
+                            }
                         }
                     }
                 });
@@ -862,10 +876,13 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                     ui.label(RichText::new(empty).font(theme::regular(13.)).color(palette.text_secondary));
                 }
                 let installed_list = std::ptr::eq(packs, &manager.installed);
+                // Desktop's Hide, for packs shared with us (commits 5edf85d87,
+                // 8049395d9).
+                let hideable = std::ptr::eq(packs, &manager.received) && langis_core::remote_config::current().sticker_pack_hiding();
                 let mut rows = Vec::new();
                 for (i, pack) in packs.iter().enumerate() {
                     let top = ui.cursor().top();
-                    let action = pack_row(ui, &palette, pack, title, (false, false));
+                    let action = pack_row(ui, &palette, pack, title, (false, false), hideable);
                     rows.push(Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top()));
                     if let Some(action) = action {
                         match action {
@@ -877,6 +894,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                             PackAction::Open => open = Some((pack.id.clone(), pack.key.clone())),
                             PackAction::Install => app.send(Command::InstallStickerPack { id: pack.id.clone(), key: pack.key.clone() }),
                             PackAction::Uninstall => app.fun.confirm_uninstall = Some((pack.id.clone(), pack.key.clone())),
+                            PackAction::Hide => app.fun.confirm_hide = Some((pack.id.clone(), pack.key.clone())),
                             PackAction::Copy => {
                                 ui.ctx().copy_text(pack_link(&pack.id, &pack.key));
                                 app.toast("Link copied");
@@ -903,10 +921,11 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
         });
     });
     app.fun.manager_tab = tab;
-    if (close || modal.should_close()) && app.fun.confirm_uninstall.is_none() {
+    if (close || modal.should_close()) && app.fun.confirm_uninstall.is_none() && app.fun.confirm_hide.is_none() {
         app.fun.manager_open = false;
     }
     uninstall_confirm(app, ui);
+    hide_confirm(app, ui);
     if let Some((id, key)) = open {
         app.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
         app.fun.preview = Some((id, key, None));
@@ -919,6 +938,27 @@ enum PackAction {
     Install,
     Uninstall,
     Copy,
+    Hide,
+}
+
+/// Desktop's `HidePackDialog` before a received pack is hidden.
+fn hide_confirm(app: &mut App, ui: &Ui) {
+    let Some((id, key)) = app.fun.confirm_hide.clone() else { return };
+    match crate::dialog::confirm(
+        ui.ctx(),
+        egui::Id::unique("sticker-hide"),
+        tr("Hide Sticker Pack?"),
+        tr("This will remove the sticker pack. You can't add it again without a link or sticker message."),
+        tr("Hide"),
+        crate::dialog::Variant::SubtleDestructive,
+    ) {
+        Some(crate::dialog::Choice::Action) => {
+            app.fun.confirm_hide = None;
+            app.send(Command::SetStickerPackHidden { id, key, hidden: true });
+        }
+        Some(crate::dialog::Choice::Cancel) => app.fun.confirm_hide = None,
+        None => {}
+    }
 }
 
 /// Desktop's sticker details: the sticker large, its emoji, and the
@@ -927,6 +967,10 @@ fn sticker_details(app: &mut App, ui: &Ui) {
     let Some((pack_id, pack_key, sticker)) = app.fun.sticker_details.clone() else { return };
     let palette = Palette::of(ui.ctx());
     let favorite = app.fun.favorite_ids.iter().any(|(p, s)| *p == pack_id && *s == sticker.id);
+    // Desktop offers Add only for an installed pack, and names the pack
+    // (`StickerPreviewModal`'s details popover, commit 4cbe3539e).
+    let pack = app.fun.preview.as_ref().and_then(|(_, _, r)| r.as_ref()?.as_ref().ok()).map(|p| p.pack.clone());
+    let installed = pack.as_ref().is_some_and(|p| p.installed) || app.fun.packs.iter().any(|p| p.id == pack_id);
     let mut toggle = false;
     let closed = crate::panes::modal(ui, "sticker-details", 300., |ui| {
         crate::panes::title(ui, tr("Sticker details"));
@@ -938,12 +982,22 @@ fn sticker_details(app: &mut App, ui: &Ui) {
                 crate::chat::append_with_emoji(&mut job, e, egui::TextFormat { font_id: theme::regular(28.), color: palette.text, ..Default::default() });
                 ui.label(job);
             }
+            if let Some(pack) = pack.as_ref().filter(|p| !p.title.is_empty() || !p.author.is_empty()) {
+                let line = [pack.title.as_str(), pack.author.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · ");
+                ui.label(RichText::new(line).font(theme::regular(12.)).color(palette.text_secondary));
+            }
             ui.add_space(8.);
-            toggle = widgets::pill_button(ui, if favorite { tr("Remove from Favorites") } else { tr("Add to Favorites") }, false).clicked();
+            if favorite || installed {
+                toggle = widgets::pill_button(ui, if favorite { tr("Remove from Favorites") } else { tr("Add to Favorites") }, false).clicked();
+            }
         });
     });
     if toggle {
         app.send(Command::SetStickerFavorite { pack_id, pack_key, sticker_id: sticker.id, favorite: !favorite });
+        // (At the limit the backend says why instead.)
+        if favorite || app.fun.favorite_ids.len() < 500 {
+            app.toast(if favorite { tr("Sticker removed from Favorites") } else { tr("Sticker added to Favorites") });
+        }
     }
     if closed || toggle {
         app.fun.sticker_details = None;
@@ -977,7 +1031,7 @@ fn uninstall_confirm(app: &mut App, ui: &Ui) {
     }
 }
 
-fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: &str, moves: (bool, bool)) -> Option<PackAction> {
+fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: &str, moves: (bool, bool), hideable: bool) -> Option<PackAction> {
     let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.), Sense::click());
     if r.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
@@ -1029,14 +1083,20 @@ fn pack_row(ui: &mut Ui, palette: &Palette, pack: &StickerPackSummary, section: 
     {
         crate::menu::open_at(ui.ctx(), menu, at);
     }
-    let mut copy = false;
+    let (mut copy, mut hide) = (false, false);
     crate::menu::show(ui.ctx(), menu, |m| {
         if m.item(Some("link"), tr("Copy link")) {
             copy = true;
         }
+        if hideable && m.item(Some("visible-slash"), tr("Hide")) {
+            hide = true;
+        }
     });
     if copy {
         return Some(PackAction::Copy);
+    }
+    if hide {
+        return Some(PackAction::Hide);
     }
     r.clicked().then_some(PackAction::Open)
 }

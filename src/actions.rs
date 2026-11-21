@@ -93,6 +93,8 @@ const PIN_DURATIONS: [(&str, Option<u32>); 4] =
 /// What a popup or dialog asked for, applied by the chat.
 pub enum Do {
     Reply(i64),
+    /// Desktop's "Reply privately" to a group message (commit 98032f987).
+    ReplyPrivately(i64),
     Edit(i64),
     Command(Command),
     Copy(String),
@@ -198,6 +200,7 @@ pub fn hover_extra_command(app: &App, m: &Message) -> Option<Command> {
 struct Offers {
     download: Option<usize>,
     reply: bool,
+    reply_privately: bool,
     react: bool,
     edit: bool,
     copy: bool,
@@ -217,6 +220,7 @@ fn offers(app: &App, m: &Message, c: &langis_store::Conversation, pinned: bool) 
     Offers {
         download: m.attachments.iter().position(|a| !a.sticker).filter(|_| usable),
         reply: usable && can_send,
+        reply_privately: can_reply_privately(app, m, c),
         react: !m.deleted && can_send,
         edit: can_send && langis_core::edits::can_edit(m, note_to_self, now),
         copy: usable && !m.body.is_empty() && m.poll.is_none(),
@@ -225,6 +229,22 @@ fn offers(app: &App, m: &Message, c: &langis_store::Conversation, pinned: bool) 
         retry_delete: failed_delete,
         delete: true,
     }
+}
+
+/// Desktop's `canReplyPrivately` (`ts/state/selectors/message.preload.ts`,
+/// commit 98032f987): the remote config allows it, and it's someone's
+/// message, not deleted, in a group we accepted and didn't block, from
+/// someone we didn't block and who is still on Signal.
+fn can_reply_privately(app: &App, m: &Message, c: &langis_store::Conversation) -> bool {
+    if !langis_core::remote_config::current().private_reply_send() {
+        return false;
+    }
+    if m.direction != Direction::Incoming || m.deleted || c.kind != ConversationKind::Group || !c.accepted || c.blocked {
+        return false;
+    }
+    let Some(author) = m.author.as_deref() else { return false };
+    let person = app.conversation(&langis_store::ConversationId::direct(author));
+    !person.is_some_and(|p| p.blocked || p.ever_unregistered())
 }
 
 /// A sticker's pack id, key and sticker id, from the hex its message keeps.
@@ -271,6 +291,9 @@ pub fn show_popup(app: &App, ctx: &egui::Context, popup: &mut Popup, chat: &[Mes
                 }
                 if offer.reply && ui.item(Some("reply"), tr("Reply")) {
                     out.push(Do::Reply(id));
+                }
+                if offer.reply_privately && ui.item(Some("reply"), tr("Reply privately")) {
+                    out.push(Do::ReplyPrivately(id));
                 }
                 // Desktop's sticker favorite, from the sticker's pack.
                 if let Some((pack_id, pack_key, sticker_id)) = m.attachments.iter().find(|a| a.sticker).and_then(|a| a.sticker_pack.as_ref()).and_then(sticker_ref).filter(|_| !m.deleted) {

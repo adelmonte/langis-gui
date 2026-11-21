@@ -36,6 +36,9 @@ pub struct ChatView {
     pub at_start: bool,
     pub composer: String,
     pub quote: Option<i64>,
+    /// The quoted message when it's another chat's (a private reply), with
+    /// its group's title.
+    pub private_quote: Option<(langis_store::Message, String)>,
     pub typing_sent: bool,
     /// When "typing" last went out; resent every 10s while typing.
     pub typing_refreshed: Option<Instant>,
@@ -173,7 +176,7 @@ enum Action {
     /// The reaction bar for a message, at a point.
     ReactBar { message_id: i64, at: Pos2 },
     /// Scroll to the message a quote quotes.
-    JumpToQuote { author: Option<String>, sent_at: i64 },
+    JumpToQuote { author: Option<String>, sent_at: i64, group: Option<langis_store::ConversationId>, group_unknown: bool },
     /// Scrolls to a message by id.
     Jump(i64),
     /// Opens a message's Info (its recipients' send states).
@@ -208,6 +211,7 @@ impl ChatView {
             at_start: false,
             composer: draft.clone(),
             quote: None,
+            private_quote: None,
             typing_sent: false,
             typing_refreshed: None,
             last_typed: None,
@@ -606,12 +610,16 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     chat.dialog = Some(crate::actions::Dialog::Info { message: message_id, details: None });
                 }
             }
-            Action::JumpToQuote { author, sent_at } => {
-                let here = app.chat.as_ref().and_then(|c| c.messages.iter().find(|m| m.sent_at == sent_at && m.author == author).map(|m| m.id));
+            // A private reply's original is in its group (Desktop's
+            // `scrollToQuotedMessage`, commit 98032f987).
+            Action::JumpToQuote { group_unknown: true, group: None, .. } => app.toast(tr("Original message and group not found")),
+            Action::JumpToQuote { author, sent_at, group, .. } => {
+                let target = group.clone().unwrap_or_else(|| id.clone());
+                let here = app.chat.as_ref().filter(|c| c.id == target).and_then(|c| c.messages.iter().find(|m| m.sent_at == sent_at && m.author == author).map(|m| m.id));
                 match here {
-                    Some(message_id) => app.open_at(id.clone(), message_id),
+                    Some(message_id) => app.open_at(target, message_id),
                     None => {
-                        let conversation = id.clone();
+                        let conversation = target;
                         app.load(move |db| async move {
                             match db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten() {
                                 Some(m) => Some(crate::app::Loaded::Chat(ChatLoaded::Jump { conversation, message_id: m.id })),
@@ -662,6 +670,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
     let mut opened = None;
     let mut safety_of: Option<String> = None;
     let mut asked = None;
+    let mut privately = None;
     for (from_popup, d) in todo {
         match d {
             Do::Close => {
@@ -676,6 +685,14 @@ fn popups(app: &mut App, ui: &mut Ui) {
             Do::Reply(id) => {
                 chat.quote = Some(id);
                 chat.editing = None;
+            }
+            // Desktop's "Reply privately": their 1:1 chat, replying to this.
+            Do::ReplyPrivately(id) => {
+                let found = chat.messages.iter().find(|m| m.id == id).cloned();
+                if let Some((m, author)) = found.and_then(|m| m.author.clone().map(|a| (m, a))) {
+                    privately = Some((id, m, author, conversation.title.clone()));
+                }
+                chat.popup = None;
             }
             Do::Edit(id) => {
                 if let Some(m) = chat.messages.iter().find(|m| m.id == id) {
@@ -725,6 +742,13 @@ fn popups(app: &mut App, ui: &mut Ui) {
     app.chat = Some(chat);
     if let Some(to) = opened {
         app.open(to);
+    }
+    if let Some((id, m, author, group)) = privately {
+        app.open(langis_store::ConversationId::direct(&author));
+        if let Some(chat) = app.chat.as_mut() {
+            chat.quote = Some(id);
+            chat.private_quote = Some((m, group));
+        }
     }
     if let Some(aci) = safety_of {
         crate::details::open_safety(app, langis_store::ConversationId::direct(&aci));
@@ -2003,10 +2027,13 @@ fn message(
             ui.painter().rect_filled(warn, CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, fill);
             let ink = if outgoing { Color32::WHITE } else { palette.text };
             theme::paint_symbol(ui.painter(), "info", Pos2::new(warn.left() + 14., warn.center().y), 14., ink);
-            ui.painter().text(Pos2::new(warn.left() + 28., warn.center().y), Align2::LEFT_CENTER, tr("Original message not found"), theme::regular(13.), ink);
+            // Desktop's `Quote__original-message-and-group-not-found` for a
+            // private reply whose group we don't have.
+            let text = if q.group_unknown || q.group.as_ref().is_some_and(|g| ctx.app.conversation(g).is_none()) { tr("Original message and group not found") } else { tr("Original message not found") };
+            ui.painter().text(Pos2::new(warn.left() + 28., warn.center().y), Align2::LEFT_CENTER, text, theme::regular(13.), ink);
         }
         if !q.story && ui.interact(rect, ui.scope_id().with(("quote", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            actions.push(Action::JumpToQuote { author: q.author.clone(), sent_at: q.sent_at });
+            actions.push(Action::JumpToQuote { author: q.author.clone(), sent_at: q.sent_at, group: q.group.clone(), group_unknown: q.group_unknown });
         }
         y += quote_h;
     }
@@ -2771,9 +2798,15 @@ fn check_quote(app: &App, ui: &Ui, conversation: &langis_store::ConversationId, 
         return;
     }
     ui.ctx().data_mut(|d| d.insert_temp(asked, true));
-    let (conversation, author, sent_at, ctx) = (conversation.clone(), q.author.clone(), q.sent_at, ui.ctx().clone());
+    // A private reply's original is in its group; one whose group we don't
+    // have is missing.
+    let conversation = if q.group_unknown { None } else { Some(q.group.clone().unwrap_or_else(|| conversation.clone())) };
+    let (author, sent_at, ctx) = (q.author.clone(), q.sent_at, ui.ctx().clone());
     app.load(move |db| async move {
-        let found = db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten().is_some();
+        let found = match conversation {
+            Some(conversation) => db.find_message(&conversation, author.as_deref(), sent_at).await.ok().flatten().is_some(),
+            None => false,
+        };
         ctx.data_mut(|d| d.insert_temp(id, found));
         ctx.request_repaint();
         None
@@ -2848,6 +2881,16 @@ fn quote(ui: &Ui, palette: &Palette, outgoing: bool, q: &langis_store::Quote, re
     let inner = rect.shrink2(Vec2::new(10., 6.));
     // A story's quote: "{name} · Story".
     let author = if q.story { format!("{author} · {}", tr("Story")) } else { author };
+    // A private reply names its group (Desktop's `quotedGroupTitle`, or
+    // "Unknown group").
+    let author = match (&q.group, q.group_unknown) {
+        (Some(group), _) => match ctx.app.conversation(group) {
+            Some(g) => format!("{author} · {}", g.title),
+            None => format!("{author} · {}", tr("Unknown group")),
+        },
+        (None, true) => format!("{author} · {}", tr("Unknown group")),
+        (None, false) => author,
+    };
     ui.painter().text(Pos2::new(inner.left() + 2., inner.top()), Align2::LEFT_TOP, author, theme::semibold(13.), text_color);
     let galley = quote_body(ui, q, rect.width(), text_color);
     ui.painter().galley(Pos2::new(inner.left() + 2., inner.top() + 19.), galley, text_color);
