@@ -1045,7 +1045,34 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
     } else if let Some(offset) = chat.pending_offset.take() {
         scroll = scroll.vertical_scroll_offset(offset);
     }
+    // Chromium's keys for a scroll box when no field has the keys: Page Up
+    // and Page Down scroll by most of a page, Home to the top of what's
+    // loaded, End to the newest.
+    let (page, home, end) = if ui.memory(|m| m.focused().is_none()) && chat.dialog.is_none() && chat.popup.is_none() {
+        let none = egui::Modifiers::NONE;
+        ui.input_mut(|i| {
+            let up = i.consume_key(none, egui::Key::PageUp);
+            let down = i.consume_key(none, egui::Key::PageDown);
+            (up as i32 - down as i32, i.consume_key(none, egui::Key::Home), i.consume_key(none, egui::Key::End))
+        })
+    } else {
+        (0, false, false)
+    };
+    if end {
+        if chat.at_end {
+            chat.scroll_to_bottom = 10;
+        } else {
+            chat.want_latest = true;
+        }
+    }
+    let viewport_h = ui.available_height();
     let output = scroll.show(ui, |ui| {
+        if page != 0 {
+            ui.scroll_with_delta(Vec2::new(0., page as f32 * viewport_h * 0.875));
+        }
+        if home {
+            ui.scroll_with_delta(Vec2::new(0., f32::MAX / 4.));
+        }
         let width = ui.available_width();
         ui.set_width(width);
         ui.add_space(12.);
