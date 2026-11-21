@@ -53,8 +53,6 @@ Everything a linked Signal Desktop does, with its layout and wording
   Korean need a system font.
 - Hiding the window to the tray may not work on every Wayland compositor,
   and dropping files on the window may not either (winit's support).
-- The sticker manager is a dialog rather than Desktop's side panel, and the
-  narrow (avatars only) list is for chats only.
 
 Calls work on Linux in real use. Not yet tried on a real account: sounds,
 paste and drag-and-drop, chat export, notification profiles, backups, the
