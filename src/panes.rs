@@ -135,6 +135,9 @@ pub struct Panes {
     pub avatar_lightbox: Option<String>,
     /// Desktop's "Set up your username" megaphone.
     pub username_megaphone: bool,
+    /// The server no longer has our username, or our link (Desktop's
+    /// `usernameCorrupted`, `usernameLinkCorrupted`).
+    pub username_corrupted: (bool, bool),
     pub server_alerts: langis_core::server_alerts::ServerAlerts,
     pub critical_modal: bool,
     pub captcha: Option<String>,
