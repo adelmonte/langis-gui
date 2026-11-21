@@ -1477,7 +1477,7 @@ fn dialogs(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                 ui.add_space(6.);
             }
             let q = query.trim().to_lowercase();
-            let people: Vec<langis_store::Conversation> = app.conversations.iter().filter(|p| p.kind == ConversationKind::Direct && !p.blocked && (q.is_empty() || p.title.to_lowercase().contains(&q))).cloned().collect();
+            let people: Vec<langis_store::Conversation> = app.conversations.iter().filter(|p| p.kind == ConversationKind::Direct && !p.blocked && !p.unregistered(chrono::Utc::now().timestamp_millis()) && (q.is_empty() || p.title.to_lowercase().contains(&q))).cloned().collect();
             // Desktop's ChooseGroupMembersModal: someone not in the list, by
             // their number or username.
             let username = crate::panes::probably_username(&q);

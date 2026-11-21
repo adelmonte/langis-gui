@@ -171,7 +171,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             }
         }
     } else if let Some(id) = app.selected.clone() {
-        let callable = app.conversation(&id).is_some_and(|c| c.kind == langis_store::ConversationKind::Direct && !c.blocked);
+        let callable = app.conversation(&id).is_some_and(|c| c.kind == langis_store::ConversationKind::Direct && !c.blocked && !c.ever_unregistered());
         for (key, video) in [(Key::C, false), (Key::Y, true)] {
             if pressed(ctx, ALT_SHIFT, key) && callable {
                 crate::panes::open_lobby(app, id.clone(), video);

@@ -1610,7 +1610,8 @@ fn choose_members(app: &mut App, ui: &mut Ui, palette: &Palette, query: &mut Str
     let q = query.trim().to_lowercase();
     let username = probably_username(&q);
     let phone = !username && probably_phone(&q);
-    let mut people: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Direct && !c.blocked && (q.is_empty() || c.title.to_lowercase().contains(&q))).cloned().collect();
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut people: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Direct && !c.blocked && !c.unregistered(now) && (q.is_empty() || c.title.to_lowercase().contains(&q))).cloned().collect();
     people.sort_by_key(|c| c.title.to_lowercase());
     let footer = 64.;
     let body_h = (ui.available_height() - footer).max(0.);
@@ -1776,7 +1777,10 @@ pub fn compose_pane(app: &mut App, ui: &mut Ui) -> bool {
             let phone = !username && probably_phone(&q);
             let link = signal_link(query.trim());
             let matches = |c: &&langis_store::Conversation| q.is_empty() || c.title.to_lowercase().contains(&q) || c.phone.as_deref().is_some_and(|p| p.contains(&q));
-            let mut contacts: Vec<_> = app.conversations.iter().filter(|c| c.kind != ConversationKind::Group && !c.blocked && matches(c)).cloned().collect();
+            // Desktop's `getAllComposableConversations`: not someone found
+            // unregistered in the last six hours.
+            let now = chrono::Utc::now().timestamp_millis();
+            let mut contacts: Vec<_> = app.conversations.iter().filter(|c| c.kind != ConversationKind::Group && !c.blocked && !c.unregistered(now) && matches(c)).cloned().collect();
             contacts.sort_by_key(|c| c.title.to_lowercase());
             let mut groups: Vec<_> = app.conversations.iter().filter(|c| c.kind == ConversationKind::Group && !c.left && !c.ended && matches(c)).cloned().collect();
             groups.sort_by_key(|c| c.title.to_lowercase());
