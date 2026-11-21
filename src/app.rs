@@ -1382,6 +1382,10 @@ impl eframe::App for App {
         }
         self.poll();
         self.diag.frame(ctx);
+        let key = egui::Id::unique("window-state");
+        let mut window = ctx.data(|d| d.get_temp::<Option<crate::window_state::WindowState>>(key)).flatten();
+        crate::window_state::track(&mut window, ctx);
+        ctx.data_mut(|d| d.insert_temp(key, window));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -1406,6 +1410,12 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        // The window's state for next time, as Desktop keeps it.
+        if !self.demo
+            && let Some(Some(window)) = self.ctx.data(|d| d.get_temp::<Option<crate::window_state::WindowState>>(egui::Id::unique("window-state")))
+        {
+            crate::window_state::save(&self.data_dir, &window);
+        }
         if let Some(t) = self.tray.take() {
             t.stop();
         }

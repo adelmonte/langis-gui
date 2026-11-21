@@ -66,6 +66,7 @@ mod video;
 mod voice;
 mod wayland_dnd;
 mod widgets;
+mod window_state;
 
 use std::path::PathBuf;
 
@@ -158,15 +159,22 @@ fn main() -> eframe::Result {
         }
     };
     init_logging(&args);
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("langis")
-            .with_app_id("langis")
-            .with_inner_size([1100., 760.])
-            .with_min_inner_size([640., 480.])
-            .with_icon(window_icon()),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("langis")
+        .with_app_id("langis")
+        .with_inner_size([1100., 760.])
+        .with_min_inner_size([640., 480.])
+        .with_icon(window_icon());
+    // The window as it was last time (Desktop's window config).
+    if !args.demo
+        && let Some(saved) = window_state::load(&args.data_dir.clone().unwrap_or_else(app::default_data_dir))
+    {
+        viewport = viewport.with_inner_size(saved.size).with_maximized(saved.maximized).with_fullscreen(saved.fullscreen);
+        if let Some(pos) = saved.pos {
+            viewport = viewport.with_position(pos);
+        }
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("langis", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, args)))))
 }
 
