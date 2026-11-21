@@ -59,6 +59,8 @@ pub struct Fun {
     sticker_query: String,
     /// A sticker taken out of Recents from its menu, to save.
     forget_recent: Option<(Vec<u8>, u32)>,
+    /// The Favorites button was clicked with none: Desktop's hint toast.
+    favorites_hint: bool,
     /// GIFs sent lately, newest first (Desktop's Recents), kept in the
     /// `ui.recent_gifs` setting.
     pub recent_gifs: Vec<(Gif, PathBuf)>,
@@ -179,7 +181,11 @@ pub fn show(app: &mut App, ctx: &egui::Context, anchor: Pos2, chat: &mut ChatVie
     }
     let manager = fun.manager_open;
     let forget = fun.forget_recent.take();
+    let hint = std::mem::take(&mut fun.favorites_hint);
     app.fun = fun;
+    if hint {
+        app.toast(tr("Right click a sticker to add to Favorites"));
+    }
     if let Some((pack, sticker)) = forget {
         app.fun.recent_stickers.retain(|(p, s)| !(*p == pack && *s == sticker));
         save_recent_stickers(app);
@@ -441,7 +447,9 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                 (pack, f.sticker.clone())
             })
             .collect();
-        if !favorites.is_empty() {
+        // Desktop keeps the Favorites button while favorites are on, empty
+        // or not (`FunPanelStickers`, commit 5b083e565).
+        if !favorites.is_empty() || langis_core::remote_config::current().sticker_favorites() {
             sections.push((tr("Favorites").to_owned(), None, "star", favorites));
         }
         for p in &fun.packs {
@@ -479,7 +487,11 @@ fn stickers(app: &App, ui: &mut Ui, palette: &Palette, fun: &mut Fun) -> Option<
                             None => theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., palette.text),
                         }
                         if r.on_hover_text(title.as_str()).clicked() {
-                            jump = Some(i);
+                            if *symbol == "star" && sections[i].3.is_empty() {
+                                fun.favorites_hint = true;
+                            } else {
+                                jump = Some(i);
+                            }
                         }
                     }
                 });
@@ -927,6 +939,10 @@ fn sticker_details(app: &mut App, ui: &Ui) {
     let Some((pack_id, pack_key, sticker)) = app.fun.sticker_details.clone() else { return };
     let palette = Palette::of(ui.ctx());
     let favorite = app.fun.favorite_ids.iter().any(|(p, s)| *p == pack_id && *s == sticker.id);
+    // Desktop offers Add only for an installed pack, and names the pack
+    // (`StickerPreviewModal`'s details popover, commit 4cbe3539e).
+    let pack = app.fun.preview.as_ref().and_then(|(_, _, r)| r.as_ref()?.as_ref().ok()).map(|p| p.pack.clone());
+    let installed = pack.as_ref().is_some_and(|p| p.installed) || app.fun.packs.iter().any(|p| p.id == pack_id);
     let mut toggle = false;
     let closed = crate::panes::modal(ui, "sticker-details", 300., |ui| {
         crate::panes::title(ui, tr("Sticker details"));
@@ -938,12 +954,22 @@ fn sticker_details(app: &mut App, ui: &Ui) {
                 crate::chat::append_with_emoji(&mut job, e, egui::TextFormat { font_id: theme::regular(28.), color: palette.text, ..Default::default() });
                 ui.label(job);
             }
+            if let Some(pack) = pack.as_ref().filter(|p| !p.title.is_empty() || !p.author.is_empty()) {
+                let line = [pack.title.as_str(), pack.author.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · ");
+                ui.label(RichText::new(line).font(theme::regular(12.)).color(palette.text_secondary));
+            }
             ui.add_space(8.);
-            toggle = widgets::pill_button(ui, if favorite { tr("Remove from Favorites") } else { tr("Add to Favorites") }, false).clicked();
+            if favorite || installed {
+                toggle = widgets::pill_button(ui, if favorite { tr("Remove from Favorites") } else { tr("Add to Favorites") }, false).clicked();
+            }
         });
     });
     if toggle {
         app.send(Command::SetStickerFavorite { pack_id, pack_key, sticker_id: sticker.id, favorite: !favorite });
+        // (At the limit the backend says why instead.)
+        if favorite || app.fun.favorite_ids.len() < 500 {
+            app.toast(if favorite { tr("Sticker removed from Favorites") } else { tr("Sticker added to Favorites") });
+        }
     }
     if closed || toggle {
         app.fun.sticker_details = None;
