@@ -806,6 +806,12 @@ impl App {
                 // a notification profile that doesn't allow the call is on.
                 let quiet = update.as_ref().is_some_and(|u| crate::notification_profiles::silenced(self, &u.conversation, true, false));
                 let was_ringing = self.call.as_ref().is_some_and(|u| u.incoming && u.status == langis_core::CallStatus::Ringing);
+                if ringing && !was_ringing {
+                    self.call_view.ring_quiet = quiet;
+                    if quiet {
+                        tracing::info!("a notification profile keeps the incoming call out of sight");
+                    }
+                }
                 if ringing && !was_ringing && !quiet {
                     if self.sound.ringtone {
                         crate::sounds::start_ring();
@@ -1449,6 +1455,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         crate::view::show(self, ui);
         crate::notification_profiles::tick(self);
+        crate::call::ring_follows_profile(self);
         self.update_title(ui.ctx());
     }
 

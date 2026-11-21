@@ -41,11 +41,14 @@ pub struct CallView {
     /// When the pointer last moved over the call: its controls fade out
     /// five seconds after (Desktop's CallScreen).
     last_moved: Option<std::time::Instant>,
+    /// The ringing call is kept out of sight by the notification profile
+    /// on (see [`ringing_shown`]), as last checked.
+    pub ring_quiet: bool,
 }
 
 impl Default for CallView {
     fn default() -> Self {
-        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0, self_large: false, last_moved: None, talking_since: None, before_presenting: None }
+        Self { textures: HashMap::new(), audio_on: true, video_on: None, pip: false, settings_open: false, layout: Layout::Grid, pip_snap: PipSnap::Right(PIP_TOP_MARGIN), pip_grab: None, grid_page: 0, overflow_from: 0, self_large: false, last_moved: None, talking_since: None, before_presenting: None, ring_quiet: false }
     }
 }
 
@@ -102,13 +105,42 @@ fn status_text(call: &CallUpdate) -> String {
     }
 }
 
-/// Desktop's `IncomingCallBar`, along the top of the window.
-/// Desktop's `IncomingCallBar`: a 70px gray-75 bar (radius 8, at most 600
-/// wide, 22 from the top) with the 48px avatar, the chat's name and what's
-/// ringing, then Decline, Answer without video (for a video call) and
-/// Answer, 40px circles 24 apart.
-pub fn incoming_bar(app: &mut App, ui: &mut Ui) {
+/// The call ringing us, unless the notification profile on doesn't allow
+/// it: Desktop's `CallManager` then shows no `IncomingCallBar` (so none of
+/// its answer and decline shortcuts either) and plays no ringtone, and the
+/// call rings on unseen until the caller gives up or another device
+/// answers.
+pub fn ringing_shown(app: &App) -> Option<CallUpdate> {
+    app.call
+        .clone()
+        .filter(|c| c.incoming && c.status == CallStatus::Ringing)
+        .filter(|c| !crate::notification_profiles::silenced(app, &c.conversation, true, false))
+}
+
+/// Desktop's ringtone effect depends on the active profile: a profile
+/// turning on while a call rings stops the ringtone, and one turning off
+/// starts it.
+pub fn ring_follows_profile(app: &mut App) {
     let Some(call) = app.call.clone().filter(|c| c.incoming && c.status == CallStatus::Ringing) else { return };
+    let quiet = crate::notification_profiles::silenced(app, &call.conversation, true, false);
+    if quiet == app.call_view.ring_quiet {
+        return;
+    }
+    app.call_view.ring_quiet = quiet;
+    if quiet {
+        tracing::info!("a notification profile now keeps the ringing call out of sight");
+        crate::sounds::stop_ring();
+    } else if app.sound.ringtone {
+        crate::sounds::start_ring();
+    }
+}
+
+/// Desktop's `IncomingCallBar`, along the top of the window: a 70px
+/// gray-75 bar (radius 8, at most 600 wide, 22 from the top) with the 48px
+/// avatar, the chat's name and what's ringing, then Decline, Answer
+/// without video (for a video call) and Answer, 40px circles 24 apart.
+pub fn incoming_bar(app: &mut App, ui: &mut Ui) {
+    let Some(call) = ringing_shown(app) else { return };
     let palette = Palette::of(ui.ctx());
     let conversation = app.conversation(&call.conversation).cloned();
     let title = conversation.as_ref().map(|c| c.title.clone()).unwrap_or_default();
