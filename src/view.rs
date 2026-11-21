@@ -61,6 +61,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     drop_overlay(app, ui);
     crate::panes::custom_time_dialogs(app, ui.ctx());
     crate::chat_colors::editor(app, ui.ctx());
+    crate::call_survey::show(app, ui.ctx());
     app.close_dialog(ui.ctx());
     crate::fun::dialogs(app, ui);
     crate::lightbox::show(app, ui);

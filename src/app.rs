@@ -182,6 +182,9 @@ pub struct App {
     pub focused: bool,
     /// Desktop notifications on, and what they show ("all", "name", "none").
     pub notify: (bool, String),
+    /// The account's "While muted" and unread reminder settings, all set,
+    /// for what a chat leaves to them.
+    pub account_notify: langis_store::ChatNotify,
     /// Sounds, call notifications and the taskbar flash.
     pub sound: crate::sounds::Prefs,
     /// Files dropped on the window under Wayland (winit gives egui only
@@ -321,6 +324,8 @@ impl App {
             theme: "system".into(),
             focused: true,
             notify: (true, "all".into()),
+            // Desktop's `DEFAULT_NOTIFY_IF_MUTED`, `DEFAULT_SHOW_UNREAD_REMINDERS`.
+            account_notify: langis_store::ChatNotify { calls: Some(false), mentions: Some(true), replies: Some(true), unread_reminders: Some(false) },
             nav_collapsed: false,
             momentum: Default::default(),
             me: (String::new(), None),
@@ -683,7 +688,7 @@ impl App {
             Event::ConversationsChanged | Event::ContactsSynced | Event::ProfileChanged(_) => self.reload_conversations(),
             Event::AuthorNamesChanged(pairs) => self.names.extend(pairs),
             Event::Incoming { conversation, message_id, mentions_me, replies_to_me } => {
-                self.notify_message(&conversation, message_id, mentions_me || replies_to_me);
+                self.notify_message(&conversation, message_id, mentions_me, replies_to_me);
                 self.on_event(Event::MessageChanged { conversation, message_id });
             }
             Event::MessageChanged { conversation, message_id } => {
@@ -850,6 +855,18 @@ impl App {
                     self.load_pinned(conversation);
                 }
             }
+            // Desktop's unread reminder, as a notification when they're on;
+            // langis asks again hourly until told it was shown.
+            Event::UnreadReminder { conversation, reminder } => {
+                let (on, content) = self.notify.clone();
+                if let Some(chat) = self.conversation(&conversation).filter(|_| on) {
+                    let name = |id: &str| self.names.get(id).cloned().unwrap_or_else(|| tr("Unknown contact").to_owned());
+                    let (title, body) = crate::unread_reminders::content(&reminder, &chat.title, content != "none", name);
+                    let _ = self.loaded_tx.send(Loaded::Notify { title, body });
+                    self.send(Command::UnreadReminderShown { conversation });
+                }
+            }
+            Event::CallQualitySurvey(_) => crate::call_survey::open(&self.ctx),
             Event::Error(text) => {
                 // A new group that failed: Desktop's error dialog instead.
                 if self.panes.creating_group && text.contains("group") {
@@ -1049,12 +1066,33 @@ impl App {
             let sound = crate::sounds::Prefs::from_values(values);
             Some(Loaded::NotifyPrefs { on, content, nav_collapsed, sound })
         });
+        self.load(|db| async move {
+            let mut account = langis_store::ChatNotify::default();
+            for kind in langis_store::ChatNotifyKind::ALL {
+                let setting = langis_core::AccountSetting::for_chat(kind);
+                let on = setting.is_on(db.setting(setting.key()).await.ok().flatten().as_deref());
+                match kind {
+                    langis_store::ChatNotifyKind::Calls => account.calls = Some(on),
+                    langis_store::ChatNotifyKind::Mentions => account.mentions = Some(on),
+                    langis_store::ChatNotifyKind::Replies => account.replies = Some(on),
+                    langis_store::ChatNotifyKind::UnreadReminders => account.unread_reminders = Some(on),
+                }
+            }
+            Some(Loaded::Apply(Box::new(move |app: &mut App| app.account_notify = account)))
+        });
+    }
+
+    /// Whether a chat's `kind` is on: its own setting, else the account's
+    /// (Desktop's `getNotifyWhileMutedForConversation`).
+    pub fn chat_notify_on(&self, chat: &langis_store::Conversation, kind: langis_store::ChatNotifyKind) -> bool {
+        chat.notify.on(kind, |k| self.account_notify.get(k).unwrap_or(false))
     }
 
     /// A new message, as a desktop notification: not for the chat being
-    /// read, and not for muted chats unless it mentions or answers us
-    /// (Desktop's rules, without its per-kind exceptions).
-    fn notify_message(&self, conversation: &ConversationId, message_id: i64, for_me: bool) {
+    /// read, and not for a muted chat unless it's a group and the message
+    /// mentions or answers us while that kind is on there (Desktop's
+    /// `maybeNotify`, `isAllowedByConversation`).
+    fn notify_message(&self, conversation: &ConversationId, message_id: i64, mentions_me: bool, replies_to_me: bool) {
         let (on, content) = self.notify.clone();
         let Some(chat) = self.conversation(conversation) else { return };
         let reading = self.focused && self.selected.as_ref() == Some(conversation);
@@ -1062,8 +1100,11 @@ impl App {
         if reading && self.sound.in_chat && !chat.muted {
             crate::sounds::once(crate::sounds::Sound::Pop);
         }
-        // A muted group set to "Mentions: Don't notify" stays quiet for them too.
-        if !on || reading || (chat.muted && (!for_me || chat.dont_notify_mentions)) {
+        use langis_store::ChatNotifyKind as K;
+        let allowed = !chat.muted
+            || (chat.kind == langis_store::ConversationKind::Group
+                && ((mentions_me && self.chat_notify_on(chat, K::Mentions)) || (replies_to_me && self.chat_notify_on(chat, K::Replies))));
+        if !on || reading || !allowed {
             return;
         }
         // Desktop's `maybeNotify`: quiet while a notification profile that
