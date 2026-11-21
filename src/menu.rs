@@ -227,6 +227,52 @@ impl Menu<'_> {
         self.ui.painter().galley(Pos2::new(rect.left() + PAD, rect.center().y - galley.size().y / 2.), galley, self.palette.text_secondary);
     }
 
+    /// `Header`: a medium label, with a secondary description under it.
+    pub fn header(&mut self, label: &str, description: Option<&str>) {
+        let w = self.ui.available_width();
+        let height = if description.is_some() { ROW + 14. } else { ROW };
+        let (rect, _) = self.ui.allocate_exact_size(Vec2::new(w, height), Sense::hover());
+        let painter = self.ui.painter();
+        let top = rect.top() + PAD + 1.;
+        let g = painter.layout_no_wrap(label.to_owned(), theme::medium(13.), self.palette.text);
+        self.needed = self.needed.max(g.size().x + 2. * PAD);
+        painter.galley(Pos2::new(rect.left() + PAD, top), g, self.palette.text);
+        if let Some(text) = description {
+            let g = painter.layout_no_wrap(text.to_owned(), theme::regular(12.), self.palette.text_secondary);
+            self.needed = self.needed.max(g.size().x + 2. * PAD);
+            painter.galley(Pos2::new(rect.left() + PAD, top + 18.), g, self.palette.text_secondary);
+        }
+    }
+
+    /// `CustomItem`: `paint` draws the leading element, `lead` wide, then
+    /// the label. True when chosen; the menu stays open unless `close`
+    /// (Desktop's `preventDefault` on select).
+    pub fn custom(&mut self, lead: f32, label: &str, close: bool, paint: impl FnOnce(&egui::Painter, Rect)) -> bool {
+        let w = self.ui.available_width();
+        let (rect, _) = self.ui.allocate_exact_size(Vec2::new(w, ROW), Sense::hover());
+        let response = self.ui.interact(rect, self.id.with(("custom", label)), Sense::click());
+        if response.hovered() && self.state.subs.len() > self.depth && !self.heading_to_sub() {
+            self.state.subs.truncate(self.depth);
+        }
+        let painter = self.ui.painter().clone();
+        if response.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(7), self.palette.fill_pressed);
+        }
+        let lead_rect = Rect::from_center_size(Pos2::new(rect.left() + PAD + lead / 2., rect.center().y), Vec2::splat(lead));
+        paint(&painter, lead_rect);
+        let g = painter.layout_no_wrap(label.to_owned(), theme::regular(13.), self.palette.text);
+        let x = lead_rect.right() + GAP + 2.;
+        self.needed = self.needed.max(x - rect.left() + g.size().x + PAD);
+        painter.galley(Pos2::new(x, rect.center().y - g.size().y / 2.), g, self.palette.text);
+        if response.clicked() {
+            if close {
+                *self.closed = true;
+            }
+            return true;
+        }
+        false
+    }
+
     /// `Separator`: 4px above and below, inset 2px.
     pub fn separator(&mut self) {
         let w = self.ui.available_width();
