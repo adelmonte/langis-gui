@@ -764,6 +764,10 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
                 if m.item(Some("plus"), "Add to dictionary") {
                     add = true;
                 }
+                // Then the rest of Electron's menu for a text field.
+                m.separator();
+                let selected = egui::text_edit::TextEditState::load(m.ui.ctx(), id).and_then(|s| s.cursor.char_range()).is_some_and(|r| !r.is_empty());
+                crate::interaction::field_items(m, id, selected, true);
             });
             if let Some(with) = replace
                 && chat.composer.get(start..end) == Some(word.as_str())

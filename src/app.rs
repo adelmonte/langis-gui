@@ -265,6 +265,8 @@ impl App {
         // The language first: the fonts follow it (a CJK one from the system).
         crate::i18n::set_locale(crate::i18n::resolve(&crate::i18n::saved()));
         crate::theme::install(&ctx);
+        // The zoom keys save the zoom, as Desktop's do (`interaction.rs`).
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let (loaded_tx, loaded) = channel();
         let (data_dir, scratch) = if args.demo {
             let dir = tempfile::Builder::new().prefix("langis-gui-demo-").tempdir().expect("a scratch directory for the demo");
@@ -1383,7 +1385,9 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        crate::interaction::begin(self, ui.ctx());
         crate::view::show(self, ui);
+        crate::interaction::end(self, ui.ctx());
         crate::notification_profiles::tick(self);
         self.update_title(ui.ctx());
     }
@@ -1394,6 +1398,7 @@ impl eframe::App for App {
         static SPEED: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| {
             std::env::var("LANGIS_SCROLL_SPEED").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| *v > 0.).unwrap_or(2.5)
         });
+        crate::interaction::inject(ctx, raw_input);
         self.momentum.apply(raw_input, *SPEED);
         if self.momentum.flinging() {
             ctx.request_repaint();

@@ -313,6 +313,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             if r.clicked() {
                 toggle_zoom = true;
             }
+            // Electron's menu on an image: Copy image (not for view-once).
+            if let Some(path) = &item.path {
+                crate::interaction::image_menu(ui, &r, std::path::Path::new(path));
+            }
         }
         let center = Rect::from_center_size(media.center(), Vec2::splat(64.));
         let progress = app.downloads.get(&(item.message_id, item.index)).copied();

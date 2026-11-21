@@ -33,6 +33,7 @@ mod format;
 mod fun;
 mod glyphs;
 mod i18n;
+mod interaction;
 mod i18n_locales;
 mod icons;
 mod lightbox;

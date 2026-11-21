@@ -39,6 +39,48 @@ struct State {
     subs: Vec<(Id, Rect)>,
     /// When the pointer left a submenu's trigger towards it.
     heading: Option<f64>,
+    /// The row the arrow keys are on, in the first panel (Radix's roving
+    /// focus), and how many rows it had last frame.
+    highlight: Option<usize>,
+    rows: usize,
+}
+
+/// The keys a menu takes while it's open, taken before the rest of the
+/// window sees them (`interaction::begin`).
+#[derive(Clone, Copy, Default)]
+pub struct Keys {
+    down: bool,
+    up: bool,
+    home: bool,
+    end: bool,
+    choose: bool,
+}
+
+fn keys_id() -> Id {
+    Id::unique("menu-keys")
+}
+
+fn open_frame_id() -> Id {
+    Id::unique("menu-open-frame")
+}
+
+/// When a menu was open last frame: takes its keys from this frame's
+/// input, so the composer and the shortcuts don't also act on them.
+pub fn take_keys(ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    let open = ctx.data(|d| d.get_temp::<u64>(open_frame_id())).is_some_and(|f| f + 1 >= frame);
+    if !open {
+        return;
+    }
+    let none = egui::Modifiers::NONE;
+    let keys = ctx.input_mut(|i| Keys {
+        down: i.consume_key(none, egui::Key::ArrowDown),
+        up: i.consume_key(none, egui::Key::ArrowUp),
+        home: i.consume_key(none, egui::Key::Home),
+        end: i.consume_key(none, egui::Key::End),
+        choose: i.consume_key(none, egui::Key::Enter) | i.consume_key(none, egui::Key::Space),
+    });
+    ctx.data_mut(|d| d.insert_temp(keys_id(), keys));
 }
 
 /// What a panel measured last frame, to size and place it this frame.
@@ -102,6 +144,27 @@ pub fn show(ctx: &egui::Context, id: Id, add: impl FnOnce(&mut Menu)) -> bool {
         close(ctx, id);
         return false;
     }
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(open_frame_id(), frame));
+    // Radix's arrow keys: down and up move through the rows, wrapping;
+    // Home and End go to the ends; Enter or Space chooses.
+    let keys = ctx.data_mut(|d| d.remove_temp::<Keys>(keys_id())).unwrap_or_default();
+    if state.rows > 0 {
+        let last = state.rows - 1;
+        if keys.down {
+            state.highlight = Some(state.highlight.map_or(0, |h| if h >= last { 0 } else { h + 1 }));
+        }
+        if keys.up {
+            state.highlight = Some(state.highlight.map_or(last, |h| if h == 0 { last } else { h - 1 }));
+        }
+        if keys.home {
+            state.highlight = Some(0);
+        }
+        if keys.end {
+            state.highlight = Some(last);
+        }
+    }
+    let choose = keys.choose;
 
     // Radix's modal layer: the window under the menu takes no pointer input.
     let screen = ctx.content_rect();
@@ -139,7 +202,8 @@ pub fn show(ctx: &egui::Context, id: Id, add: impl FnOnce(&mut Menu)) -> bool {
         }
     };
     let mut closed = false;
-    panel(ctx, id, id, 0, pos, &mut state, &mut closed, add);
+    state.rows = 0;
+    panel(ctx, id, id, 0, pos, &mut state, &mut closed, choose, add);
     if closed {
         close(ctx, id);
     } else {
@@ -153,7 +217,7 @@ fn measure(ctx: &egui::Context, panel: Id) -> Measure {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn panel(ctx: &egui::Context, root: Id, id: Id, depth: usize, pos: Pos2, state: &mut State, closed: &mut bool, add: impl FnOnce(&mut Menu)) -> Rect {
+fn panel(ctx: &egui::Context, root: Id, id: Id, depth: usize, pos: Pos2, state: &mut State, closed: &mut bool, choose: bool, add: impl FnOnce(&mut Menu)) -> Rect {
     let palette = Palette::of(ctx);
     let last = measure(ctx, id);
     let width = last.width.clamp(MIN_W, MAX_W);
@@ -170,7 +234,7 @@ fn panel(ctx: &egui::Context, root: Id, id: Id, depth: usize, pos: Pos2, state: 
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 ui.set_width(width - 2. * PAD);
-                let mut menu = Menu { ui, root, id, depth, palette, leading: last.leading, needed: 0., found_leading: 0., state, closed };
+                let mut menu = Menu { ui, root, id, depth, palette, leading: last.leading, needed: 0., found_leading: 0., state, closed, choose };
                 add(&mut menu);
                 (menu.needed, menu.found_leading)
             })
@@ -198,6 +262,8 @@ pub struct Menu<'a> {
     found_leading: f32,
     state: &'a mut State,
     closed: &'a mut bool,
+    /// Enter or Space this frame, for the highlighted row.
+    choose: bool,
 }
 
 enum Lead<'s> {
@@ -210,6 +276,13 @@ impl Menu<'_> {
     /// `Item`: true when chosen, which closes the menu.
     pub fn item(&mut self, symbol: Option<&str>, label: &str) -> bool {
         self.row(symbol.map_or(Lead::None, Lead::Symbol), None, label, None, true)
+    }
+
+    /// Where the next row will be: Copy of a selected text acts as the
+    /// pointer goes down on it (`interaction::begin`), before egui drops the
+    /// selection for the press.
+    pub fn next_row(&self) -> Rect {
+        Rect::from_min_size(self.ui.cursor().min, Vec2::new(self.ui.available_width(), ROW))
     }
 
     /// `CheckboxItem` and `RadioItem`: a check before the label when chosen.
@@ -251,11 +324,13 @@ impl Menu<'_> {
         let w = self.ui.available_width();
         let (rect, _) = self.ui.allocate_exact_size(Vec2::new(w, ROW), Sense::hover());
         let response = self.ui.interact(rect, self.id.with(("custom", label)), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+        let (keyed, chosen) = self.keyed(&response);
         if response.hovered() && self.state.subs.len() > self.depth && !self.heading_to_sub() {
             self.state.subs.truncate(self.depth);
         }
         let painter = self.ui.painter().clone();
-        if response.hovered() {
+        if keyed || (response.hovered() && self.state.highlight.is_none()) {
             painter.rect_filled(rect, CornerRadius::same(7), self.palette.fill_pressed);
         }
         let lead_rect = Rect::from_center_size(Pos2::new(rect.left() + PAD + lead / 2., rect.center().y), Vec2::splat(lead));
@@ -264,7 +339,7 @@ impl Menu<'_> {
         let x = lead_rect.right() + GAP + 2.;
         self.needed = self.needed.max(x - rect.left() + g.size().x + PAD);
         painter.galley(Pos2::new(x, rect.center().y - g.size().y / 2.), g, self.palette.text);
-        if response.clicked() {
+        if response.clicked() || chosen {
             if close {
                 *self.closed = true;
             }
@@ -287,8 +362,10 @@ impl Menu<'_> {
         let open = self.state.subs.get(self.depth).is_some_and(|(id, _)| *id == sub_id);
         let rect = self.row_rect();
         let response = self.ui.interact(rect, sub_id.with("trigger"), Sense::click());
-        let hovered = response.hovered();
-        if hovered || response.clicked() {
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+        let (keyed, chosen) = self.keyed(&response);
+        let hovered = response.hovered() || keyed;
+        if hovered || response.clicked() || chosen {
             self.state.subs.truncate(self.depth);
             self.state.subs.push((sub_id, rect));
             self.state.heading = None;
@@ -318,7 +395,7 @@ impl Menu<'_> {
             x = (parent.left() - size.x).max(screen.left() + EDGE);
         }
         let y = (rect.top() - PAD).min(screen.bottom() - EDGE - size.y).max(screen.top() + EDGE);
-        let sub_rect = panel(&ctx, self.root, sub_id, self.depth + 1, Pos2::new(x, y), self.state, self.closed, add);
+        let sub_rect = panel(&ctx, self.root, sub_id, self.depth + 1, Pos2::new(x, y), self.state, self.closed, false, add);
         self.state.subs.truncate(self.depth + 1);
         if let Some(entry) = self.state.subs.get_mut(self.depth) {
             entry.1 = rect;
@@ -338,18 +415,37 @@ impl Menu<'_> {
         let (rect, _) = self.ui.allocate_exact_size(Vec2::new(w, height), Sense::hover());
         let id = self.id.with(("row", label));
         let response = self.ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
-        let hovered = enabled && response.hovered();
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+        let (keyed, chosen) = if enabled { self.keyed(&response) } else { (false, false) };
+        let hovered = enabled && (keyed || (response.hovered() && self.state.highlight.is_none()));
         if response.hovered() && self.state.subs.len() > self.depth && !self.heading_to_sub() {
             self.state.subs.truncate(self.depth);
         }
         let fill = if hovered { self.palette.fill_pressed } else { Color32::TRANSPARENT };
         let natural = self.paint_row(rect, fill, lead, symbol, label, description, enabled);
         self.needed = self.needed.max(natural);
-        if enabled && response.clicked() {
+        if enabled && (response.clicked() || chosen) {
             *self.closed = true;
             return true;
         }
         false
+    }
+
+    /// Numbers a choosable row of the first panel; returns whether the arrow
+    /// keys are on it, and whether Enter chose it. A pointer moving over a
+    /// row moves the keys' place there.
+    fn keyed(&mut self, response: &egui::Response) -> (bool, bool) {
+        if self.depth > 0 {
+            return (false, false);
+        }
+        let me = self.state.rows;
+        self.state.rows += 1;
+        let moved = self.ui.input(|i| i.pointer.delta() != Vec2::ZERO);
+        if response.hovered() && moved {
+            self.state.highlight = Some(me);
+        }
+        let on = self.state.highlight == Some(me);
+        (on, on && self.choose)
     }
 
     /// Whether the pointer is moving from the open submenu's trigger

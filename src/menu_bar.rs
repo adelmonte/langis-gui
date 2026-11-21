@@ -15,11 +15,6 @@ fn key(ui: &Ui, key: Key, modifiers: Modifiers) {
     });
 }
 
-fn zoom(app: &App, ui: &Ui, factor: f32) {
-    let z = factor.clamp(0.5, 3.);
-    ui.ctx().set_zoom_factor(z);
-    crate::settings::write(app, crate::settings::SETTING_ZOOM, z.to_string());
-}
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     let alt = ui.input(|i| i.modifiers.alt && i.keys_down.is_empty());
@@ -80,17 +75,16 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             });
             any_open |= r.inner.is_some();
             let r = ui.menu_button(tr("View"), |ui| {
-                let now = ui.ctx().zoom_factor();
                 if ui.button(tr("Actual Size")).clicked() {
-                    zoom(app, ui, 1.);
+                    crate::interaction::zoom_step(app, ui.ctx(), 0);
                     ui.close();
                 }
                 if ui.button(tr("Zoom In")).clicked() {
-                    zoom(app, ui, now + 0.1);
+                    crate::interaction::zoom_step(app, ui.ctx(), 1);
                     ui.close();
                 }
                 if ui.button(tr("Zoom Out")).clicked() {
-                    zoom(app, ui, now - 0.1);
+                    crate::interaction::zoom_step(app, ui.ctx(), -1);
                     ui.close();
                 }
                 ui.separator();

@@ -1885,6 +1885,8 @@ fn message(
     let x = if outgoing { row.right() - side - bubble_w } else { row.left() + lead + avatar_col };
     let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(bubble_w, bubble_h));
     let response = ui.interact(bubble, ui.scope_id().with(("bubble", m.id)), Sense::click());
+    // Desktop's message isn't a button: the arrow over it.
+    crate::interaction::no_pointer(ui.ctx(), response.id);
 
     // The bubble, with Desktop's smaller corners inside a group.
     let (r, small) = (18u8, 4u8);
@@ -2129,11 +2131,24 @@ fn message(
         // egui label's can; links and spoilers still take a click.
         let sense = if ctx.selecting { Sense::click() } else { Sense::click_and_drag() };
         let text_response = ui.interact(text_rect, ui.scope_id().with(("text", m.id)), sense);
+        let mut on_link = false;
         if let Some(pointer) = text_response.hover_pos() {
             let cursor = g.cursor_from_pos(pointer - pos);
             let at = cursor.index.0;
-            if rich.links.iter().any(|(r, _)| r.contains(&at)) {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let link = rich.links.iter().find(|(r, _)| r.contains(&at)).map(|(_, url)| url.clone());
+            on_link = link.is_some();
+            // A middle click opens a link, as Chromium's does.
+            if let Some(url) = link.filter(|u| u.starts_with("http") || u.starts_with("mailto:"))
+                && text_response.middle_clicked()
+            {
+                actions.push(Action::Open(url));
+            }
+            // The text sits over the bubble: a right-click on it opens the
+            // message's menu too, as anywhere on Desktop's message (its
+            // `AxoContextMenu` takes the right-click, links and selection
+            // included).
+            if !ctx.selecting && text_response.secondary_clicked() {
+                actions.push(Action::Menu { message_id: m.id, at: pointer });
             }
             if text_response.clicked() {
                 if let Some((_, url)) = rich.links.iter().find(|(r, _)| r.contains(&at)) {
@@ -2153,7 +2168,10 @@ fn message(
         if ctx.selecting {
             ui.painter().galley(pos, g, in_color);
         } else {
-            egui::text_selection::LabelSelectionState::label_text_selection(ui, &text_response, pos, g, in_color, Stroke::NONE);
+            crate::interaction::paint_selectable(ui, &text_response, pos, g, in_color);
+        }
+        if on_link {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         if let Some((label, clickable)) = long_line {
             let color = if clickable { if outgoing { Color32::WHITE } else { palette.accent_text } } else { meta_color };
