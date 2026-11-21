@@ -58,6 +58,8 @@ pub enum Page {
     Calls,
     Notifications,
     WhileMuted,
+    /// Desktop's NotificationProfilesHome and its create flow.
+    NotificationProfiles,
     Privacy,
     PhoneNumber,
     Blocked,
@@ -82,7 +84,7 @@ impl Page {
             Page::ChatColor => Page::Appearance,
             Page::ChatFolders => Page::Chats,
             Page::ChatFolderEdit => Page::ChatFolders,
-            Page::WhileMuted => Page::Notifications,
+            Page::WhileMuted | Page::NotificationProfiles => Page::Notifications,
             Page::PhoneNumber | Page::Blocked => Page::Privacy,
             Page::ProfileName | Page::ProfileAbout => Page::Profile,
             other => other,
@@ -298,12 +300,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             app.settings.page = Page::ChatFolders;
         }
         let page = app.settings.page;
+        let profiles_title = (page == Page::NotificationProfiles).then(|| crate::notification_profiles::title(app));
         let title = match (&app.settings.folder, page) {
             (Some((_, true, _)), Page::ChatFolderEdit) => tr("Create a folder"),
-            _ => page.title(),
+            _ => profiles_title.as_deref().unwrap_or(page.title()),
         };
         if axo_list::panel_header(ui, title, page != page.top()) {
-            if page == Page::ChatFolderEdit {
+            if page == Page::NotificationProfiles {
+                crate::notification_profiles::back(app);
+            } else if page == Page::ChatFolderEdit {
                 app.settings.folder_leaving = true;
             } else {
                 app.settings.page = page.top();
@@ -328,6 +333,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 Page::Calls => calls(app, ui, &snapshot),
                 Page::Notifications => notifications(app, ui, &snapshot),
                 Page::WhileMuted => while_muted(app, ui, &snapshot),
+                Page::NotificationProfiles => crate::notification_profiles::page(app, ui),
                 Page::Privacy => privacy(app, ui, &snapshot),
                 Page::PhoneNumber => phone_number(app, ui, &palette, &snapshot),
                 Page::Blocked => blocked(app, ui, &palette),
@@ -337,6 +343,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     ask(app, ui.ctx());
     folder_dialogs(app, ui);
+    crate::notification_profiles::dialogs(app, ui);
     language_dialog(app, ui);
     help_window(app, ui);
 }
@@ -1444,6 +1451,14 @@ fn notifications(app: &mut App, ui: &mut Ui, s: &Snapshot) {
         if axo_list::switch(ui, Item::new(tr("Include muted chats in app badge")).description(tr("Chat folder badges will always include muted chats")), &mut muted) {
             app.badge_prefs.muted = muted;
             write(app, SETTING_BADGE_MUTED, muted.to_string());
+        }
+    });
+    // Desktop's Notification profiles.
+    axo_list::gap(ui);
+    axo_list::list(ui, None, None, |ui| {
+        if axo_list::item(ui, Item::new(tr("Notification profiles")).description(tr("Add or edit notification profiles")), End::Arrow(None)).clicked() {
+            app.panes.profiles.view = crate::notification_profiles::View::List;
+            app.settings.page = Page::NotificationProfiles;
         }
     });
     // Desktop's Reset notification settings: this device's back to default.

@@ -76,6 +76,8 @@ pub struct Panes {
     // The chat list.
     pub archived: bool,
     pub folders: Vec<ChatFolder>,
+    /// Desktop's notification profiles, and which is on.
+    pub profiles: crate::notification_profiles::Profiles,
     /// The folder shown (`None`: all chats).
     pub folder: Option<String>,
     /// A chat waiting on "Delete chat?", and whether we're still in it.
@@ -170,6 +172,7 @@ pub enum Compose {
 /// Called once the account is ready.
 pub fn on_ready(app: &mut App) {
     load_folders(app);
+    crate::notification_profiles::load(app);
     crate::stories::load(app);
     crate::chat_colors::load(app);
     crate::settings::load_zoom(app);
@@ -205,6 +208,7 @@ pub fn on_event(app: &mut App, event: Event) {
             app.ctx.data_mut(|d| d.insert_temp(crate::stories::failed_id(id), true));
         }
         Event::ChatFoldersChanged => load_folders(app),
+        Event::NotificationProfilesChanged => crate::notification_profiles::load(app),
         Event::ChatColorsChanged => crate::chat_colors::load(app),
         Event::CallLinksChanged => load_calls(app),
         Event::CallLinkCreated(room) => {
@@ -1144,6 +1148,7 @@ pub fn list_menu(app: &mut App, m: &mut crate::menu::Menu) {
         app.tab = crate::app::Tab::Settings;
         app.settings.page = crate::settings::Page::ChatFolders;
     }
+    m.sub(Some("moon"), tr("Notification profile"), |m| crate::notification_profiles::menu(app, m));
 }
 
 /// Desktop's message request bar, in place of the composer: true when it
