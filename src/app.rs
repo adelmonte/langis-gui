@@ -177,6 +177,8 @@ pub struct App {
     pub safety: Option<SafetyPrompt>,
     pub toasts: Vec<Toast>,
     pub settings: SettingsView,
+    /// Settings > Backups and the backup media download.
+    pub backups: crate::backups::BackupsView,
     /// The theme setting: "system", "light" or "dark".
     pub theme: String,
     pub focused: bool,
@@ -336,6 +338,7 @@ impl App {
             safety: None,
             toasts: Vec::new(),
             settings: Default::default(),
+            backups: Default::default(),
             theme: "system".into(),
             focused: true,
             notify: (true, "all".into()),
@@ -692,6 +695,7 @@ impl App {
                 self.load_link_previews();
                 self.load_recent_emoji();
                 self.load_badges();
+                self.send(Command::LoadBackupMediaDownload);
                 self.load(|db| async move {
                     let get = |v: Option<String>| v.map(|v| v == "true");
                     let auto_convert = get(db.setting(crate::settings::SETTING_AUTO_CONVERT_EMOJI).await.ok().flatten()).unwrap_or(true);
@@ -922,6 +926,8 @@ impl App {
                 }
             }
             Event::CallQualitySurvey(_) => crate::call_survey::open(&self.ctx),
+            Event::BackupStatus(status) => self.backups.status = Some(status),
+            Event::BackupMediaDownload(download) => self.backups.download = Some(download),
             Event::Error(text) => {
                 // A new group that failed: Desktop's error dialog instead.
                 if self.panes.creating_group && text.contains("group") {

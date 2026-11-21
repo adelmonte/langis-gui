@@ -13,6 +13,7 @@ mod contact_modal;
 mod audio;
 mod blurhash;
 mod axo_list;
+mod backups;
 mod avatar_editor;
 mod collisions;
 mod countries;

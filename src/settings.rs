@@ -1,7 +1,7 @@
 //! Desktop's Preferences (`ts/components/Preferences.dom.tsx`): the
 //! profile card and the pages on the left, each page an `AxoPanel` of
 //! `PreferencesList`s on the right. Rows for what langis doesn't do (spell
-//! check, sounds, badges, donations, backups) are left out.
+//! check, sounds, badges, donations, local backups) are left out.
 
 use egui::RichText;
 use egui::{Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
@@ -64,11 +64,14 @@ pub enum Page {
     PhoneNumber,
     Blocked,
     DataUsage,
+    /// Desktop's Backups and BackupsDetails.
+    Backups,
+    BackupsDetails,
 }
 
 impl Page {
     /// The nav button a page lights up, and its symbol and label.
-    const NAV: [(Page, &'static str, &'static str); 8] = [
+    const NAV: [(Page, &'static str, &'static str); 9] = [
         (Page::Account, "person-circle", "Account"),
         (Page::General, "settings", "General"),
         (Page::Appearance, "appearance", "Appearance"),
@@ -77,6 +80,7 @@ impl Page {
         (Page::Notifications, "bell", "Notifications"),
         (Page::Privacy, "lock", "Privacy"),
         (Page::DataUsage, "piechart", "Data usage"),
+        (Page::Backups, "backup", "Backups"),
     ];
 
     fn top(self) -> Page {
@@ -87,6 +91,7 @@ impl Page {
             Page::WhileMuted | Page::NotificationProfiles => Page::Notifications,
             Page::PhoneNumber | Page::Blocked => Page::Privacy,
             Page::ProfileName | Page::ProfileAbout => Page::Profile,
+            Page::BackupsDetails => Page::Backups,
             other => other,
         }
     }
@@ -102,6 +107,7 @@ impl Page {
             Page::WhileMuted => tr("While muted"),
             Page::PhoneNumber => tr("Phone Number"),
             Page::Blocked => tr("Blocked"),
+            Page::BackupsDetails => tr("Backups"),
             other => Page::NAV.iter().find(|(p, _, _)| *p == other).map(|(_, _, l)| tr(l)).unwrap_or(""),
         }
     }
@@ -338,6 +344,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 Page::PhoneNumber => phone_number(app, ui, &palette, &snapshot),
                 Page::Blocked => blocked(app, ui, &palette),
                 Page::DataUsage => data_usage(app, ui, &snapshot),
+                Page::Backups => {
+                    if crate::backups::page(app, ui) {
+                        app.settings.page = Page::BackupsDetails;
+                    }
+                }
+                Page::BackupsDetails => {
+                    // Desktop goes back when there's no plan to detail.
+                    if app.backups.status.as_ref().is_some_and(|s| s.tier.is_none()) {
+                        app.settings.page = Page::Backups;
+                    }
+                    crate::backups::details_page(app, ui)
+                }
             });
         });
     });
@@ -346,6 +364,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     crate::notification_profiles::dialogs(app, ui);
     language_dialog(app, ui);
     help_window(app, ui);
+    crate::backups::dialogs(app, ui.ctx());
 }
 
 /// The app's version, for About and the debug log.
