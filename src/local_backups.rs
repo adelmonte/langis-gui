@@ -45,6 +45,8 @@ pub struct State {
     turning_off: Option<bool>,
     /// The export dialog.
     workflow: Option<LocalBackupProgress>,
+    /// Waiting on the system's password prompt, and where a yes leads.
+    auth: Option<(std::sync::mpsc::Receiver<bool>, Page)>,
 }
 
 #[derive(Clone, Default)]
@@ -114,6 +116,48 @@ fn ask(app: &mut App) {
         app.send(Command::LoadRecoveryKey);
         load(app);
     }
+    // The system's answer, once it's given.
+    if let Some((answer, page)) = app.settings.backups.auth.take() {
+        match answer.try_recv() {
+            Ok(true) => app.settings.page = page,
+            Ok(false) => app.toast(tr("Authentication failed")),
+            Err(std::sync::mpsc::TryRecvError::Empty) => app.settings.backups.auth = Some((answer, page)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+        }
+    }
+}
+
+/// Desktop's `promptOSAuth` on Linux: polkit's `pkcheck` asks for the
+/// user's password, when our action is registered (`data/org.langis.policy`
+/// installed under /usr/share/polkit-1/actions, which needs root). Without
+/// it, as in Desktop, there's nothing to ask and the step goes ahead.
+fn authorize(app: &mut App, reason: &'static str, then: Page) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ctx = app.ctx.clone();
+    std::thread::spawn(move || {
+        let action = format!("org.langis.{reason}");
+        let run = |cmd: &str, args: &[&str]| std::process::Command::new(cmd).args(args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+        let registered = run("pkaction", &["--action-id", &action]).is_ok_and(|s| s.success());
+        let allowed = !registered
+            || run("pkcheck", &["-u", "--process", &std::process::id().to_string(), "--action-id", &action]).is_ok_and(|s| s.success());
+        let _ = tx.send(allowed);
+        ctx.request_repaint();
+    });
+    app.settings.backups.auth = Some((rx, then));
+}
+
+/// Desktop's `copyTextTemporarily`: the recovery key leaves the clipboard
+/// after 45 seconds, unless something else was copied since.
+fn copy_for_a_while(ctx: &egui::Context, text: String) {
+    ctx.copy_text(text.clone());
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(45));
+        if let Ok(mut clipboard) = arboard::Clipboard::new()
+            && clipboard.get_text().is_ok_and(|now| now == text)
+        {
+            let _ = clipboard.set_text(String::new());
+        }
+    });
 }
 
 /// Desktop's Backups page.
@@ -134,7 +178,11 @@ pub fn other_ways(app: &mut App, ui: &mut Ui) {
         let item = Item::new(tr("Desktop backups")).symbol("folder").description(description).disabled(no_key);
         let action = if set_up { tr("Manage") } else { tr("Set up") };
         if axo_list::item(ui, item, End::Action(action, false)).clicked() && !no_key {
-            app.settings.page = if set_up { Page::LocalBackups } else { Page::LocalBackupsSetupFolder };
+            if set_up {
+                app.settings.page = Page::LocalBackups;
+            } else {
+                authorize(app, "enable-backups", Page::LocalBackupsSetupFolder);
+            }
         }
     });
 }
@@ -191,7 +239,7 @@ pub fn manage_page(app: &mut App, ui: &mut Ui) {
         if axo_list::item(ui, item, End::Action(tr("View key"), false)).clicked() {
             if key_current {
                 app.settings.backups.step = KeyStep::View;
-                app.settings.page = Page::LocalBackupsKeyReference;
+                authorize(app, "view-aep", Page::LocalBackupsKeyReference);
             } else {
                 app.settings.backups.key_changed = true;
             }
@@ -334,7 +382,7 @@ pub fn key_page(app: &mut App, ui: &mut Ui, referencing: bool) {
         let text = tr("Do not share your recovery key with anyone. This will let them take over your account. Signal will never message you for your recovery key. Never respond to a chat pretending to be Signal.");
         if dialog::alert(&ctx, egui::Id::unique("recovery-key-do-not-share"), tr("Do not share recovery key"), text, tr("Got it")) {
             app.settings.backups.do_not_share = false;
-            ctx.copy_text(shown.clone());
+            copy_for_a_while(&ctx, shown.clone());
             app.toast(tr("Recovery key copied"));
         }
     }

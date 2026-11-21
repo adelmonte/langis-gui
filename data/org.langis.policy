@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Optional: installed under /usr/share/polkit-1/actions (needs root), langis
+     asks for your password before setting up Desktop backups or showing the
+     recovery key, as Signal Desktop's packages do. Without it, it doesn't ask. -->
+<policyconfig>
+  <action id="org.langis.enable-backups">
+    <description>Set up backups</description>
+    <message>Authentication is required to set up backups.</message>
+    <defaults>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
+  <action id="org.langis.view-aep">
+    <description>View recovery key</description>
+    <message>Authentication is required to view your recovery key.</message>
+    <defaults>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
