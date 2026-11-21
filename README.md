@@ -23,10 +23,17 @@ The picture is the demo account with made-up chats
 Checked against Signal Desktop 8.38's source in November 2026. Items
 marked (langis) need backend work first.
 
-- Backups and Notification profiles (langis): each is its own project.
-- No tray icon (egui has none).
-- Per-chat "while muted" exceptions and unread reminders (langis; the
-  account-wide ones work).
+- Backups (langis): Signal's backup format is a project of its own.
+- Sent media quality (Standard/High) is left out by design, and donations
+  on purpose.
+- The call quality survey asks, but nothing is sent: Signal takes the
+  answers over a connection langis doesn't have.
+- Hiding the window to the tray may not work on every Wayland compositor.
+- Languages written right to left, and others that need complex text
+  shaping, aren't offered: egui can't draw them yet. Chinese, Japanese and
+  Korean need a system font.
+- The sticker manager is a dialog rather than Desktop's side panel, and the
+  narrow (avatars only) list is for chats only.
 - Some notices only come from transferred history so far: joined Signal,
   merged chats, a number that belongs to someone, the name a chat started
   with. The default-timer notice in new chats and group V1 migration
@@ -37,7 +44,8 @@ marked (langis) need backend work first.
   chat).
 
 Calls work on Linux in real use. Not yet tried on a real account: sounds,
-paste and drag-and-drop, and chat export.
+paste and drag-and-drop, chat export, notification profiles, the sticker
+pack creator, linking errors and relinking, and removing a contact.
 
 ## Install
 
