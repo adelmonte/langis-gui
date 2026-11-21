@@ -418,7 +418,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if chat.selected.is_some() {
         select_bar(app, ui, &palette, &mut chat);
     } else if signal {
-    } else if !crate::panes::message_request_bar(app, ui, &palette, &conversation) {
+    } else if crate::panes::message_request_bar(app, ui, &palette, &conversation) {
+    } else if conversation.ever_unregistered() {
+        unregistered_bar(ui, &palette);
+    } else {
         crate::composer::show(app, ui, &palette, &mut chat, &conversation);
     }
     let mut actions = Vec::new();
@@ -859,7 +862,7 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                             let until = if c.muted { 0 } else { i64::MAX };
                             app.send(Command::SetChat { conversation: c.id.clone(), change: langis_core::ChatChange::MutedUntil(until) });
                         }
-                    } else if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked {
+                    } else if c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked && !c.ever_unregistered() {
                         let group = c.kind == ConversationKind::Group;
                         let in_other = app.call.as_ref().is_some_and(|call| call.conversation != c.id);
                         let going = group && app.panes.active_calls.get(&c.id).is_some_and(|u| !u.is_empty());
@@ -882,6 +885,28 @@ fn header(app: &mut App, ui: &mut Ui, palette: &Palette, c: &langis_store::Conve
                         });
                     }
                 });
+            });
+        });
+}
+
+/// Desktop's `CompositionArea--sms-only`, in place of the composer for
+/// someone a send found no longer on Signal (`isConversationEverUnregistered`).
+fn unregistered_bar(ui: &mut Ui, palette: &Palette) {
+    egui::Panel::bottom("unregistered")
+        .show_separator_line(false)
+        .frame(egui::Frame::new().fill(palette.background).inner_margin(egui::Margin { left: 16, right: 16, top: 14, bottom: 18 }))
+        .show(ui, |ui| {
+            let r = ui.max_rect();
+            ui.painter().hline(r.x_range().expand(16.), r.top() - 14., egui::Stroke::new(1., palette.border));
+            let color = if palette.dark { theme::rgb(0xe9e9e9) } else { theme::rgb(0x5e5e5e) };
+            ui.vertical_centered(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.;
+                ui.label(RichText::new(tr("This person isn\u{2019}t using Signal")).font(theme::semibold(13.)).color(color));
+                ui.label(
+                    RichText::new(tr("Signal Desktop does not support messaging non-Signal contacts. Ask this person to install Signal for a more secure messaging experience."))
+                        .font(theme::regular(13.))
+                        .color(color),
+                );
             });
         });
 }

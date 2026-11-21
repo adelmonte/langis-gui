@@ -132,7 +132,7 @@ fn new_call(app: &mut App, ui: &mut Ui, palette: &Palette) {
     ui.add_space(8.);
     let q = query.trim().to_lowercase();
     let matches = |c: &&langis_store::Conversation| {
-        c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked && !c.ended && (q.is_empty() || c.title.to_lowercase().contains(&q))
+        c.kind != ConversationKind::NoteToSelf && !c.left && !c.blocked && !c.ended && c.removal_stage.is_none() && !c.unregistered(chrono::Utc::now().timestamp_millis()) && (q.is_empty() || c.title.to_lowercase().contains(&q))
     };
     let direct: Vec<_> = app.conversations.iter().filter(matches).filter(|c| c.kind == ConversationKind::Direct).cloned().collect();
     let groups: Vec<_> = app.conversations.iter().filter(matches).filter(|c| c.kind == ConversationKind::Group).cloned().collect();

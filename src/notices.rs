@@ -33,6 +33,8 @@ pub fn notice_text(notice: &Notice, name: impl Fn(&str) -> String) -> String {
         Notice::NumberChanged { who } => crate::i18n::tf("icu:ChangeNumber--notification", &format!("{} changed their phone number", name(who)), &[("sender", crate::i18n::Arg::from(&name(who)))]),
         // `icu:ChatRefresh--notification`.
         Notice::SessionRefreshed => tr("Chat session refreshed").into(),
+        // `icu:ContactRemovedNotification__text`.
+        Notice::ContactRemoved => tr("You have removed this person, messaging them again will add them back to your list.").into(),
         // `icu:JoinedSignal--notification`.
         Notice::JoinedSignal { .. } => tr("Contact joined Signal").into(),
         Notice::SessionEnded => tr("Secure session reset").into(),
@@ -405,7 +407,7 @@ pub fn notice_icon(notice: &Notice) -> (Option<&'static str>, bool) {
         Notice::ProfileNameChanged { .. } => "person-compact",
         Notice::NumberChanged { .. } => "phone-compact",
         Notice::SessionRefreshed | Notice::SessionEnded => "refresh",
-        Notice::JoinedSignal { .. } | Notice::NumberIsTheirs { .. } | Notice::DeliveryIssue { .. } => "info-compact",
+        Notice::JoinedSignal { .. } | Notice::NumberIsTheirs { .. } | Notice::DeliveryIssue { .. } | Notice::ContactRemoved => "info-compact",
         Notice::Merged { .. } => "merge-compact",
         Notice::StartedWith { .. } => "thread-compact",
         Notice::UnsupportedMessage { .. } => "error-circle-compact",

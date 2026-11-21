@@ -85,7 +85,8 @@ pub fn follow_global(app: &mut App, ctx: &egui::Context) {
             return;
         }
         // People without a chat yet: those with one show under Chats.
-        let listed: std::collections::HashSet<ConversationId> = app.conversations.iter().filter(|c| c.last_message_at > 0).map(|c| c.id.clone()).collect();
+        // Nor anyone we removed (Desktop's search, `removalStage`).
+        let listed: std::collections::HashSet<ConversationId> = app.conversations.iter().filter(|c| c.last_message_at > 0 || c.removal_stage.is_some()).map(|c| c.id.clone()).collect();
         app.load(move |db| async move {
             let hits = db.search_messages(&query, LIMIT).await.unwrap_or_default();
             let q = query.to_lowercase();

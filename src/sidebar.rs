@@ -224,6 +224,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
             });
             ui.add_space(6.);
             status_banner(app, ui, &palette);
+            username_banner(app, ui, &palette);
             // Desktop's archive helper: what archived chats are.
             if app.panes.archived {
                 ui.horizontal(|ui| {
@@ -508,6 +509,58 @@ fn status_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
     ui.add_space(6.);
 }
 
+/// Desktop's `LeftPaneBanner` when our username or its link broke
+/// (`LeftPane`'s `usernameCorrupted`, then `usernameLinkCorrupted`): the
+/// text, and "Fix now" opening the username editor or the link screen.
+fn username_banner(app: &mut App, ui: &mut Ui, palette: &Palette) {
+    let (username, link) = app.panes.username_corrupted;
+    let text = if username {
+        tr("Something went wrong with your username, it\u{2019}s no longer assigned to your account. You can try and set it again or choose a new one.")
+    } else if link {
+        tr("Something went wrong with your QR code and username link, it\u{2019}s no longer valid. Create a new link to share with others.")
+    } else {
+        return;
+    };
+    // gray-15 on gray-75 text in light, the reverse in dark.
+    let (fill, color, action) = if palette.dark {
+        (theme::rgb(0x3b3b3b), theme::rgb(0xdedede), theme::rgb(0xe9e9e9))
+    } else {
+        (theme::rgb(0xdedede), theme::rgb(0x3b3b3b), theme::rgb(0x1b1b1b))
+    };
+    let mut fix = false;
+    ui.add_space(4.);
+    ui.horizontal(|ui| {
+        ui.add_space(10.);
+        egui::Frame::new()
+            .fill(fill)
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(egui::Margin { left: 12, right: 7, top: 12, bottom: 16 })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width() - 10.);
+                ui.label(RichText::new(text).font(theme::regular(13.)).color(color));
+                ui.add_space(8.);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(9.);
+                    let label = tr("Fix now");
+                    let r = ui.add(egui::Label::new(RichText::new(label).font(theme::semibold(14.)).color(action)).sense(Sense::click()));
+                    fix = r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label).clicked();
+                });
+            });
+    });
+    ui.add_space(8.);
+    if !fix {
+        return;
+    }
+    app.tab = crate::app::Tab::Settings;
+    app.settings.page = crate::settings::Page::Profile;
+    crate::profile::open(app);
+    if username {
+        crate::profile::start_username(app);
+    } else {
+        crate::profile::open_link_screen(app);
+    }
+}
+
 /// One chat: 68px, avatar 48, title and time over two lines of preview.
 #[allow(clippy::too_many_arguments)]
 fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, typing: bool, mentions: u32, badge: Option<&str>) -> egui::Response {
@@ -587,7 +640,7 @@ fn chat_row(ui: &mut Ui, palette: &Palette, c: &Conversation, selected: bool, ty
         // `__blocked`: the 16px block icon, 4px, then the text.
         Icon::Block.paint(ui, Rect::from_center_size(Pos2::new(left + 8., inner.top() + 29.), Vec2::splat(16.)), 16., palette.text_secondary);
         job.append(tr("Blocked"), 20., body(palette.text_secondary));
-    } else if !c.accepted {
+    } else if !c.accepted && c.removal_stage != Some(langis_store::RemovalStage::JustNotification) {
         job.append("Message request", 0., egui::TextFormat { font_id: theme::semibold(13.), ..body(palette.text_secondary) });
     } else if typing {
         dots = true;

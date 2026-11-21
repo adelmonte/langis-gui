@@ -948,7 +948,11 @@ impl App {
             let profile = langis_core::own_profile(&db, &aci).await;
             let answered = db.setting(crate::panes::SETTING_USERNAME_MEGAPHONE).await.ok().flatten().is_some();
             let show = profile.username.is_none() && !answered;
-            Some(Loaded::Apply(Box::new(move |app: &mut App| app.panes.username_megaphone = show)))
+            let corrupted = (profile.username_corrupted, profile.username_link_corrupted);
+            Some(Loaded::Apply(Box::new(move |app: &mut App| {
+                app.panes.username_megaphone = show;
+                app.panes.username_corrupted = corrupted;
+            })))
         });
     }
 
