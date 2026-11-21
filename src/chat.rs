@@ -2125,7 +2125,10 @@ fn message(
     if let (Some(g), Some(rich)) = (galley, rich.as_ref()) {
         let pos = Pos2::new(left, y);
         let text_rect = Rect::from_min_size(pos, g.size());
-        let text_response = ui.interact(text_rect, ui.scope_id().with(("text", m.id)), Sense::click());
+        // Desktop's message text can be selected and copied (Ctrl+C), as an
+        // egui label's can; links and spoilers still take a click.
+        let sense = if ctx.selecting { Sense::click() } else { Sense::click_and_drag() };
+        let text_response = ui.interact(text_rect, ui.scope_id().with(("text", m.id)), sense);
         if let Some(pointer) = text_response.hover_pos() {
             let cursor = g.cursor_from_pos(pointer - pos);
             let at = cursor.index.0;
@@ -2147,7 +2150,11 @@ fn message(
             }
         }
         let g_h = g.size().y;
-        ui.painter().galley(pos, g, in_color);
+        if ctx.selecting {
+            ui.painter().galley(pos, g, in_color);
+        } else {
+            egui::text_selection::LabelSelectionState::label_text_selection(ui, &text_response, pos, g, in_color, Stroke::NONE);
+        }
         if let Some((label, clickable)) = long_line {
             let color = if clickable { if outgoing { Color32::WHITE } else { palette.accent_text } } else { meta_color };
             let at = Pos2::new(left, y + g_h + 2.);
