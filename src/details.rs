@@ -400,11 +400,6 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             if axo_list::item(ui, Item::new(tr("Contact Us")).symbol("invite"), End::External).clicked() {
                 crate::chat::open_externally("https://support.signal.org/hc/requests/new?desktop");
             }
-            // Desktop goes to its donation flow; langis has none, so
-            // Signal's donate page.
-            if axo_list::item(ui, Item::new(tr("Donate to Signal")).symbol("heart"), End::Click).clicked() {
-                crate::chat::open_externally("https://signal.org/donate/");
-            }
         });
     }
 
