@@ -36,6 +36,7 @@ mod i18n;
 mod i18n_locales;
 mod icons;
 mod lightbox;
+mod local_backups;
 mod menu;
 mod menu_bar;
 mod notices;

@@ -1,7 +1,7 @@
 //! Desktop's Preferences (`ts/components/Preferences.dom.tsx`): the
 //! profile card and the pages on the left, each page an `AxoPanel` of
 //! `PreferencesList`s on the right. Rows for what langis doesn't do (spell
-//! check, sounds, badges, donations, backups) are left out.
+//! check, sounds, badges, donations) are left out.
 
 use egui::RichText;
 use egui::{Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
@@ -64,11 +64,18 @@ pub enum Page {
     PhoneNumber,
     Blocked,
     DataUsage,
+    /// Desktop's Backups, and its Desktop backups pages: the backups, the
+    /// folder and key setup steps, and the key viewed again.
+    Backups,
+    LocalBackups,
+    LocalBackupsSetupFolder,
+    LocalBackupsSetupKey,
+    LocalBackupsKeyReference,
 }
 
 impl Page {
     /// The nav button a page lights up, and its symbol and label.
-    const NAV: [(Page, &'static str, &'static str); 8] = [
+    const NAV: [(Page, &'static str, &'static str); 9] = [
         (Page::Account, "person-circle", "Account"),
         (Page::General, "settings", "General"),
         (Page::Appearance, "appearance", "Appearance"),
@@ -77,6 +84,7 @@ impl Page {
         (Page::Notifications, "bell", "Notifications"),
         (Page::Privacy, "lock", "Privacy"),
         (Page::DataUsage, "piechart", "Data usage"),
+        (Page::Backups, "backup", "Backups"),
     ];
 
     fn top(self) -> Page {
@@ -87,6 +95,8 @@ impl Page {
             Page::WhileMuted | Page::NotificationProfiles => Page::Notifications,
             Page::PhoneNumber | Page::Blocked => Page::Privacy,
             Page::ProfileName | Page::ProfileAbout => Page::Profile,
+            Page::LocalBackupsKeyReference => Page::LocalBackups,
+            Page::LocalBackups | Page::LocalBackupsSetupFolder | Page::LocalBackupsSetupKey => Page::Backups,
             other => other,
         }
     }
@@ -102,6 +112,9 @@ impl Page {
             Page::WhileMuted => tr("While muted"),
             Page::PhoneNumber => tr("Phone Number"),
             Page::Blocked => tr("Blocked"),
+            Page::LocalBackups => tr("Desktop backups"),
+            // Desktop leaves the setup pages' titles blank.
+            Page::LocalBackupsSetupFolder | Page::LocalBackupsSetupKey | Page::LocalBackupsKeyReference => "",
             other => Page::NAV.iter().find(|(p, _, _)| *p == other).map(|(_, _, l)| tr(l)).unwrap_or(""),
         }
     }
@@ -179,6 +192,8 @@ pub struct SettingsView {
     /// Desktop's PreferencesLanguageDialog: its search, and the language
     /// picked (empty: the system's).
     language: Option<(String, String)>,
+    /// Desktop backups' pages and dialogs.
+    pub backups: crate::local_backups::State,
 }
 
 struct FolderChats {
@@ -338,6 +353,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 Page::PhoneNumber => phone_number(app, ui, &palette, &snapshot),
                 Page::Blocked => blocked(app, ui, &palette),
                 Page::DataUsage => data_usage(app, ui, &snapshot),
+                Page::Backups => crate::local_backups::page(app, ui),
+                Page::LocalBackups => crate::local_backups::manage_page(app, ui),
+                Page::LocalBackupsSetupFolder => crate::local_backups::folder_page(app, ui),
+                Page::LocalBackupsSetupKey => crate::local_backups::key_page(app, ui, false),
+                Page::LocalBackupsKeyReference => crate::local_backups::key_page(app, ui, true),
             });
         });
     });
@@ -345,6 +365,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     folder_dialogs(app, ui);
     crate::notification_profiles::dialogs(app, ui);
     language_dialog(app, ui);
+    crate::local_backups::dialogs(app, ui);
     help_window(app, ui);
 }
 
