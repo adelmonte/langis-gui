@@ -117,7 +117,56 @@ pub fn call_text(incoming: bool, video: bool, outcome: langis_store::CallOutcome
     }
 }
 
+/// Desktop's wording for a change whose maker isn't known (`--unknown`).
+fn unknown_text(change: &GroupNotice, name: &impl Fn(&str) -> String) -> Option<String> {
+    use crate::i18n::{Arg, tf};
+    let who = |m: &Option<String>| m.as_deref().map(name);
+    Some(match change {
+        GroupNotice::Title { title } if title.is_empty() => tr("A member removed the group name.").into(),
+        GroupNotice::Title { title } => tf("icu:GroupV2--title--change--unknown", &format!("A member changed the group name to \"{title}\"."), &[("newTitle", Arg::from(title))]),
+        GroupNotice::Description { description: Some(d) } if d.is_empty() => tr("The group description was removed.").into(),
+        GroupNotice::Description { .. } => tr("The group description was changed.").into(),
+        GroupNotice::Avatar => tr("A member changed the group avatar.").into(),
+        GroupNotice::InfoAccess { admins_only: true } => tr("An admin changed who can edit group info to \"Only admins.\"").into(),
+        GroupNotice::InfoAccess { admins_only: false } => tr("An admin changed who can edit group info to \"All members.\"").into(),
+        GroupNotice::MemberAccess { admins_only: true } => tr("An admin changed who can edit group membership to \"Only admins.\"").into(),
+        GroupNotice::MemberAccess { admins_only: false } => tr("An admin changed who can edit group membership to \"All members.\"").into(),
+        GroupNotice::LabelAccess { admins_only: true } => tr("An admin changed who can add member labels to \"Only admins.\"").into(),
+        GroupNotice::LabelAccess { admins_only: false } => tr("An admin changed who can add member labels to \"All members.\"").into(),
+        GroupNotice::Added { member: None } => tr("You were added to the group.").into(),
+        GroupNotice::Added { member } => {
+            let m = who(member).unwrap_or_default();
+            tf("icu:GroupV2--member-add--other--unknown", &format!("A member added {m}."), &[("memberName", Arg::from(&m))])
+        }
+        GroupNotice::Removed { member: None } => tr("You were removed from the group.").into(),
+        GroupNotice::Removed { member } => {
+            let m = who(member).unwrap_or_default();
+            tf("icu:GroupV2--member-remove--other--unknown", &format!("A member removed {m}."), &[("memberName", Arg::from(&m))])
+        }
+        GroupNotice::Admin { member: None, admin: true } => tr("An admin made you an admin.").into(),
+        GroupNotice::Admin { member: None, admin: false } => tr("An admin revoked your admin privileges.").into(),
+        GroupNotice::Admin { member, admin } => {
+            let m = who(member).unwrap_or_default();
+            if *admin {
+                tf("icu:GroupV2--member-privilege--promote--other--unknown", &format!("An admin made {m} an admin."), &[("memberName", Arg::from(&m))])
+            } else {
+                tf("icu:GroupV2--member-privilege--demote--other--unknown", &format!("An admin revoked admin privileges from {m}."), &[("memberName", Arg::from(&m))])
+            }
+        }
+        GroupNotice::LinkReset => tr("The group link has been reset.").into(),
+        GroupNotice::LinkOff => tr("The group link has been turned off.").into(),
+        GroupNotice::AnnouncementsOnly { on: true } => tr("The group was changed to only allow admins to send messages.").into(),
+        GroupNotice::AnnouncementsOnly { on: false } => tr("The group was changed to allow all members to send messages.").into(),
+        _ => return None,
+    })
+}
+
 fn group_text(by: Option<&str>, change: &GroupNotice, name: impl Fn(&str) -> String) -> String {
+    if by == Some(langis_store::UNKNOWN_ACTOR)
+        && let Some(text) = unknown_text(change, &name)
+    {
+        return text;
+    }
     let who = by.map(&name);
     // "You …" or "Alice …".
     let actor = || who.clone().unwrap_or_else(|| tr("You").into());
