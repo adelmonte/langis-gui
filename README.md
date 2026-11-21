@@ -23,7 +23,9 @@ The picture is the demo account with made-up chats
 Checked against Signal Desktop 8.38's source in November 2026. Items
 marked (langis) need backend work first.
 
-- Backups (langis): Signal's backup format is a project of its own.
+- Signal Secure Backups (the remote tier) is managed on the phone. Desktop
+  backups (Settings > Backups) work, but no backup made here has been
+  restored on a phone yet.
 - Sent media quality (Standard/High) is left out by design, and donations
   on purpose.
 - The call quality survey asks, but nothing is sent: Signal takes the

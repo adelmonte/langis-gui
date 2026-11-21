@@ -44,6 +44,7 @@ in its guide), not a workaround here.
 | `stories.rs`, `calls_tab.rs`, `call.rs` | Stories, call history and links, the call screen. |
 | `settings.rs` | Settings. |
 | `backups.rs` | Settings > Backups, the backup media download banner and its settings row. |
+| `local_backups.rs` | Settings > Backups: Desktop backups (folder, recovery key, back up now, turn off). |
 | `notification_profiles.rs` | Notification profiles: settings pages, the chat list menu and indicator. |
 | `menu.rs`, `dialog.rs`, `axo_list.rs` | Desktop's Axo menus, dialogs and settings lists. |
 | `theme.rs`, `widgets.rs`, `icons.rs`, `glyphs.rs`, `format.rs`, `notices.rs` | Shared drawing and text. |

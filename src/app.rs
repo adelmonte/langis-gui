@@ -662,6 +662,9 @@ impl App {
         if self.fun.on_event(&event) {
             return;
         }
+        if crate::local_backups::on_event(self, &event) {
+            return;
+        }
         match event {
             Event::NeedsLinking => {
                 self.phase = Phase::Linking { url: None, error: None, qr: None };

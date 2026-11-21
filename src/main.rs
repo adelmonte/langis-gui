@@ -38,6 +38,7 @@ mod i18n_locales;
 mod icons;
 mod handoff;
 mod lightbox;
+mod local_backups;
 mod menu;
 mod menu_bar;
 mod notices;
