@@ -838,6 +838,17 @@ impl App {
                     self.load_pinned(conversation);
                 }
             }
+            // Desktop's unread reminder, as a notification when they're on;
+            // langis asks again hourly until told it was shown.
+            Event::UnreadReminder { conversation, reminder } => {
+                let (on, content) = self.notify.clone();
+                if let Some(chat) = self.conversation(&conversation).filter(|_| on) {
+                    let name = |id: &str| self.names.get(id).cloned().unwrap_or_else(|| tr("Unknown contact").to_owned());
+                    let (title, body) = crate::unread_reminders::content(&reminder, &chat.title, content != "none", name);
+                    let _ = self.loaded_tx.send(Loaded::Notify { title, body });
+                    self.send(Command::UnreadReminderShown { conversation });
+                }
+            }
             Event::Error(text) => {
                 // A new group that failed: Desktop's error dialog instead.
                 if self.panes.creating_group && text.contains("group") {

@@ -54,6 +54,7 @@ mod sounds;
 mod spell;
 mod startup;
 mod stories;
+mod unread_reminders;
 mod symbols;
 mod theme;
 mod tray;
