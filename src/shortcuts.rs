@@ -186,6 +186,14 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             app.open(id);
         }
     }
+    // Desktop's other keys for them: Ctrl+Tab and Ctrl+Shift+Tab.
+    for (modifiers, step) in [(CTRL_SHIFT, -1), (CTRL, 1)] {
+        if pressed(ctx, modifiers, Key::Tab)
+            && let Some(id) = neighbor(app, step, false)
+        {
+            app.open(id);
+        }
+    }
     for (key, step) in [(Key::ArrowUp, -1), (Key::ArrowDown, 1)] {
         if pressed(ctx, ALT_SHIFT, key)
             && let Some(id) = neighbor(app, step, true)
@@ -214,7 +222,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     }
     // Desktop's Navigate by section (Ctrl+T, F6): the chat list's search,
     // then the composer, round again.
-    if pressed(ctx, CTRL, Key::T) || pressed(ctx, Modifiers::NONE, Key::F6) {
+    if pressed(ctx, CTRL, Key::T) || pressed(ctx, CTRL, Key::F6) || pressed(ctx, Modifiers::NONE, Key::F6) {
         let search = crate::sidebar::search_id();
         let composer = app.selected.as_ref().filter(|_| app.chat.is_some()).map(crate::composer::input_id);
         let in_search = ctx.memory(|m| m.has_focus(search));
