@@ -476,7 +476,8 @@ pub fn discard_guard<T: Clone + PartialEq + Send + Sync + 'static>(ctx: &egui::C
 }
 
 pub fn body(ui: &mut Ui, palette: &Palette, text: &str) {
-    ui.label(RichText::new(text).font(theme::regular(14.)).color(palette.text_secondary));
+    // Selectable, as a dialog's text in Chromium.
+    crate::interaction::label(ui, RichText::new(text).font(theme::regular(14.)).color(palette.text_secondary));
 }
 
 /// Buttons along a dialog's bottom, right to left: the first is primary.

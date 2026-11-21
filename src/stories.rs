@@ -810,7 +810,10 @@ fn paint_story_caption(ui: &Ui, s: &Story, rect: Rect, expanded: bool) -> (Optio
                 let at = Pos2::new(rect.left() + 16., rect.bottom() - galley.size().y - extra - 16.);
                 let back = Rect::from_min_size(at - Vec2::splat(6.), galley.size() + Vec2::new(12., 12. + extra));
                 ui.painter().rect_filled(back, CornerRadius::same(8), Color32::from_black_alpha(120));
-                ui.painter().galley(at, galley.clone(), Color32::WHITE);
+                // The caption can be selected by dragging, as Desktop's;
+                // clicks go through to the viewer.
+                let r = ui.interact(Rect::from_min_size(at, galley.size()), ui.scope_id().with("story-caption"), egui::Sense::drag());
+                crate::interaction::paint_selectable(ui, &r, at, galley.clone(), Color32::WHITE);
                 if elided {
                     ui.painter().text(Pos2::new(at.x, at.y + galley.size().y + 2.), egui::Align2::LEFT_TOP, tr("Read more"), theme::semibold(13.), Color32::WHITE);
                     cut = Some(back);

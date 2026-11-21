@@ -1594,7 +1594,13 @@ fn message(
                     egui::Image::new(egui::ImageSource::Bytes { uri: uri.into(), bytes: bytes.into() }).tint(color).fit_to_exact_size(Vec2::splat(16.)).paint_at(ui, at);
                 }
             }
-            ui.painter().galley(Pos2::new(rect.center().x, rect.top()), galley, color);
+            // A notice's text can be selected and copied, as Desktop's.
+            let at = Pos2::new(rect.center().x, rect.top());
+            if ctx.selecting {
+                ui.painter().galley(at, galley, color);
+            } else {
+                crate::interaction::selectable(ui, ui.scope_id().with(("notice-text", m.id)), at, galley, color);
+            }
             if let Some((label, action)) = button
                 && !ctx.selecting
             {

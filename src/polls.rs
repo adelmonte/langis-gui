@@ -188,7 +188,11 @@ pub fn paint(
     let mut out = None;
     let mut y = rect.top();
     let qh = view.question.size().y;
-    ui.painter().galley(Pos2::new(rect.left(), y), view.question, text);
+    // The question can be selected by dragging, as Desktop's; clicks and
+    // right-clicks fall through to the message.
+    let at = Pos2::new(rect.left(), y);
+    let r = ui.interact(Rect::from_min_size(at, view.question.size()), ui.scope_id().with(("poll-question", message_id)), Sense::drag());
+    crate::interaction::paint_selectable(ui, &r, at, view.question, text);
     y += qh + 2.;
     let sub = if poll.ended {
         "Poll · Final results"

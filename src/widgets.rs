@@ -141,20 +141,29 @@ pub fn linked_text(ui: &mut Ui, text: &str, size: f32, color: Color32, width: f3
     }
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     let cut = galley.elided;
-    let (rect, r) = ui.allocate_exact_size(Vec2::new(if center { width } else { galley.size().x }, galley.size().y), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(if center { width } else { galley.size().x }, galley.size().y), Sense::hover());
+    // A centered galley's x is its middle; its rect starts half a width left.
     let origin = if center { egui::pos2(rect.center().x, rect.top()) } else { rect.min };
+    let text_rect = Rect::from_min_size(egui::pos2(if center { origin.x - galley.size().x / 2. } else { origin.x }, origin.y), galley.size());
+    let r = ui.interact(text_rect, ui.next_auto_id().with("linked-text"), Sense::click_and_drag() - Sense::FOCUSABLE);
     // The link under the pointer, by character.
     let hovered = r.hover_pos().and_then(|p| {
         let index = galley.cursor_from_pos(p - origin).index;
         let byte = text.char_indices().nth(index.0).map_or(text.len(), |(b, _)| b);
         links.iter().find(|(range, _)| range.contains(&byte)).map(|(_, url)| url.clone())
     });
-    ui.painter().galley(origin, galley, color);
+    // The text can be selected and copied, as Chromium's; a link takes a
+    // click (a middle one too), and a right-click offers Copy link
+    // (Electron's menu), or Copy for a selection.
+    crate::interaction::paint_selectable(ui, &r, origin, galley, color);
     if let Some(url) = hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        if r.clicked() {
+        if r.clicked() || r.middle_clicked() {
             crate::chat::open_externally(&url);
         }
+        crate::interaction::link_menu(ui, &r, &url);
+    } else {
+        crate::interaction::copy_menu(ui, &r);
     }
     cut
 }
