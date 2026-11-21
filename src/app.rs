@@ -267,6 +267,7 @@ impl App {
         crate::theme::install(&ctx);
         let (loaded_tx, loaded) = channel();
         let (data_dir, scratch) = if args.demo {
+            sweep_demo_dirs();
             let dir = tempfile::Builder::new().prefix("langis-gui-demo-").tempdir().expect("a scratch directory for the demo");
             (dir.path().to_owned(), Some(dir))
         } else {
@@ -1481,6 +1482,21 @@ const ALREADY_RUNNING: &str = "langis-gui is already running for this account. S
 /// Whether another running copy holds the data directory (the backend's
 /// `langis.lock`). Checked up front so a passphrase isn't asked for first;
 /// `Backend::start` still has the final say.
+/// Demo scratch directories left behind (a run killed, or the screenshot
+/// tests, which don't drop the app): removed once over ten minutes old and
+/// not held by a running app, so /tmp (often a small RAM disk) doesn't fill.
+fn sweep_demo_dirs() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let stale = entry.file_name().to_string_lossy().starts_with("langis-gui-demo-")
+            && entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() > 600);
+        if stale && !in_use(&path) {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+}
+
 fn in_use(dir: &std::path::Path) -> bool {
     let Ok(file) = std::fs::File::open(dir.join("langis.lock")) else { return false };
     matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
