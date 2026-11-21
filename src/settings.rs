@@ -454,7 +454,7 @@ fn help_window(app: &mut App, ui: &mut Ui) {
                         ui.label(RichText::new(tr("Debug log submitted")).font(theme::semibold(14.)));
                         ui.add_space(8.);
                         let mut shown = url.clone();
-                        ui.add(egui::TextEdit::singleline(&mut shown).desired_width(f32::INFINITY));
+                        ui.add(egui::TextEdit::singleline(&mut shown).hint_text(tr("Debug log")).desired_width(f32::INFINITY));
                         ui.add_space(12.);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if widgets::pill_button(ui, tr("Copy Link"), true).clicked() {
@@ -478,7 +478,7 @@ fn help_window(app: &mut App, ui: &mut Ui) {
                                 // Desktop shows the start of it, read-only.
                                 let mut preview: String = text.chars().take(20_000).collect();
                                 egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
-                                    ui.add(egui::TextEdit::multiline(&mut preview).font(egui::FontId::monospace(11.)).desired_width(f32::INFINITY).interactive(true));
+                                    ui.add(egui::TextEdit::multiline(&mut preview).hint_text(tr("Debug log")).font(egui::FontId::monospace(11.)).desired_width(f32::INFINITY).interactive(true));
                                 });
                                 ui.add_space(12.);
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
