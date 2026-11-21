@@ -157,7 +157,10 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
     let palette = Palette::of(ui.ctx());
     // Searching, composing and the archive need the full width.
     let requires_full = !app.search.is_empty() || app.panes.compose.is_some() || app.panes.archived || app.message_search.within.is_some();
-    let width = pane_width(app.left_width, requires_full);
+    // A window too narrow for the list and a chat beside it (Desktop goes
+    // down to 300px wide) shows the list narrow, unless it's needed in full.
+    let room = ui.available_width() - 320.;
+    let width = if !requires_full && room < pane_width(app.left_width, false) { NARROW_WIDTH } else { pane_width(app.left_width, requires_full) };
     egui::Panel::left("chat-list")
         .resizable(false)
         .exact_size(width)

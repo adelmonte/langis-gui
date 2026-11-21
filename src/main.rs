@@ -195,7 +195,7 @@ fn main() -> eframe::Result {
         .with_title("langis")
         .with_app_id("langis")
         .with_inner_size([1100., 760.])
-        .with_min_inner_size([640., 480.])
+        .with_min_inner_size([300., 200.])
         .with_icon(window_icon());
     // The window as it was last time (Desktop's window config).
     if !args.demo
