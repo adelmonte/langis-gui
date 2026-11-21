@@ -2237,7 +2237,10 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
         let mut close_people = false;
         let gone = modal(ui, "lobby-people", 320., |ui| {
             title(ui, &crate::i18n::tf("icu:calling__in-this-call", &if users.len() == 1 { "In this call \u{b7} 1 person".to_owned() } else { format!("In this call \u{b7} {} people", users.len()) }, &[("people", crate::i18n::Arg::from(&users.len()))]));
-            for u in &users {
+            // A call link's (Desktop's `CallingAdhocCallInfo`): people we
+            // don't know yet are one "N people" row.
+            let (listed, unknown) = if conversation.as_call_link().is_some() { crate::calls_tab::known_and_unknown(app, &users) } else { (users.clone(), 0) };
+            for u in &listed {
                 ui.horizontal(|ui| {
                     let photo = app.conversation(&ConversationId::direct(u)).cloned();
                     match &photo {
@@ -2248,11 +2251,15 @@ fn lobby_dialog(app: &mut App, ui: &mut Ui) {
                 });
                 ui.add_space(4.);
             }
+            if unknown > 0 && crate::calls_tab::unknown_row(ui, unknown, !listed.is_empty(), palette.text) {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("lobby-unknown-info"), true));
+            }
             close_people = buttons(ui, &[tr("OK")]).is_some();
         });
         if gone || close_people {
             ui.ctx().data_mut(|d| d.remove::<bool>(people_id));
         }
+        crate::calls_tab::unknown_info_dialog(ui.ctx(), egui::Id::unique("lobby-unknown-info"));
     }
     if let Some(l) = app.panes.lobby.as_mut() {
         l.video = video;

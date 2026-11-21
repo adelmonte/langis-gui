@@ -396,6 +396,7 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
         crate::menu::open_at(ui.ctx(), menu, at);
     }
     let mut chosen = None;
+    let link_admin = app.call.as_ref().is_some_and(|c| c.conversation.as_call_link().is_some() && c.link.as_ref().is_some_and(|l| l.admin));
     crate::menu::show(ui.ctx(), menu, |m| {
         if p.audio && m.item(Some("mic-slash"), tr("Mute audio")) {
             chosen = Some(0);
@@ -405,6 +406,10 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
         }
         if m.item(Some("message"), tr("Go to chat")) {
             chosen = Some(2);
+        }
+        // A call link we administer: Desktop's Remove from call.
+        if link_admin && m.item(Some("minus-circle"), tr("Remove from call")) {
+            chosen = Some(3);
         }
     });
     match chosen {
@@ -417,7 +422,58 @@ fn paint_tile(app: &mut App, ui: &mut Ui, ctx: &egui::Context, p: &langis_core::
             app.call_view.pip = true;
             app.open(langis_store::ConversationId::direct(&p.aci));
         }
+        Some(3) => crate::contact_modal::confirm_remove_from_call(app, p.aci.clone(), p.demux_id),
         _ => {}
+    }
+    // Desktop's tile while their media keys haven't come, 5 seconds past
+    // the later of their joining and ours: "Can't receive audio and video
+    // from {name}" and More info (an info button alone in a small tile).
+    let joined = match app.call.as_ref().map(|c| &c.status) {
+        Some(langis_core::CallStatus::Connected { since }) => Some((*since).max(p.added_at)),
+        _ => None,
+    };
+    let now = chrono::Utc::now().timestamp_millis();
+    if !blocked && !p.media_keys && let Some(joined) = joined {
+        let due = joined + 5000;
+        if now < due {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis((due - now) as u64));
+        } else {
+            let radius = CornerRadius::same(if small { 8 } else { 12 });
+            ui.painter().rect_filled(rect, radius, Color32::from_gray(50));
+            let text = if app.names.contains_key(&p.aci) {
+                crate::i18n::tf("icu:calling__missing-media-keys", &format!("Can't receive audio and video from {name}"), &[("name", crate::i18n::Arg::from(&name))])
+            } else {
+                tr("Can't receive audio and video").to_owned()
+            };
+            let info_id = egui::Id::unique("missing-media-keys-info");
+            let more = if small {
+                let at = Rect::from_center_size(rect.center(), Vec2::splat(28.));
+                theme::paint_symbol(ui.painter(), "info", at.center(), 20., Color32::WHITE);
+                ui.interact(at, ui.scope_id().with(("media-keys", p.demux_id)), Sense::click())
+            } else {
+                theme::paint_symbol(ui.painter(), "error-circle", rect.center() - Vec2::new(0., 34.), 24., Color32::WHITE);
+                let g = ui.painter().layout(text.clone(), theme::regular(13.), Color32::WHITE, (rect.width() - 32.).max(40.));
+                let top = rect.center().y - 14.;
+                let text_rect = Rect::from_min_size(Pos2::new(rect.center().x - g.size().x / 2., top), g.size());
+                ui.painter().galley(text_rect.min, g, Color32::WHITE);
+                let label = ui.painter().layout_no_wrap(tr("More info").to_owned(), theme::medium(13.), Color32::WHITE);
+                let button = Rect::from_center_size(Pos2::new(rect.center().x, text_rect.bottom() + 22.), label.size() + Vec2::new(24., 10.));
+                let r = ui.interact(button, ui.scope_id().with(("media-keys", p.demux_id)), Sense::click());
+                let fill = if r.hovered() { Color32::from_white_alpha(60) } else { Color32::from_white_alpha(38) };
+                ui.painter().rect_filled(button, CornerRadius::same(14), fill);
+                ui.painter().galley(button.center() - label.size() / 2., label, Color32::WHITE);
+                r
+            };
+            if more.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(info_id, p.demux_id));
+            }
+            if ui.ctx().data(|d| d.get_temp::<u32>(info_id)) == Some(p.demux_id) {
+                let body = tr("This may be because they have not verified your safety number change, there's a problem with their device, or they have blocked you.");
+                if crate::dialog::alert(ui.ctx(), egui::Id::unique(("missing-media-keys-dialog", p.demux_id)), &text, body, tr("OK")) {
+                    ui.ctx().data_mut(|d| d.remove::<u32>(info_id));
+                }
+            }
+        }
     }
     // Desktop's speaking indicator: an outline while they're heard.
     if p.audio && video.levels.level(p.demux_id) > 0.04 {

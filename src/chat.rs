@@ -578,6 +578,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         }
                     });
                 }
+                NoticeButton::BlockRequest(member) => {
+                    let name = app.name(&member);
+                    let body = crate::i18n::tf("icu:PendingRequests--block--contents", &format!("{name} will not be able to join or request to join this group via the group link. They can still be added to the group manually."), &[("name", crate::i18n::Arg::from(&name))]);
+                    let block = Command::BlockGroupLinkRequests { conversation: id.clone(), member };
+                    crate::panes::ask(app, tr("Block request?"), body, tr("Block Request"), true, vec![block]);
+                }
                 NoticeButton::Explain(title, body, support) => {
                     if let Some(chat) = app.chat.as_mut() {
                         chat.dialog = Some(crate::actions::Dialog::Explain { title, body, support });
@@ -3082,6 +3088,8 @@ pub enum NoticeButton {
     /// Desktop's explainer dialog: a title, its text, and (for a chat
     /// session refresh) Contact Support.
     Explain(String, String, bool),
+    /// "Block request" on repeated requests to join (an ACI).
+    BlockRequest(String),
 }
 
 fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> Option<(&'static str, NoticeButton)> {
@@ -3119,6 +3127,13 @@ fn notice_button(ctx: &Ctx<'_>, m: &Message, notice: &langis_store::Notice) -> O
         // Desktop's GroupV2Change "View": the description as changed.
         Notice::Group { change: langis_store::GroupNotice::Description { description: Some(d) }, .. } if !d.is_empty() => {
             Some((tr("View"), NoticeButton::Explain(tr("Group description").into(), d.clone(), false)))
+        }
+        // Desktop's GroupV2Change "Block request": to admins, while the
+        // requester is neither in the group nor already blocked.
+        Notice::Group { change: langis_store::GroupNotice::RequestBounce { member, .. }, .. } => {
+            let c = ctx.app.conversation(ctx.chat_id)?;
+            let show = c.admins.contains(&ctx.app.aci) && *member != ctx.app.aci && !c.members.contains(member) && !c.group_state.banned.contains(member);
+            show.then(|| (tr("Block request"), NoticeButton::BlockRequest(member.clone())))
         }
         Notice::PollEnded { by, sent_at, .. } => Some((tr("View poll"), NoticeButton::Go { author: by.clone(), sent_at: *sent_at })),
         Notice::Pinned { author, sent_at, .. } => Some((tr("Go to message"), NoticeButton::Go { author: author.clone(), sent_at: *sent_at })),

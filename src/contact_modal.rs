@@ -36,6 +36,9 @@ pub struct Contact {
 enum Confirm {
     Admin,
     Remove,
+    /// Desktop's call link "Remove {name} from the call?": Block from call
+    /// or Remove (a demux id).
+    Call(u32),
 }
 
 /// The member menu's Make admin / Remove as admin (`admin`) or Remove from
@@ -45,6 +48,22 @@ pub fn confirm_member(app: &mut App, group: ConversationId, aci: String, admin: 
         group: Some(group),
         aci,
         confirm: Some(if admin { Confirm::Admin } else { Confirm::Remove }),
+        confirm_only: true,
+        about: None,
+        about_open: false,
+        add_to_group: None,
+        label_info: false,
+        own: None,
+    });
+}
+
+/// A call tile's Remove from call (Desktop's `CallingParticipantMenu`):
+/// its Block from call or Remove, without the modal itself.
+pub fn confirm_remove_from_call(app: &mut App, aci: String, demux_id: u32) {
+    app.panes.contact = Some(Contact {
+        group: None,
+        aci,
+        confirm: Some(Confirm::Call(demux_id)),
         confirm_only: true,
         about: None,
         about_open: false,
@@ -115,6 +134,24 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let is_admin = group.as_ref().is_some_and(|g| g.admins.contains(&aci));
     let in_call = app.call.is_some();
 
+    if let Some(Confirm::Call(demux_id)) = confirm {
+        let body = crate::i18n::tf("icu:CallingAdhocCallInfo__RemoveClientDialogBody", &format!("Remove {name} from the call?"), &[("name", crate::i18n::Arg::from(&name))]);
+        let actions = [(tr("Block from call"), Variant::StrongDestructive), (tr("Remove"), Variant::StrongDestructive)];
+        match dialog::show(ctx, egui::Id::unique("contact-call-confirm"), "", &body, Some(tr("Cancel")), &actions) {
+            Some(Answer::Action(i)) => {
+                app.send(Command::RemoveFromCall { demux_id, block: i == 0 });
+                app.panes.contact = None;
+            }
+            Some(Answer::Cancel) if app.panes.contact.as_ref().is_some_and(|c| c.confirm_only) => app.panes.contact = None,
+            Some(Answer::Cancel) => {
+                if let Some(c) = app.panes.contact.as_mut() {
+                    c.confirm = None;
+                }
+            }
+            None => {}
+        }
+        return;
+    }
     if let Some(which) = confirm {
         // `ContactModal`'s confirmations, over it.
         let (title, body, action) = match which {
@@ -126,6 +163,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
             Confirm::Admin => (String::new(), crate::i18n::tf("icu:ContactModal--make-admin-info", &format!("{name} will be able to edit this group and its members."), &[("contact", crate::i18n::Arg::from(&name))]), tr("Make admin")),
             Confirm::Remove => (String::new(), format!("Remove \"{name}\" from the group?"), tr("Remove from group")),
+            Confirm::Call(_) => return,
         };
         let variant = if which == Confirm::Remove || is_admin { Variant::StrongDestructive } else { Variant::StrongPrimary };
         if let Some(answer) = dialog::show(ctx, egui::Id::unique("contact-confirm"), &title, &body, Some(tr("Cancel")), &[(action, variant)]) {
@@ -133,6 +171,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 match which {
                     Confirm::Admin => app.send(Command::SetGroupAdmin { conversation: g, member: aci.clone(), admin: !is_admin }),
                     Confirm::Remove => app.send(Command::RemoveFromGroup { conversation: g, service_id: aci.clone() }),
+                    Confirm::Call(_) => {}
                 }
             }
             if app.panes.contact.as_ref().is_some_and(|c| c.confirm_only) {
@@ -301,7 +340,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 if p.audio {
                     items.push(("mic-slash", tr("Mute audio").into(), Do::MuteInCall(p.demux_id)));
                 }
-                if call.conversation.as_call_link().is_some() {
+                // Desktop's `isRemoveFromCallVisible`: a link we administer.
+                let link_admin = call.link.as_ref().is_some_and(|l| l.admin);
+                if call.conversation.as_call_link().is_some() && link_admin {
                     items.push(("minus-circle", tr("Remove from call").into(), Do::RemoveFromCall(p.demux_id)));
                 }
             }
@@ -351,9 +392,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             return;
         }
         Do::RemoveFromCall(demux_id) => {
-            let body = crate::i18n::tf("icu:CallingAdhocCallInfo__RemoveClientDialogBody", &format!("Remove {name} from the call?"), &[("name", crate::i18n::Arg::from(&name))]);
-            app.panes.contact = None;
-            crate::panes::ask(app, "", body, tr("Remove"), true, vec![Command::RemoveFromCall { demux_id }]);
+            if let Some(c) = app.panes.contact.as_mut() {
+                c.confirm = Some(Confirm::Call(demux_id));
+            }
             return;
         }
         Do::Nothing => {}
