@@ -1381,6 +1381,15 @@ impl eframe::App for App {
         // (`maybeRefreshRemoteConfig`; langis waits two hours between).
         if focused && !self.focused && self.backend.is_some() {
             self.send(Command::RefreshRemoteConfig);
+            // Back in the window with the open chat at its newest: what came
+            // meanwhile is read now, as Desktop marks read on focus.
+            if let Some(chat) = self.chat.as_ref().filter(|c| !c.scrolled_up)
+                && let Some(c) = self.conversation(&chat.id)
+                && (c.unread_count > 0 || c.marked_unread)
+                && matches!(self.tab, Tab::Chats)
+            {
+                self.send(Command::MarkRead { conversation: chat.id.clone() });
+            }
         }
         self.focused = focused;
         // The app redraws at least every 30 seconds; a much longer gap on
