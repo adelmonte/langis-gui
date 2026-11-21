@@ -537,7 +537,11 @@ pub fn link_screen(app: &mut App, ui: &mut Ui) {
                 egui::Image::new((qr.id(), qr_box.size())).paint_at(ui, qr_box);
             }
             let text = if bg == Color32::WHITE { Color32::BLACK } else { Color32::WHITE };
-            ui.painter().text(egui::pos2(card.center().x, card.bottom() - 34.), egui::Align2::CENTER_CENTER, name, theme::semibold(16.), text);
+            // The username on the card can be selected and copied
+            // (Desktop's `UsernameLinkEditor__card__text`: `user-select: text`).
+            let g = ui.painter().layout_no_wrap(name.to_string(), theme::semibold(16.), text);
+            let at = egui::pos2(card.center().x, card.bottom() - 34.) - g.size() / 2.;
+            crate::interaction::selectable(ui, ui.scope_id().with("username-card-text"), at, g, text);
             ui.add_space(12.);
             // The eight colors.
             ui.horizontal(|ui| {

@@ -308,7 +308,9 @@ fn main(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
             }
         }
         ui.add_space(10.);
-        let name = ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(20.))).sense(egui::Sense::click()));
+        // Desktop's `ConversationDetailsHeader__title`: `user-select: text`.
+        let name = ui.add(egui::Label::new(RichText::new(&c.title).font(theme::semibold(20.))).sense(egui::Sense::click()).selectable(true));
+        crate::interaction::copy_menu(ui, &name);
         // Desktop's OfficialChatInlineBadge after the Signal chat's name and
         // Note to Self's (`ConversationDetailsHeader`).
         let official = c.id.is_signal() || c.kind == ConversationKind::NoteToSelf;
@@ -843,8 +845,9 @@ fn safety(app: &mut App, ui: &mut Ui, palette: &Palette, c: &Conversation) {
                             });
                             ui.add_space(14.);
                         }
+                        // The digits can be selected and copied, as Desktop's.
                         for line in groups.chunks(4) {
-                            ui.label(RichText::new(line.join("  ")).font(egui::FontId::monospace(17.)).color(egui::Color32::WHITE));
+                            crate::interaction::label(ui, RichText::new(line.join("  ")).font(egui::FontId::monospace(17.)).color(egui::Color32::WHITE));
                         }
                         ui.add_space(14.);
                         let label = if number.verified { tr("Clear verification") } else { tr("Mark as verified") };

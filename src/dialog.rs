@@ -137,6 +137,7 @@ pub fn show_with(ctx: &egui::Context, id: Id, title: &str, description: &str, ca
 /// `AxoButton` size `md`: 6px by 12px padding, 13px medium, pill shaped.
 fn button(ui: &egui::Ui, id: Id, rect: Rect, label: &str, fill: Color32, pressed: Color32, text: Color32) -> bool {
     let r = ui.interact(rect, id, Sense::click());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     let bg = if r.is_pointer_button_down_on() { pressed } else { fill };
     ui.painter().rect_filled(rect, CornerRadius::same(15), bg);
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, theme::medium(13.), text);

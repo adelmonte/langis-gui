@@ -1253,7 +1253,8 @@ fn info_body(app: &App, ui: &mut Ui, palette: &Palette, m: &Message, details: Op
                 ui.set_min_width(110.);
                 ui.label(RichText::new(label).font(theme::medium(13.)).color(palette.text_secondary));
             });
-            ui.label(RichText::new(value).font(theme::regular(13.)));
+            // Selectable, as Desktop's message details.
+            crate::interaction::label(ui, RichText::new(value).font(theme::regular(13.)));
             if i == 0 && from_sealed {
                 sealed_icon(ui, palette);
             }

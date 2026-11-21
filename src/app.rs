@@ -48,8 +48,8 @@ pub enum Loaded {
     NotifyPrefs { on: bool, content: String, nav_collapsed: bool, sound: crate::sounds::Prefs },
     /// Our own profile name and photo.
     Me { name: Option<String>, photo: Option<String> },
-    /// A desktop notification to show.
-    Notify { title: String, body: String },
+    /// A desktop notification to show; a click on it opens `conversation`.
+    Notify { title: String, body: String, conversation: Option<ConversationId> },
     /// Anything else: applied to the app as it comes.
     Apply(Box<dyn FnOnce(&mut App) + Send>),
     /// For the open chat.
@@ -280,6 +280,8 @@ impl App {
         // The language first: the fonts follow it (a CJK one from the system).
         crate::i18n::set_locale(crate::i18n::resolve(&crate::i18n::saved()));
         crate::theme::install(&ctx);
+        // The zoom keys save the zoom, as Desktop's do (`interaction.rs`).
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let (loaded_tx, loaded) = channel();
         let link = args.link.clone();
         let (data_dir, scratch) = if args.demo {
@@ -831,7 +833,7 @@ impl App {
                             self.conversation(&u.conversation).map(|c| c.title.clone()).unwrap_or_else(|| "Someone".into())
                         };
                         let body = if u.video { tr("Incoming video call") } else { tr("Incoming voice call") };
-                        let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into() });
+                        let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into(), conversation: Some(u.conversation.clone()) });
                     }
                     if self.sound.attention {
                         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Critical));
@@ -930,7 +932,7 @@ impl App {
                 if let Some(chat) = self.conversation(&conversation).filter(|_| on) {
                     let name = |id: &str| self.names.get(id).cloned().unwrap_or_else(|| tr("Unknown contact").to_owned());
                     let (title, body) = crate::unread_reminders::content(&reminder, &chat.title, content != "none", name);
-                    let _ = self.loaded_tx.send(Loaded::Notify { title, body });
+                    let _ = self.loaded_tx.send(Loaded::Notify { title, body, conversation: Some(conversation.clone()) });
                     self.send(Command::UnreadReminderShown { conversation });
                 }
             }
@@ -997,11 +999,31 @@ impl App {
                 }
                 self.me = (name.unwrap_or_default(), photo);
             }
-            Loaded::Notify { title, body } => {
+            Loaded::Notify { title, body, conversation } => {
+                let (tx, ctx) = (self.loaded_tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
-                    let shown = notify_rust::Notification::new().appname("langis").summary(&title).body(&escape_markup(&body)).show();
-                    if let Err(error) = shown {
-                        tracing::warn!(%error, "couldn't show a notification");
+                    // A click on Desktop's notification brings the window
+                    // up on the chat (the server's "default" action).
+                    let shown = notify_rust::Notification::new().appname("langis").summary(&title).body(&escape_markup(&body)).action("default", "Open").show();
+                    match shown {
+                        Ok(handle) => handle.wait_for_action(|action| {
+                            if action != "default" {
+                                return;
+                            }
+                            let open = Loaded::Apply(Box::new(move |app: &mut App| {
+                                let ctx = app.ctx.clone();
+                                app.show_window(&ctx);
+                                if let Some(id) = conversation {
+                                    app.tab = Tab::Chats;
+                                    if app.selected.as_ref() != Some(&id) {
+                                        app.open(id);
+                                    }
+                                }
+                            }));
+                            let _ = tx.send(open);
+                            ctx.request_repaint();
+                        }),
+                        Err(error) => tracing::warn!(%error, "couldn't show a notification"),
                     }
                 });
             }
@@ -1190,10 +1212,11 @@ impl App {
         }
         let (title, group) = (chat.title.clone(), chat.kind == langis_store::ConversationKind::Group);
         if content == "none" {
-            let loaded = Loaded::Notify { title: "langis".into(), body: "New message".into() };
+            let loaded = Loaded::Notify { title: "langis".into(), body: "New message".into(), conversation: Some(conversation.clone()) };
             let _ = self.loaded_tx.send(loaded);
             return;
         }
+        let conversation = conversation.clone();
         self.load(move |db| async move {
             let message = db.message(message_id).await.ok().flatten()?;
             let mut body = if content == "name" {
@@ -1207,7 +1230,7 @@ impl App {
             if group && content == "all" && let Some(author) = &message.author_name {
                 body = format!("{author}: {body}");
             }
-            Some(Loaded::Notify { title, body })
+            Some(Loaded::Notify { title, body, conversation: Some(conversation) })
         });
     }
 
@@ -1428,6 +1451,15 @@ impl eframe::App for App {
         // (`maybeRefreshRemoteConfig`; langis waits two hours between).
         if focused && !self.focused && self.backend.is_some() {
             self.send(Command::RefreshRemoteConfig);
+            // Back in the window with the open chat at its newest: what came
+            // meanwhile is read now, as Desktop marks read on focus.
+            if let Some(chat) = self.chat.as_ref().filter(|c| !c.scrolled_up)
+                && let Some(c) = self.conversation(&chat.id)
+                && (c.unread_count > 0 || c.marked_unread)
+                && matches!(self.tab, Tab::Chats)
+            {
+                self.send(Command::MarkRead { conversation: chat.id.clone() });
+            }
         }
         self.focused = focused;
         // The app redraws at least every 30 seconds; a much longer gap on
@@ -1450,10 +1482,16 @@ impl eframe::App for App {
         }
         self.poll();
         self.diag.frame(ctx);
+        let key = egui::Id::unique("window-state");
+        let mut window = ctx.data(|d| d.get_temp::<Option<crate::window_state::WindowState>>(key)).flatten();
+        crate::window_state::track(&mut window, ctx);
+        ctx.data_mut(|d| d.insert_temp(key, window));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        crate::interaction::begin(self, ui.ctx());
         crate::view::show(self, ui);
+        crate::interaction::end(self, ui.ctx());
         crate::notification_profiles::tick(self);
         crate::call::ring_follows_profile(self);
         self.update_title(ui.ctx());
@@ -1465,6 +1503,7 @@ impl eframe::App for App {
         static SPEED: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| {
             std::env::var("LANGIS_SCROLL_SPEED").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| *v > 0.).unwrap_or(2.5)
         });
+        crate::interaction::inject(ctx, raw_input);
         self.momentum.apply(raw_input, *SPEED);
         if self.momentum.flinging() {
             ctx.request_repaint();
@@ -1472,6 +1511,12 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        // The window's state for next time, as Desktop keeps it.
+        if !self.demo
+            && let Some(Some(window)) = self.ctx.data(|d| d.get_temp::<Option<crate::window_state::WindowState>>(egui::Id::unique("window-state")))
+        {
+            crate::window_state::save(&self.data_dir, &window);
+        }
         if let Some(t) = self.tray.take() {
             t.stop();
         }

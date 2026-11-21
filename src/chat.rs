@@ -1045,7 +1045,34 @@ fn timeline(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView, 
     } else if let Some(offset) = chat.pending_offset.take() {
         scroll = scroll.vertical_scroll_offset(offset);
     }
+    // Chromium's keys for a scroll box when no field has the keys: Page Up
+    // and Page Down scroll by most of a page, Home to the top of what's
+    // loaded, End to the newest.
+    let (page, home, end) = if ui.memory(|m| m.focused().is_none()) && chat.dialog.is_none() && chat.popup.is_none() {
+        let none = egui::Modifiers::NONE;
+        ui.input_mut(|i| {
+            let up = i.consume_key(none, egui::Key::PageUp);
+            let down = i.consume_key(none, egui::Key::PageDown);
+            (up as i32 - down as i32, i.consume_key(none, egui::Key::Home), i.consume_key(none, egui::Key::End))
+        })
+    } else {
+        (0, false, false)
+    };
+    if end {
+        if chat.at_end {
+            chat.scroll_to_bottom = 10;
+        } else {
+            chat.want_latest = true;
+        }
+    }
+    let viewport_h = ui.available_height();
     let output = scroll.show(ui, |ui| {
+        if page != 0 {
+            ui.scroll_with_delta(Vec2::new(0., page as f32 * viewport_h * 0.875));
+        }
+        if home {
+            ui.scroll_with_delta(Vec2::new(0., f32::MAX / 4.));
+        }
         let width = ui.available_width();
         ui.set_width(width);
         ui.add_space(12.);
@@ -1594,7 +1621,13 @@ fn message(
                     egui::Image::new(egui::ImageSource::Bytes { uri: uri.into(), bytes: bytes.into() }).tint(color).fit_to_exact_size(Vec2::splat(16.)).paint_at(ui, at);
                 }
             }
-            ui.painter().galley(Pos2::new(rect.center().x, rect.top()), galley, color);
+            // A notice's text can be selected and copied, as Desktop's.
+            let at = Pos2::new(rect.center().x, rect.top());
+            if ctx.selecting {
+                ui.painter().galley(at, galley, color);
+            } else {
+                crate::interaction::selectable(ui, ui.scope_id().with(("notice-text", m.id)), at, galley, color);
+            }
             if let Some((label, action)) = button
                 && !ctx.selecting
             {
@@ -1885,6 +1918,8 @@ fn message(
     let x = if outgoing { row.right() - side - bubble_w } else { row.left() + lead + avatar_col };
     let bubble = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(bubble_w, bubble_h));
     let response = ui.interact(bubble, ui.scope_id().with(("bubble", m.id)), Sense::click());
+    // Desktop's message isn't a button: the arrow over it.
+    crate::interaction::no_pointer(ui.ctx(), response.id);
 
     // The bubble, with Desktop's smaller corners inside a group.
     let (r, small) = (18u8, 4u8);
@@ -2129,11 +2164,24 @@ fn message(
         // egui label's can; links and spoilers still take a click.
         let sense = if ctx.selecting { Sense::click() } else { Sense::click_and_drag() };
         let text_response = ui.interact(text_rect, ui.scope_id().with(("text", m.id)), sense);
+        let mut on_link = false;
         if let Some(pointer) = text_response.hover_pos() {
             let cursor = g.cursor_from_pos(pointer - pos);
             let at = cursor.index.0;
-            if rich.links.iter().any(|(r, _)| r.contains(&at)) {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let link = rich.links.iter().find(|(r, _)| r.contains(&at)).map(|(_, url)| url.clone());
+            on_link = link.is_some();
+            // A middle click opens a link, as Chromium's does.
+            if let Some(url) = link.filter(|u| u.starts_with("http") || u.starts_with("mailto:"))
+                && text_response.middle_clicked()
+            {
+                actions.push(Action::Open(url));
+            }
+            // The text sits over the bubble: a right-click on it opens the
+            // message's menu too, as anywhere on Desktop's message (its
+            // `AxoContextMenu` takes the right-click, links and selection
+            // included).
+            if !ctx.selecting && text_response.secondary_clicked() {
+                actions.push(Action::Menu { message_id: m.id, at: pointer });
             }
             if text_response.clicked() {
                 if let Some((_, url)) = rich.links.iter().find(|(r, _)| r.contains(&at)) {
@@ -2153,7 +2201,10 @@ fn message(
         if ctx.selecting {
             ui.painter().galley(pos, g, in_color);
         } else {
-            egui::text_selection::LabelSelectionState::label_text_selection(ui, &text_response, pos, g, in_color, Stroke::NONE);
+            crate::interaction::paint_selectable(ui, &text_response, pos, g, in_color);
+        }
+        if on_link {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         if let Some((label, clickable)) = long_line {
             let color = if clickable { if outgoing { Color32::WHITE } else { palette.accent_text } } else { meta_color };

@@ -83,6 +83,8 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, tip: &str) -> Response {
         ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
     }
     icon.paint(ui, rect, size, palette.text);
+    // Its name for screen readers, as Desktop's `aria-label`.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     response.on_hover_text(tip)
 }
 
@@ -97,6 +99,8 @@ pub fn axo_icon_button(ui: &mut Ui, symbol: &str, label: &str) -> Response {
         ui.painter().circle_filled(rect.center(), 16., palette.fill);
     }
     theme::paint_symbol(ui.painter(), symbol, rect.center(), 20., palette.text);
+    // Its name for screen readers, as Desktop's `aria-label`.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     response.on_hover_text(label)
 }
 
@@ -113,6 +117,8 @@ pub fn axo_icon_button_sm(ui: &mut Ui, symbol: &str, label: &str, pressed: bool)
         ui.painter().circle_filled(rect.center(), 14., palette.fill);
     }
     theme::paint_symbol(ui.painter(), symbol, rect.center(), 18., if pressed { Color32::WHITE } else { palette.text });
+    // Its name for screen readers, as Desktop's `aria-label`.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     response.on_hover_text(label)
 }
 
@@ -141,20 +147,29 @@ pub fn linked_text(ui: &mut Ui, text: &str, size: f32, color: Color32, width: f3
     }
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     let cut = galley.elided;
-    let (rect, r) = ui.allocate_exact_size(Vec2::new(if center { width } else { galley.size().x }, galley.size().y), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(if center { width } else { galley.size().x }, galley.size().y), Sense::hover());
+    // A centered galley's x is its middle; its rect starts half a width left.
     let origin = if center { egui::pos2(rect.center().x, rect.top()) } else { rect.min };
+    let text_rect = Rect::from_min_size(egui::pos2(if center { origin.x - galley.size().x / 2. } else { origin.x }, origin.y), galley.size());
+    let r = ui.interact(text_rect, ui.next_auto_id().with("linked-text"), Sense::click_and_drag() - Sense::FOCUSABLE);
     // The link under the pointer, by character.
     let hovered = r.hover_pos().and_then(|p| {
         let index = galley.cursor_from_pos(p - origin).index;
         let byte = text.char_indices().nth(index.0).map_or(text.len(), |(b, _)| b);
         links.iter().find(|(range, _)| range.contains(&byte)).map(|(_, url)| url.clone())
     });
-    ui.painter().galley(origin, galley, color);
+    // The text can be selected and copied, as Chromium's; a link takes a
+    // click (a middle one too), and a right-click offers Copy link
+    // (Electron's menu), or Copy for a selection.
+    crate::interaction::paint_selectable(ui, &r, origin, galley, color);
     if let Some(url) = hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        if r.clicked() {
+        if r.clicked() || r.middle_clicked() {
             crate::chat::open_externally(&url);
         }
+        crate::interaction::link_menu(ui, &r, &url);
+    } else {
+        crate::interaction::copy_menu(ui, &r);
     }
     cut
 }
@@ -228,6 +243,7 @@ pub fn axo_button(ui: &mut Ui, label: &str, variant: Axo) -> Response {
     };
     ui.painter().rect_filled(rect, CornerRadius::same(15), fill);
     ui.painter().galley(rect.center() - galley.size() / 2., galley, text);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     response
 }
 
@@ -244,6 +260,7 @@ pub fn pill_button(ui: &mut Ui, text: &str, primary: bool) -> Response {
     }
     ui.painter().rect_filled(rect, CornerRadius::same(16), fill);
     ui.painter().galley(rect.center() - galley.size() / 2., galley, text_color);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text));
     response
 }
 

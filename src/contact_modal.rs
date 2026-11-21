@@ -469,7 +469,8 @@ fn about_and_add(app: &mut App, ctx: &egui::Context, aci: &str, name: &str) {
                 let r = ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(24.), Sense::hover());
                     theme::paint_symbol(ui.painter(), symbol, r.center(), 18., palette.text);
-                    ui.add(egui::Label::new(egui::RichText::new(text).font(theme::regular(14.))).wrap());
+                    // Selectable, as the modal's text in Chromium.
+                    crate::interaction::label(ui, egui::RichText::new(text).font(theme::regular(14.)));
                 });
                 ui.add_space(8.);
                 let r = ui.interact(r.response.rect, ui.scope_id().with(("about-row", symbol)), Sense::click());
