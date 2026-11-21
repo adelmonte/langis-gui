@@ -210,6 +210,7 @@ pub fn chat_list(app: &mut App, ui: &mut Ui) {
                     if widgets::axo_icon_button_sm(ui, "compose", tr("New chat"), false).clicked() {
                         app.panes.compose = Some(crate::panes::Compose::Chat { query: String::new(), searching: false, found: None });
                     }
+                    crate::notification_profiles::indicator(app, ui);
                 });
             });
             ui.add_space(6.);

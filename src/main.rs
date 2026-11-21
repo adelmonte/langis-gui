@@ -6,6 +6,7 @@ mod permissions;
 mod sticker_creator;
 mod anim;
 mod app;
+mod notification_profiles;
 mod thumbs;
 mod shortcuts;
 mod contact_modal;

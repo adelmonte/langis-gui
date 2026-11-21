@@ -447,10 +447,13 @@ impl App {
     /// The window title with the unread count, as Desktop's
     /// `updateUnreadCount`: messages or chats, muted ones or not.
     fn update_title(&mut self, ctx: &egui::Context) {
+        // Desktop's `countUnreadStats` leaves out, with muted chats, those
+        // the notification profile on doesn't allow.
+        let profile = crate::notification_profiles::active(self);
         let count: u32 = self
             .conversations
             .iter()
-            .filter(|c| !c.archived && (self.badge_prefs.muted || !c.muted))
+            .filter(|c| !c.archived && (self.badge_prefs.muted || (!c.muted && profile.is_none_or(|p| p.allowed_members.contains(&c.id)))))
             .map(|c| if self.badge_prefs.chats { u32::from(c.unread_count > 0 || c.marked_unread) } else { c.unread_count.max(u32::from(c.marked_unread)) })
             .sum();
         let title = if count > 0 { format!("langis ({count})") } else { "langis".to_owned() };
@@ -732,8 +735,11 @@ impl App {
                 }
                 // Ring while a call rings us; a notification when it starts.
                 let ringing = update.as_ref().is_some_and(|u| u.incoming && u.status == langis_core::CallStatus::Ringing);
+                // Desktop's `CallManager`: no ringtone or notification while
+                // a notification profile that doesn't allow the call is on.
+                let quiet = update.as_ref().is_some_and(|u| crate::notification_profiles::silenced(self, &u.conversation, true, false));
                 let was_ringing = self.call.as_ref().is_some_and(|u| u.incoming && u.status == langis_core::CallStatus::Ringing);
-                if ringing && !was_ringing {
+                if ringing && !was_ringing && !quiet {
                     if self.sound.ringtone {
                         crate::sounds::start_ring();
                     }
@@ -1056,6 +1062,11 @@ impl App {
         if !on || reading || (chat.muted && (!for_me || chat.dont_notify_mentions)) {
             return;
         }
+        // Desktop's `maybeNotify`: quiet while a notification profile that
+        // doesn't allow this chat (or mentions, for one) is on.
+        if crate::notification_profiles::silenced(self, conversation, false, for_me) {
+            return;
+        }
         if self.sound.notification {
             crate::sounds::once(crate::sounds::Sound::Pop);
         }
@@ -1328,6 +1339,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         crate::view::show(self, ui);
+        crate::notification_profiles::tick(self);
         self.update_title(ui.ctx());
     }
 
