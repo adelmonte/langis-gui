@@ -660,6 +660,7 @@ fn popups(app: &mut App, ui: &mut Ui) {
         }
     }
     hero_dialog(ui.ctx(), &mut chat);
+    crate::fun::manager_panel(app, ui);
     if let Some(dialog) = chat.dialog.as_mut() {
         for d in crate::actions::show_dialog(app, ui, dialog, &chat.messages, &conversation, chat.pinned.len()) {
             todo.push((false, d));

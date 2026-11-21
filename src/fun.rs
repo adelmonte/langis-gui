@@ -829,14 +829,21 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
     if !app.fun.manager_open {
         return;
     }
-    let mut close = false;
+    uninstall_confirm(app, ui);
+    hide_confirm(app, ui);
+}
+
+/// Desktop's StickerManager, a panel over the conversation (its header
+/// the All and My Stickers tabs), from the sticker picker.
+pub fn manager_panel(app: &mut App, ui: &Ui) {
+    if !app.fun.manager_open {
+        return;
+    }
+    let palette = Palette::of(ui.ctx());
     let mut open = None;
     let manager = app.fun.manager.clone().unwrap_or_default();
     let mut tab = app.fun.manager_tab;
-    let modal = egui::Modal::new(egui::Id::unique("sticker-manager")).frame(frame).show(ui.ctx(), |ui| {
-        ui.set_width(440.);
-        ui.label(RichText::new("Sticker packs").font(theme::semibold(18.)));
-        ui.add_space(8.);
+    let back = crate::actions::panel(ui, &palette, "", |ui| {
         // Desktop's StickerManager tabs.
         ui.horizontal(|ui| {
             let half = ui.available_width() / 2.;
@@ -862,7 +869,7 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                 (tr("Shared With You"), &manager.received, "", tr("When you receive a sticker from someone, the sticker pack will appear here.")),
             ]
         };
-        egui::ScrollArea::vertical().max_height(460.).min_scrolled_height(300.).auto_shrink([false, true]).show(ui, |ui| {
+        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
             for (title, packs, empty, description) in sections {
                 if packs.is_empty() && empty.is_empty() {
                     continue;
@@ -913,19 +920,11 @@ pub fn dialogs(app: &mut App, ui: &Ui) {
                 }
             }
         });
-        ui.add_space(12.);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if widgets::pill_button(ui, tr("Done"), true).clicked() {
-                close = true;
-            }
-        });
     });
     app.fun.manager_tab = tab;
-    if (close || modal.should_close()) && app.fun.confirm_uninstall.is_none() && app.fun.confirm_hide.is_none() {
+    if back && app.fun.confirm_uninstall.is_none() && app.fun.confirm_hide.is_none() {
         app.fun.manager_open = false;
     }
-    uninstall_confirm(app, ui);
-    hide_confirm(app, ui);
     if let Some((id, key)) = open {
         app.send(Command::PreviewStickerPack { id: id.clone(), key: key.clone() });
         app.fun.preview = Some((id, key, None));

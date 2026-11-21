@@ -1113,7 +1113,7 @@ fn radio_row(ui: &mut Ui, on: bool, label: &str) -> bool {
 
 /// A panel over the conversation (Desktop's `ConversationPanel`): a back
 /// button and the title, then `body` in a centered column. True on back.
-fn panel(ui: &Ui, palette: &Palette, title: &str, body: impl FnOnce(&mut Ui)) -> bool {
+pub(crate) fn panel(ui: &Ui, palette: &Palette, title: &str, body: impl FnOnce(&mut Ui)) -> bool {
     let pane = ui.max_rect();
     let mut back = false;
     egui::Area::new(egui::Id::unique(("conversation-panel", title))).order(egui::Order::Middle).fixed_pos(pane.min).show(ui.ctx(), |ui| {
