@@ -3456,11 +3456,9 @@ pub fn open_link(app: &mut App, url: &str) {
             }
             None => app.toast("This sticker pack link isn't valid."),
         },
-        // signal.me: looked up as New chat does, which offers to message them.
-        Some(Route::ContactByPhoneNumber(_) | Route::ContactByEncryptedUsername(_)) => {
-            app.send(Command::FindRecipient { query: url.to_owned() });
-            app.panes.compose = Some(crate::panes::Compose::Chat { query: url.to_owned(), searching: true, found: None });
-        }
+        // signal.me: looked up, and its chat opened (Desktop's
+        // `showConversationViaSignalDotMe`).
+        Some(Route::ContactByPhoneNumber(_) | Route::ContactByEncryptedUsername(_)) => crate::handoff::find_and_open(app, url),
         _ => open_externally(url),
     }
 }

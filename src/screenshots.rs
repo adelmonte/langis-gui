@@ -46,7 +46,7 @@ fn screenshots() {
         .with_theme(egui::Theme::Light)
         .with_max_steps(10_000)
         .wgpu()
-        .build_eframe(|cc| App::new(cc, crate::Args { demo: true, data_dir: None, minimized: false }));
+        .build_eframe(|cc| App::new(cc, crate::Args { demo: true, data_dir: None, minimized: false, ..Default::default() }));
     wait(&mut harness, "the demo account", |app| matches!(app.phase, Phase::Ready) && !app.conversations.is_empty());
     harness.state().ctx.set_theme(egui::ThemePreference::Light);
 
@@ -170,7 +170,7 @@ fn demo_harness() -> Harness<'static, App> {
         .with_theme(egui::Theme::Light)
         .with_max_steps(10_000)
         .wgpu()
-        .build_eframe(|cc| App::new(cc, crate::Args { demo: true, data_dir: None, minimized: false }));
+        .build_eframe(|cc| App::new(cc, crate::Args { demo: true, data_dir: None, minimized: false, ..Default::default() }));
     wait(&mut harness, "the demo account", |app| matches!(app.phase, Phase::Ready) && !app.conversations.is_empty());
     harness.state().ctx.set_theme(egui::ThemePreference::Light);
     harness

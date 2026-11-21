@@ -23,6 +23,7 @@ in its guide), not a workaround here.
 | File | What it covers |
 |---|---|
 | `main.rs` | Arguments (`--demo`, `--data-dir`), the window and its icon. |
+| `handoff.rs` | Signal links from other apps, one copy per account (the socket a second launch hands its link to), bringing the window forward. |
 | `app.rs` | App state, the start flow (key, lock check, link), `poll`, `Loaded`. |
 | `startup.rs` | Setup, unlock, link QR and failure screens. |
 | `view.rs` | Top-level layout, the safety-number prompt. |
