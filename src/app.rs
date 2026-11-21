@@ -48,8 +48,8 @@ pub enum Loaded {
     NotifyPrefs { on: bool, content: String, nav_collapsed: bool, sound: crate::sounds::Prefs },
     /// Our own profile name and photo.
     Me { name: Option<String>, photo: Option<String> },
-    /// A desktop notification to show.
-    Notify { title: String, body: String },
+    /// A desktop notification to show; a click on it opens `conversation`.
+    Notify { title: String, body: String, conversation: Option<ConversationId> },
     /// Anything else: applied to the app as it comes.
     Apply(Box<dyn FnOnce(&mut App) + Send>),
     /// For the open chat.
@@ -765,7 +765,7 @@ impl App {
                             self.conversation(&u.conversation).map(|c| c.title.clone()).unwrap_or_else(|| "Someone".into())
                         };
                         let body = if u.video { tr("Incoming video call") } else { tr("Incoming voice call") };
-                        let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into() });
+                        let _ = self.loaded_tx.send(Loaded::Notify { title: who, body: body.into(), conversation: Some(u.conversation.clone()) });
                     }
                     if self.sound.attention {
                         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Critical));
@@ -864,7 +864,7 @@ impl App {
                 if let Some(chat) = self.conversation(&conversation).filter(|_| on) {
                     let name = |id: &str| self.names.get(id).cloned().unwrap_or_else(|| tr("Unknown contact").to_owned());
                     let (title, body) = crate::unread_reminders::content(&reminder, &chat.title, content != "none", name);
-                    let _ = self.loaded_tx.send(Loaded::Notify { title, body });
+                    let _ = self.loaded_tx.send(Loaded::Notify { title, body, conversation: Some(conversation.clone()) });
                     self.send(Command::UnreadReminderShown { conversation });
                 }
             }
@@ -929,11 +929,31 @@ impl App {
                 }
                 self.me = (name.unwrap_or_default(), photo);
             }
-            Loaded::Notify { title, body } => {
+            Loaded::Notify { title, body, conversation } => {
+                let (tx, ctx) = (self.loaded_tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
-                    let shown = notify_rust::Notification::new().appname("langis").summary(&title).body(&escape_markup(&body)).show();
-                    if let Err(error) = shown {
-                        tracing::warn!(%error, "couldn't show a notification");
+                    // A click on Desktop's notification brings the window
+                    // up on the chat (the server's "default" action).
+                    let shown = notify_rust::Notification::new().appname("langis").summary(&title).body(&escape_markup(&body)).action("default", "Open").show();
+                    match shown {
+                        Ok(handle) => handle.wait_for_action(|action| {
+                            if action != "default" {
+                                return;
+                            }
+                            let open = Loaded::Apply(Box::new(move |app: &mut App| {
+                                let ctx = app.ctx.clone();
+                                app.show_window(&ctx);
+                                if let Some(id) = conversation {
+                                    app.tab = Tab::Chats;
+                                    if app.selected.as_ref() != Some(&id) {
+                                        app.open(id);
+                                    }
+                                }
+                            }));
+                            let _ = tx.send(open);
+                            ctx.request_repaint();
+                        }),
+                        Err(error) => tracing::warn!(%error, "couldn't show a notification"),
                     }
                 });
             }
@@ -1122,10 +1142,11 @@ impl App {
         }
         let (title, group) = (chat.title.clone(), chat.kind == langis_store::ConversationKind::Group);
         if content == "none" {
-            let loaded = Loaded::Notify { title: "langis".into(), body: "New message".into() };
+            let loaded = Loaded::Notify { title: "langis".into(), body: "New message".into(), conversation: Some(conversation.clone()) };
             let _ = self.loaded_tx.send(loaded);
             return;
         }
+        let conversation = conversation.clone();
         self.load(move |db| async move {
             let message = db.message(message_id).await.ok().flatten()?;
             let mut body = if content == "name" {
@@ -1139,7 +1160,7 @@ impl App {
             if group && content == "all" && let Some(author) = &message.author_name {
                 body = format!("{author}: {body}");
             }
-            Some(Loaded::Notify { title, body })
+            Some(Loaded::Notify { title, body, conversation: Some(conversation) })
         });
     }
 
