@@ -18,6 +18,7 @@ mod countries;
 mod media_editor;
 mod media_gallery;
 mod call;
+mod call_survey;
 mod calls_tab;
 mod chat;
 mod chat_colors;

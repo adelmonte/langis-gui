@@ -849,6 +849,7 @@ impl App {
                     self.send(Command::UnreadReminderShown { conversation });
                 }
             }
+            Event::CallQualitySurvey(_) => crate::call_survey::open(&self.ctx),
             Event::Error(text) => {
                 // A new group that failed: Desktop's error dialog instead.
                 if self.panes.creating_group && text.contains("group") {
