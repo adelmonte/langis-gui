@@ -2580,7 +2580,12 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
             // A GIF or animated WebP sent as a picture plays where it is.
             let animated = image && crate::thumbs::visible(ui, rect) && crate::anim::maybe_animated(path, Some(&a.content_type)) && a.content_type != "image/png" && crate::anim::paint(ui, path, rect);
             if !animated && crate::thumbs::visible(ui, rect) {
-                egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).corner_radius(radius).uv(uv).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+                if a.width.zip(a.height).is_some_and(|(w, h)| w > 0 && h > 0) {
+                    egui::Image::new(crate::thumbs::uri(ui.ctx(), path, rect.size())).corner_radius(radius).uv(uv).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+                } else {
+                    // No size stored (a video we sent): cropped by the picture's own.
+                    cover_image(ui, path, rect, radius);
+                }
             }
         }
         None => match a.blurhash.as_deref().and_then(|h| crate::blurhash::texture(ui.ctx(), h)) {

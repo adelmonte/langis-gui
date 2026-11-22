@@ -267,8 +267,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let strip_h = if count > 1 && !view_once { 72. } else { 0. };
         let caption_h = if item.caption.is_empty() || view_once { 0. } else { 40. };
         let area = Rect::from_min_max(Pos2::new(rect.left() + 72., top.bottom() + 8.), Pos2::new(rect.right() - 72., rect.bottom() - strip_h - caption_h - 16.));
-        let (w, h) = item.size.map(|(w, h)| (w.max(1) as f32, h.max(1) as f32)).unwrap_or((4., 3.));
-        let scale = (area.width() / w).min(area.height() / h).min(if item.size.is_some() { 2. } else { f32::MAX });
+        // A video's own shape once read (one we sent has no size stored).
+        let size = player.as_ref().and_then(|p| p.probe()).map(|p| (p.width, p.height)).or(item.size);
+        let (w, h) = size.map(|(w, h)| (w.max(1) as f32, h.max(1) as f32)).unwrap_or((4., 3.));
+        let scale = (area.width() / w).min(area.height() / h).min(if size.is_some() { 2. } else { f32::MAX });
         let media = Rect::from_center_size(area.center(), Vec2::new(w * scale, h * scale));
         let image = item.content_type.starts_with("image/");
         let zoomable = image && item.path.is_some() && item.size.is_some() && !view_once;
@@ -393,10 +395,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             let ty = rect.bottom() - strip_h;
             for (i, it) in &neighbors {
                 let r = Rect::from_min_size(Pos2::new(tx, ty), Vec2::splat(size));
-                match it.thumbnail.as_deref().or(it.path.as_deref().filter(|_| it.content_type.starts_with("image/"))) {
-                    Some(path) => {
-                        egui::Image::new(crate::thumbs::uri(ui.ctx(), path, r.size())).corner_radius(CornerRadius::same(6)).fit_to_exact_size(r.size()).paint_at(ui, r);
-                    }
+                let image = it.content_type.starts_with("image/");
+                // A video without a thumbnail shows its first frame.
+                let poster = (!image && it.thumbnail.is_none()).then(|| it.path.as_deref().and_then(|p| crate::video::poster(ui.ctx(), p))).flatten();
+                match it.path.as_deref().filter(|_| image).or(it.thumbnail.as_deref()).or(poster.as_deref()) {
+                    Some(path) => crate::chat::cover_image(ui, path, r, CornerRadius::same(6)),
                     None => {
                         ui.painter().rect_filled(r, CornerRadius::same(6), Color32::from_gray(50));
                     }
