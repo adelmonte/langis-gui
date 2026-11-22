@@ -39,22 +39,43 @@ pub struct Probe {
 
 pub fn probe(path: &str) -> Option<Probe> {
     let out = Command::new("ffprobe")
-        .args(["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "default=noprint_wrappers=1", "-protocol_whitelist", "file", path])
+        .args(["-v", "error", "-show_entries", "stream=codec_type,width,height,sample_aspect_ratio:stream_side_data=rotation:stream_tags=rotate:format=duration", "-of", "default=noprint_wrappers=1", "-protocol_whitelist", "file", path])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
+    parse_probe(&text)
+}
+
+/// The size as shown: ffmpeg turns the picture upright (phones store
+/// portrait video as landscape, turned) and stretches non-square pixels
+/// before any filter, so the frames come out this shape.
+fn parse_probe(text: &str) -> Option<Probe> {
     let mut p = Probe::default();
+    let (mut video, mut sar, mut rotation) = (false, None, None);
     for line in text.lines() {
         let Some((key, value)) = line.split_once('=') else { continue };
         match key {
-            "width" if p.width == 0 => p.width = value.parse().unwrap_or(0),
-            "height" if p.height == 0 => p.height = value.parse().unwrap_or(0),
+            "codec_type" => {
+                video = value == "video";
+                p.audio |= value == "audio";
+            }
+            "width" if video && p.width == 0 => p.width = value.parse().unwrap_or(0),
+            "height" if video && p.height == 0 => p.height = value.parse().unwrap_or(0),
+            "sample_aspect_ratio" if video && sar.is_none() => {
+                sar = value.split_once(':').and_then(|(n, d)| Some((n.parse::<f32>().ok()?, d.parse::<f32>().ok()?))).filter(|(n, d)| *n > 0. && *d > 0.);
+            }
+            "rotation" | "rotate" if video && rotation.is_none() => rotation = value.parse::<f32>().ok(),
             "duration" => p.duration = value.parse().unwrap_or(0.),
-            "codec_type" if value == "audio" => p.audio = true,
             _ => {}
         }
+    }
+    if let Some((n, d)) = sar.filter(|(n, d)| n != d) {
+        p.width = ((p.width as f32 * n / d).round() as u32).max(1);
+    }
+    if (rotation.unwrap_or(0.).abs().round() as i64 / 90) % 2 == 1 {
+        (p.width, p.height) = (p.height, p.width);
     }
     (p.width > 0 && p.height > 0).then_some(p)
 }
@@ -422,7 +443,7 @@ pub fn poster(ctx: &Context, path: &str) -> Option<String> {
             }
             let tmp = out.with_extension("part.jpg");
             let made = Command::new("ffmpeg")
-                .args(["-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file", "-i", &path, "-frames:v", tr("1"), "-vf", "scale='min(800,iw)':-2", "-q:v", "4", &tmp.to_string_lossy()])
+                .args(["-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file", "-i", &path, "-frames:v", tr("1"), "-vf", "scale=iw*sar:ih,setsar=1,scale='min(800,iw)':-2", "-q:v", "4", &tmp.to_string_lossy()])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -462,6 +483,15 @@ mod tests {
         let frame = frame.as_ref().expect("a frame");
         assert_eq!((frame.width, frame.height), (160, 120));
         assert_eq!(frame.pixels.len(), 160 * 120 * 4);
+    }
+
+    #[test]
+    fn turned_and_stretched_videos_are_read_as_shown() {
+        let turned = "codec_type=video\nwidth=1920\nheight=1080\nsample_aspect_ratio=1:1\nrotation=-90\ncodec_type=audio\nduration=3.5\n";
+        let p = super::parse_probe(turned).unwrap();
+        assert_eq!((p.width, p.height, p.audio), (1080, 1920, true));
+        let anamorphic = "codec_type=video\nwidth=720\nheight=576\nsample_aspect_ratio=16:15\nduration=1\n";
+        assert_eq!(super::parse_probe(anamorphic).map(|p| (p.width, p.height)), Some((768, 576)));
     }
 
     #[test]
