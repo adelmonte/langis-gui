@@ -62,7 +62,14 @@ removing a contact, and opening links from other apps.
 
 ## Install
 
-Needs [langis](https://github.com/adelmonte/langis) checked out next to it
+On Arch Linux, it's in the AUR as
+[`langis-gui`](https://aur.archlinux.org/packages/langis-gui):
+
+```sh
+yay -S langis-gui
+```
+
+To build it yourself instead: it needs [langis](https://github.com/adelmonte/langis) checked out next to it
 (`../langis`) and its build tools: `protoc`, `clang`, `cmake`, PulseAudio
 and PipeWire headers. At runtime, voice messages need `ffmpeg` (recording
 and playback) and PipeWire's `pw-play` (playback). For color emoji, install
