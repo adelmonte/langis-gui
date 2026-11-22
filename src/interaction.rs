@@ -129,7 +129,7 @@ pub fn image_menu(ui: &Ui, response: &Response, path: &std::path::Path) {
 /// clipboard is served until something else takes it.
 fn copy_image(path: std::path::PathBuf) {
     std::thread::spawn(move || {
-        let image = match image::open(&path) {
+        let image = match image::ImageReader::open(&path).and_then(|r| r.with_guessed_format()).map_err(image::ImageError::IoError).and_then(|r| r.decode()) {
             Ok(image) => image.into_rgba8(),
             Err(error) => return tracing::warn!(%error, "couldn't read the image to copy"),
         };
