@@ -2050,7 +2050,12 @@ fn message(
             let mr = CornerRadius { nw: r(l && t, radius.nw), ne: r(rt && t, radius.ne), sw: r(l && b, radius.sw), se: r(rt && b, radius.se) };
             let loading = download_progress(ctx, m, *index, a);
             let gone = a.local_path.is_none() && ctx.app.unavailable.contains(&(m.id, *index));
-            if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
+            let clicks = media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index)));
+            // The message's menu on the picture too, as on the rest of the bubble.
+            if !ctx.selecting && clicks.secondary_clicked() {
+                actions.push(Action::Menu { message_id: m.id, at: clicks.interact_pointer_pos().unwrap_or(rect.center()) });
+            }
+            if clicks.clicked() {
                 match (&a.local_path, loading) {
                     _ if gone => actions.push(Action::Toast(tr("This media is not available"))),
                     (Some(_), _) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
@@ -2091,7 +2096,12 @@ fn message(
         let mr = if media_only { radius } else if y <= bubble.top() + 1. { CornerRadius { nw: radius.nw, ne: radius.ne, sw: 0, se: 0 } } else { CornerRadius::ZERO };
         let loading = download_progress(ctx, m, *index, a);
         let gone = a.local_path.is_none() && ctx.app.unavailable.contains(&(m.id, *index));
-        if media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index))) {
+        let clicks = media(ui, palette, a, rect, mr, ui.scope_id().with(("media", m.id, *index)));
+        // The message's menu on the picture too, as on the rest of the bubble.
+        if !ctx.selecting && clicks.secondary_clicked() {
+            actions.push(Action::Menu { message_id: m.id, at: clicks.interact_pointer_pos().unwrap_or(rect.center()) });
+        }
+        if clicks.clicked() {
             match (&a.local_path, loading) {
                 _ if gone => actions.push(Action::Toast(tr("This media is not available"))),
                 (Some(_), _) => actions.push(Action::Lightbox { message_id: m.id, index: *index }),
@@ -2552,8 +2562,8 @@ fn grid_cells(n: usize, width: f32) -> (Vec<Rect>, f32) {
     (cells, h * k)
 }
 
-/// A photo or video. True when clicked.
-fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rect, radius: CornerRadius, id: egui::Id) -> bool {
+/// A photo or video, and its clicks.
+fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rect, radius: CornerRadius, id: egui::Id) -> egui::Response {
     let response = ui.interact(rect, id, Sense::click());
     let image = a.content_type.starts_with("image/");
     // Desktop's `GIF`: a GIF plays muted and looping where it is.
@@ -2617,7 +2627,7 @@ fn media(ui: &Ui, palette: &Palette, a: &langis_store::AttachmentMeta, rect: Rec
         let tri = [center.center() + Vec2::new(-6., -9.), center.center() + Vec2::new(-6., 9.), center.center() + Vec2::new(10., 0.)];
         ui.painter().add(egui::Shape::convex_polygon(tri.to_vec(), Color32::WHITE, Stroke::NONE));
     }
-    response.clicked()
+    response
 }
 
 /// Desktop's unavailable media: dimmed, with its crossed-out picture.
