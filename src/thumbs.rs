@@ -97,8 +97,14 @@ impl Thumbs {
     /// Forgets what hasn't been drawn in `idle` (its picture and its
     /// texture).
     pub fn evict(&self, ctx: &Context, idle: Duration) {
+        // Counted from the last drawn image, not the clock: a window left
+        // alone redraws only every 30 seconds, and what it shows then must
+        // not be let go just before it's drawn (every picture blinked).
         let stale: Vec<String> = match self.cache.lock() {
-            Ok(cache) => cache.iter().filter(|(_, e)| !matches!(e.state, State::Pending) && e.used.elapsed() > idle).map(|(uri, _)| uri.clone()).collect(),
+            Ok(cache) => {
+                let Some(newest) = cache.values().map(|e| e.used).max() else { return };
+                cache.iter().filter(|(_, e)| !matches!(e.state, State::Pending) && newest.duration_since(e.used) > idle).map(|(uri, _)| uri.clone()).collect()
+            }
             Err(_) => return,
         };
         if stale.is_empty() {
