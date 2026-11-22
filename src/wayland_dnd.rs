@@ -154,12 +154,19 @@ fn read_drop(state: &mut State, offer: WlDataOffer) {
     offer.receive(URI_LIST.into(), write.as_fd());
     drop(write);
     let _ = state.conn.flush();
-    let (drops, ctx) = (state.drops.clone(), state.ctx.clone());
+    let (drops, ctx, conn) = (state.drops.clone(), state.ctx.clone(), state.conn.clone());
     std::thread::spawn(move || {
         use std::io::Read;
         let mut text = String::new();
         // A file list is small; a source that sends more is cut off.
         let _ = std::fs::File::from(read).take(1 << 20).read_to_string(&mut text);
+        // Finished only once read: a source told the drop is done may
+        // stop writing, and the list comes empty.
+        if offer.version() >= 3 {
+            offer.finish();
+        }
+        offer.destroy();
+        let _ = conn.flush();
         let paths = parse_uri_list(&text);
         if !paths.is_empty()
             && let Ok(mut dropped) = drops.dropped.lock()
@@ -168,10 +175,6 @@ fn read_drop(state: &mut State, offer: WlDataOffer) {
         }
         ctx.request_repaint();
     });
-    if offer.version() >= 3 {
-        offer.finish();
-    }
-    offer.destroy();
 }
 
 impl Dispatch<WlRegistry, GlobalListContents> for State {
