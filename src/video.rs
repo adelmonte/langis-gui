@@ -458,6 +458,26 @@ pub fn poster(ctx: &Context, path: &str) -> Option<String> {
     None
 }
 
+/// The first frame of a video not yet sent (staged as bytes, `id` its
+/// staging's): written to the posters folder for ffmpeg to read, and
+/// deleted once its poster is made.
+pub fn staged_poster(ctx: &Context, id: u64, bytes: &[u8]) -> Option<String> {
+    let source = posters_dir()?.join(format!("staged-{id}.video"));
+    let source_str = source.to_string_lossy().into_owned();
+    let made = poster_path(&source_str)?;
+    if made.exists() {
+        let _ = std::fs::remove_file(&source);
+        return Some(made.to_string_lossy().into_owned());
+    }
+    if !source.exists() {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(posters_dir()?);
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&source).ok()?;
+        std::io::Write::write_all(&mut file, bytes).ok()?;
+    }
+    poster(ctx, &source_str)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

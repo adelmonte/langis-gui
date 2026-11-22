@@ -1163,6 +1163,21 @@ impl Staged {
     }
 }
 
+/// The part of a picture `size` that fills a `frame`, cut evenly; all of
+/// it until its size is known.
+fn cover_uv(size: Option<Vec2>, frame: Vec2) -> Rect {
+    let full = Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.));
+    let Some(size) = size.filter(|s| s.x > 0. && s.y > 0.) else { return full };
+    let (photo, frame) = (size.x / size.y, frame.x / frame.y.max(1.));
+    if photo > frame {
+        let keep = frame / photo;
+        Rect::from_min_max(Pos2::new((1. - keep) / 2., 0.), Pos2::new((1. + keep) / 2., 1.))
+    } else {
+        let keep = photo / frame;
+        Rect::from_min_max(Pos2::new(0., (1. - keep) / 2.), Pos2::new(1., (1. + keep) / 2.))
+    }
+}
+
 /// Desktop's limit on attachments in one message.
 const MAX_STAGED: usize = 32;
 
@@ -1368,10 +1383,18 @@ fn staged_list(ui: &mut Ui, palette: &Palette, chat: &mut ChatView, c: &langis_s
                         ui.painter().rect_filled(rect, CornerRadius::same(8), palette.fill);
                         match s.kind {
                             StagedKind::Image => {
-                                egui::Image::new(egui::ImageSource::Bytes { uri: s.uri().into(), bytes: s.image_bytes() })
-                                    .corner_radius(CornerRadius::same(8))
-                                    .fit_to_exact_size(rect.size())
-                                    .paint_at(ui, rect);
+                                // Cropped to fill the tile, as Desktop's `object-fit: cover`.
+                                let image = egui::Image::new(egui::ImageSource::Bytes { uri: s.uri().into(), bytes: s.image_bytes() });
+                                let size = match image.load_for_size(ui.ctx(), rect.size()) {
+                                    Ok(egui::load::TexturePoll::Ready { texture }) => Some(texture.size),
+                                    _ => None,
+                                };
+                                image.uv(cover_uv(size, rect.size())).corner_radius(CornerRadius::same(8)).fit_to_exact_size(rect.size()).paint_at(ui, rect);
+                            }
+                            StagedKind::Video if let Some(poster) = crate::video::staged_poster(ui.ctx(), s.id, &s.bytes) => {
+                                crate::chat::cover_image(ui, &poster, rect, CornerRadius::same(8));
+                                ui.painter().circle_filled(rect.center(), 14., Color32::from_black_alpha(140));
+                                theme::paint_symbol(ui.painter(), "play-fill", rect.center(), 16., Color32::WHITE);
                             }
                             kind => {
                                 let symbol = if kind == StagedKind::Video { "videocamera" } else { "file" };
