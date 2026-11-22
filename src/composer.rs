@@ -1267,22 +1267,32 @@ fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
             chat.staged.push(Staged::new(bytes, name));
         }
     }
-    // egui turns a paste into text; when the clipboard holds an image and
-    // no text, the paste comes as an empty one (or none at all).
+    // A clipboard with an image and no text comes as an image paste.
+    let images: Vec<_> = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::PasteImage(image) = e { Some(image.clone()) } else { None }).collect());
+    for image in images {
+        let rgba = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+        stage_png(chat, image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, rgba));
+    }
+    // An empty text paste (or none at all) may still be an image egui
+    // couldn't read.
     let pasted = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(t) if t.is_empty())) || (i.modifiers.command && i.key_pressed(egui::Key::V)));
     if pasted
         && let Ok(mut clipboard) = arboard::Clipboard::new()
         && clipboard.get_text().map(|t| t.is_empty()).unwrap_or(true)
         && let Ok(image) = clipboard.get_image()
     {
-        let rgba = image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.into_owned());
-        let mut png = std::io::Cursor::new(Vec::new());
-        if let Some(rgba) = rgba
-            && rgba.write_to(&mut png, image::ImageFormat::Png).is_ok()
-        {
-            let name = format!("signal-{}.png", chrono::Local::now().format("%Y-%m-%d-%H%M%S"));
-            chat.staged.push(Staged::new(png.into_inner(), name));
-        }
+        stage_png(chat, image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.into_owned()));
+    }
+}
+
+/// A pasted picture, staged as a PNG.
+fn stage_png(chat: &mut ChatView, rgba: Option<image::RgbaImage>) {
+    let mut png = std::io::Cursor::new(Vec::new());
+    if let Some(rgba) = rgba
+        && rgba.write_to(&mut png, image::ImageFormat::Png).is_ok()
+    {
+        let name = format!("signal-{}.png", chrono::Local::now().format("%Y-%m-%d-%H%M%S"));
+        chat.staged.push(Staged::new(png.into_inner(), name));
     }
 }
 
