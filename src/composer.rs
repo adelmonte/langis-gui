@@ -1289,14 +1289,21 @@ fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
         stage_png(chat, image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, rgba));
     }
     // An empty text paste (or none at all) may still be an image egui
-    // couldn't read.
-    let pasted = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(t) if t.is_empty())) || (i.modifiers.command && i.key_pressed(egui::Key::V)));
+    // couldn't read. A browser's "Copy image" also offers the image's HTML
+    // as text; the image wins and the markup isn't pasted.
+    let markup = |t: &str| t.trim_start().starts_with('<');
+    let text = ui.input(|i| i.events.iter().find_map(|e| if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None }));
+    let pasted = match &text {
+        Some(t) => t.is_empty() || markup(t),
+        None => ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::V)),
+    };
     if pasted
         && let Ok(mut clipboard) = arboard::Clipboard::new()
-        && clipboard.get_text().map(|t| t.is_empty()).unwrap_or(true)
+        && (text.is_some() || clipboard.get_text().map(|t| t.is_empty() || markup(&t)).unwrap_or(true))
         && let Ok(image) = clipboard.get_image()
     {
         stage_png(chat, image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.into_owned()));
+        ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Paste(_))));
     }
 }
 
