@@ -38,6 +38,7 @@ mod interaction;
 mod i18n_locales;
 mod icons;
 mod handoff;
+mod kwin;
 mod lightbox;
 mod local_backups;
 mod menu;

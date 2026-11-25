@@ -43,6 +43,8 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 raw-window-handle = "0.6"
 arboard = { version = "3.7", default-features = false, features = ["image-data", "wayland-data-control"] }
 linkify = "0.10"
+# KWin scripting, to hide the window on Plasma's Wayland session (see kwin.rs).
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 
 [dev-dependencies]
 egui_kittest = { version = "0.37", features = ["wgpu", "snapshot", "eframe"] }
