@@ -653,10 +653,15 @@ fn general(app: &mut App, ui: &mut Ui) {
         // Desktop's system tray rows.
         let (mut tray, mut tray_start) = app.tray_prefs;
         if axo_list::switch(ui, Item::new(tr("Minimize to system tray")), &mut tray) {
+            let ctx = ui.ctx().clone();
+            if tray && !app.set_tray(&ctx, true) {
+                // No StatusNotifier host: don't leave closing without a way back.
+                tray = false;
+            } else if !tray {
+                app.set_tray(&ctx, false);
+            }
             app.tray_prefs.0 = tray;
             write(app, SETTING_TRAY, tray.to_string());
-            let ctx = ui.ctx().clone();
-            app.set_tray(&ctx, tray);
         }
         if axo_list::switch(ui, Item::new(tr("Start minimized to tray")).disabled(!tray), &mut tray_start) && tray {
             app.tray_prefs.1 = tray_start;

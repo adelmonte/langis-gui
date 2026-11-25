@@ -132,10 +132,8 @@ pub struct App {
     pub tray_prefs: (bool, bool),
     /// Desktop's media permissions: microphone, camera.
     pub media_perms: (bool, bool),
-    /// The count and visibility the tray last showed, and whether the
-    /// window's shown (hidden to the tray).
-    tray_shown: (u32, bool),
-    pub window_shown: bool,
+    /// The unread count the tray last showed.
+    tray_shown: u32,
     /// Quit from the tray: closing really closes.
     quitting: bool,
     /// Desktop's Hide menu bar, and a menu of the bar open.
@@ -310,8 +308,7 @@ impl App {
             tray: None,
             tray_prefs: (false, false),
             media_perms: (args.demo, args.demo),
-            tray_shown: (u32::MAX, true),
-            window_shown: true,
+            tray_shown: u32::MAX,
             quitting: false,
             hide_menu_bar: false,
             menu_open: false,
@@ -509,32 +506,35 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    /// Turns the tray icon on or off for the setting.
-    pub fn set_tray(&mut self, ctx: &egui::Context, on: bool) {
-        match (on, self.tray.is_some()) {
-            (true, false) => {
-                self.tray = crate::tray::TrayIcon::start(ctx);
-                self.tray_shown = (u32::MAX, true);
-            }
-            (false, true) => {
-                if let Some(t) = self.tray.take() {
-                    t.stop();
-                }
-                self.show_window(ctx);
-            }
-            _ => {}
+    /// Turns the tray icon on or off for the setting. Returns whether it is
+    /// running; without a StatusNotifier host it stays off.
+    pub fn set_tray(&mut self, ctx: &egui::Context, on: bool) -> bool {
+        if on && self.tray.is_none() {
+            self.tray = crate::tray::TrayIcon::start(ctx);
+            self.tray_shown = u32::MAX;
         }
+        if !on
+            && let Some(t) = self.tray.take()
+        {
+            t.stop();
+            self.show_window(ctx);
+        }
+        self.tray.is_some()
     }
 
     fn show_window(&mut self, ctx: &egui::Context) {
-        self.window_shown = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        // Wayland has no way to raise a window (Focus is a no-op there);
+        // asking for attention at least flags it in the taskbar.
+        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
 
     pub fn hide_window(&mut self, ctx: &egui::Context) {
-        self.window_shown = false;
+        // X11 unmaps the window. Wayland cannot unmap a toplevel, so this is
+        // a no-op there (winit's `set_visible`); the app stays running in
+        // the tray either way.
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
@@ -547,8 +547,7 @@ impl App {
         }
         for e in asked {
             match e {
-                crate::tray::TrayEvent::Show => self.show_window(ctx),
-                crate::tray::TrayEvent::Hide => self.hide_window(ctx),
+                crate::tray::TrayEvent::Open => self.show_window(ctx),
                 crate::tray::TrayEvent::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -556,13 +555,17 @@ impl App {
             }
         }
         if let Some(tray) = self.tray.as_ref()
-            && self.tray_shown != (count, self.window_shown)
+            && self.tray_shown != count
         {
-            tray.update(count, self.window_shown);
-            self.tray_shown = (count, self.window_shown);
+            tray.update(count);
+            self.tray_shown = count;
         }
         // Desktop's Minimize to system tray: closing hides the window.
-        if self.tray_prefs.0 && !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
+        if self.tray_prefs.0
+            && !self.quitting
+            && !self.confirm_close
+            && ctx.input(|i| i.viewport().close_requested())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.hide_window(ctx);
         }
@@ -724,9 +727,13 @@ impl App {
                         app.media_perms = (mic || app.demo, camera || app.demo);
                         app.hide_menu_bar = hide_menu_bar;
                         let ctx = app.ctx.clone();
-                        app.set_tray(&ctx, tray);
+                        if !app.set_tray(&ctx, tray) {
+                            // No StatusNotifier host, or the setting is off:
+                            // keep closing as quitting.
+                            app.tray_prefs.0 = false;
+                        }
                         // Desktop's Start minimized to tray.
-                        if tray && tray_start {
+                        if app.tray_prefs.0 && tray_start {
                             app.hide_window(&ctx);
                         }
                         crate::emoji_picker::set_skin_tone(skin_tone);
@@ -1499,6 +1506,10 @@ impl eframe::App for App {
         let mut window = ctx.data(|d| d.get_temp::<Option<crate::window_state::WindowState>>(key)).flatten();
         crate::window_state::track(&mut window, ctx);
         ctx.data_mut(|d| d.insert_temp(key, window));
+        // The tray icon keeps working while the window is minimized or
+        // hidden (no paint pass runs then): Open window and Quit, the
+        // unread count, and closing to the tray.
+        self.update_title(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -1507,7 +1518,6 @@ impl eframe::App for App {
         crate::interaction::end(self, ui.ctx());
         crate::notification_profiles::tick(self);
         crate::call::ring_follows_profile(self);
-        self.update_title(ui.ctx());
     }
 
     /// Touchpad scrolling as Chromium's (`scroll.rs`). `LANGIS_SCROLL_SPEED`
