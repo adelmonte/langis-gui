@@ -381,6 +381,11 @@ fn screenshots_composer() {
     }
     wait(&mut harness, "spelling", |_| true);
     save(&mut harness, "composer-spelling");
+
+    // Several lines: the expand toggle over the input.
+    harness.state_mut().chat.as_mut().unwrap().composer = "Packing list:\nwater\nsnacks\nheadlamp".into();
+    wait(&mut harness, "multiline", |_| true);
+    save(&mut harness, "composer-multiline");
     harness.state_mut().chat.as_mut().unwrap().composer.clear();
 
     // Files waiting to go: a photo and a document.

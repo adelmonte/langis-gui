@@ -794,19 +794,25 @@ fn input_row(app: &mut App, ui: &mut Ui, palette: &Palette, chat: &mut ChatView,
             }
         }
         input_rect = framed.response.rect;
-        // Desktop's expand toggle: centered over the input once it's more
-        // than a line, and while large.
         // Desktop's expand toggle (`CompositionArea__toggle-large`): over the
-        // input once it's more than a line, shown while the pointer is on
-        // the input or the toggle; 48x24, top corners rounded, chevron-shallow
-        // in gray-45.
+        // input once it's more than a line, and while large; 48x24, top
+        // corners rounded, chevron-shallow in gray-45. It rises above the
+        // panel, so it's drawn in its own area, over the timeline.
         let toggle = Rect::from_center_size(Pos2::new(input_rect.center().x, input_rect.top() - 12.), Vec2::new(48., 24.));
-        let near = ui.rect_contains_pointer(input_rect.union(toggle));
-        if (chat.composer_large || input_rect.height() > 44.) && near {
-            let r = ui.interact(toggle, ui.scope_id().with("toggle-large"), Sense::click());
-            ui.painter().rect_filled(toggle, CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, if r.hovered() { palette.fill } else { palette.background });
-            theme::paint_symbol(ui.painter(), if chat.composer_large { "chevron-shallow-down" } else { "chevron-shallow-up" }, toggle.center(), 16., theme::rgb(0x878787));
-            if r.on_hover_text(if chat.composer_large { "Make the composer smaller" } else { "Expand the composer" }).clicked() {
+        if chat.composer_large || input_rect.height() > 44. {
+            let pal = *palette;
+            let large = chat.composer_large;
+            let clicked = egui::Area::new(ui.scope_id().with("toggle-large"))
+                .order(egui::Order::Middle)
+                .fixed_pos(toggle.min)
+                .show(ui.ctx(), |ui| {
+                    let (rect, r) = ui.allocate_exact_size(toggle.size(), Sense::click());
+                    ui.painter().rect_filled(rect, CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, if r.hovered() { pal.fill_pressed } else { pal.fill });
+                    theme::paint_symbol(ui.painter(), if large { "chevron-shallow-down" } else { "chevron-shallow-up" }, rect.center(), 16., theme::rgb(0x878787));
+                    r.on_hover_text(if large { "Make the composer smaller" } else { "Expand the composer" }).clicked()
+                })
+                .inner;
+            if clicked {
                 chat.composer_large = !chat.composer_large;
             }
         }
