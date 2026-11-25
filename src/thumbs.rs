@@ -103,7 +103,7 @@ impl Thumbs {
         let stale: Vec<String> = match self.cache.lock() {
             Ok(cache) => {
                 let Some(newest) = cache.values().map(|e| e.used).max() else { return };
-                cache.iter().filter(|(_, e)| !matches!(e.state, State::Pending) && newest.duration_since(e.used) > idle).map(|(uri, _)| uri.clone()).collect()
+                cache.iter().filter(|(_, e)| !matches!(e.state, State::Pending) && newest.duration_since(e.used) >= idle).map(|(uri, _)| uri.clone()).collect()
             }
             Err(_) => return,
         };
