@@ -132,10 +132,8 @@ pub struct App {
     pub tray_prefs: (bool, bool),
     /// Desktop's media permissions: microphone, camera.
     pub media_perms: (bool, bool),
-    /// The count and visibility the tray last showed, and whether the
-    /// window's shown (hidden to the tray).
-    tray_shown: (u32, bool),
-    pub window_shown: bool,
+    /// The unread count the tray last showed.
+    tray_shown: u32,
     /// Quit from the tray: closing really closes.
     quitting: bool,
     /// Desktop's Hide menu bar, and a menu of the bar open.
@@ -197,6 +195,8 @@ pub struct App {
     handoff: Option<crate::handoff::Inbox>,
     /// Brings the window forward on Wayland; `None` elsewhere.
     activator: Option<crate::handoff::Activator>,
+    /// Wayland session, where hiding needs the compositor's help.
+    wayland: bool,
     /// A launch's activation token, used the frame after the window is
     /// shown (`Some(None)`: ask for one of our own).
     activate: Option<Option<String>>,
@@ -310,8 +310,7 @@ impl App {
             tray: None,
             tray_prefs: (false, false),
             media_perms: (args.demo, args.demo),
-            tray_shown: (u32::MAX, true),
-            window_shown: true,
+            tray_shown: u32::MAX,
             quitting: false,
             hide_menu_bar: false,
             menu_open: false,
@@ -369,6 +368,10 @@ impl App {
             drops: crate::wayland_dnd::start(cc),
             handoff: None,
             activator: crate::handoff::Activator::new(cc),
+            wayland: {
+                use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
+                cc.display_handle().is_ok_and(|handle| matches!(handle.as_raw(), RawDisplayHandle::Wayland(_)))
+            },
             activate: None,
             pending_link: link,
             link_lookup: None,
@@ -509,32 +512,55 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    /// Turns the tray icon on or off for the setting.
-    pub fn set_tray(&mut self, ctx: &egui::Context, on: bool) {
-        match (on, self.tray.is_some()) {
-            (true, false) => {
-                self.tray = crate::tray::TrayIcon::start(ctx);
-                self.tray_shown = (u32::MAX, true);
-            }
-            (false, true) => {
-                if let Some(t) = self.tray.take() {
-                    t.stop();
-                }
-                self.show_window(ctx);
-            }
-            _ => {}
+    /// Turns the tray icon on or off for the setting. Returns whether it is
+    /// running; without a StatusNotifier host it stays off.
+    pub fn set_tray(&mut self, ctx: &egui::Context, on: bool) -> bool {
+        if on && self.tray.is_none() {
+            self.tray = crate::tray::TrayIcon::start(ctx);
+            self.tray_shown = u32::MAX;
         }
+        if !on
+            && let Some(t) = self.tray.take()
+        {
+            t.stop();
+            self.show_window(ctx);
+        }
+        self.tray.is_some()
     }
 
     fn show_window(&mut self, ctx: &egui::Context) {
-        self.window_shown = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        if self.wayland {
+            // Wayland has no unminimize or raise request. The activation
+            // token brings the window forward; KWin also clears
+            // skipTaskbar and focuses it, off the UI thread because D-Bus
+            // and a temporary script file block.
+            match self.activator.as_mut() {
+                Some(activator) => activator.activate(None),
+                None => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+                }
+            }
+            std::thread::spawn(|| {
+                let _ = crate::kwin::set_hidden(false);
+            });
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
     }
 
     pub fn hide_window(&mut self, ctx: &egui::Context) {
-        self.window_shown = false;
+        if self.wayland {
+            // A Wayland toplevel cannot be unmapped or unminimized by the
+            // client. A minimize is the fallback; KWin can also take it off
+            // the taskbar. Its D-Bus work runs off the UI thread.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            std::thread::spawn(|| {
+                let _ = crate::kwin::set_hidden(true);
+            });
+            return;
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
@@ -547,8 +573,7 @@ impl App {
         }
         for e in asked {
             match e {
-                crate::tray::TrayEvent::Show => self.show_window(ctx),
-                crate::tray::TrayEvent::Hide => self.hide_window(ctx),
+                crate::tray::TrayEvent::Open => self.show_window(ctx),
                 crate::tray::TrayEvent::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -556,13 +581,19 @@ impl App {
             }
         }
         if let Some(tray) = self.tray.as_ref()
-            && self.tray_shown != (count, self.window_shown)
+            && self.tray_shown != count
         {
-            tray.update(count, self.window_shown);
-            self.tray_shown = (count, self.window_shown);
+            tray.update(count);
+            self.tray_shown = count;
         }
         // Desktop's Minimize to system tray: closing hides the window.
-        if self.tray_prefs.0 && !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
+        // A signal's close (logout, shutdown) still quits.
+        if self.tray_prefs.0
+            && !self.quitting
+            && !self.confirm_close
+            && !self.closing.load(std::sync::atomic::Ordering::Relaxed)
+            && ctx.input(|i| i.viewport().close_requested())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.hide_window(ctx);
         }
@@ -709,7 +740,7 @@ impl App {
                     let skin_tone = tone.map(|i| langis_emoji::SkinTone::ALL[i - 1]);
                     let spell = get(db.setting(crate::spell::SETTING_SPELL_CHECK).await.ok().flatten()).unwrap_or(true);
                     let badge_chats = get(db.setting(crate::settings::SETTING_BADGE_CHATS).await.ok().flatten()).unwrap_or(false);
-                    let tray = get(db.setting(crate::settings::SETTING_TRAY).await.ok().flatten()).unwrap_or(false);
+                    let tray_setting = get(db.setting(crate::settings::SETTING_TRAY).await.ok().flatten());
                     let hide_menu_bar = get(db.setting(crate::menu_bar::SETTING_HIDE_MENU_BAR).await.ok().flatten()).unwrap_or(false);
                     let tray_start = get(db.setting(crate::settings::SETTING_TRAY_START).await.ok().flatten()).unwrap_or(false);
                     let mic = get(db.setting(crate::permissions::SETTING_MIC).await.ok().flatten()).unwrap_or(false);
@@ -719,14 +750,23 @@ impl App {
                     Some(Loaded::Apply(Box::new(move |app: &mut App| {
                         app.input = InputPrefs { auto_convert, formatting, skin_tone, spell };
                         app.badge_prefs = BadgePrefs { chats: badge_chats, muted: badge_muted };
+                        // Desktop's Minimize to system tray defaults off; a
+                        // stored choice turns it on. Without a StatusNotifier
+                        // host it stays off, or closing would hide the window
+                        // for good.
+                        let tray = tray_setting.unwrap_or(false);
                         app.tray_prefs = (tray, tray_start);
                         // The demo has no real devices to guard.
                         app.media_perms = (mic || app.demo, camera || app.demo);
                         app.hide_menu_bar = hide_menu_bar;
                         let ctx = app.ctx.clone();
-                        app.set_tray(&ctx, tray);
+                        if !app.set_tray(&ctx, tray) {
+                            // No StatusNotifier host, or the setting is off:
+                            // keep closing as quitting.
+                            app.tray_prefs.0 = false;
+                        }
                         // Desktop's Start minimized to tray.
-                        if tray && tray_start {
+                        if app.tray_prefs.0 && tray_start {
                             app.hide_window(&ctx);
                         }
                         crate::emoji_picker::set_skin_tone(skin_tone);
@@ -1499,6 +1539,10 @@ impl eframe::App for App {
         let mut window = ctx.data(|d| d.get_temp::<Option<crate::window_state::WindowState>>(key)).flatten();
         crate::window_state::track(&mut window, ctx);
         ctx.data_mut(|d| d.insert_temp(key, window));
+        // The tray icon keeps working while the window is minimized or
+        // hidden (no paint pass runs then): Open window and Quit, the
+        // unread count, and closing to the tray.
+        self.update_title(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -1507,7 +1551,6 @@ impl eframe::App for App {
         crate::interaction::end(self, ui.ctx());
         crate::notification_profiles::tick(self);
         crate::call::ring_follows_profile(self);
-        self.update_title(ui.ctx());
     }
 
     /// Touchpad scrolling as Chromium's (`scroll.rs`). `LANGIS_SCROLL_SPEED`
