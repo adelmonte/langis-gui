@@ -10,7 +10,7 @@ publish = false
 langis-core = { path = "../langis/crates/core" }
 langis-store = { path = "../langis/crates/store" }
 langis-emoji = { path = "../langis/crates/emoji" }
-eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "accesskit", "clipboard", "default_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "default_fonts"] }
 egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 # Color emoji (the system's Noto Color Emoji, drawn from its bitmaps).
 epaint = { version = "0.37", features = ["color_fonts"] }
@@ -36,12 +36,12 @@ libc = "0.2"
 spellbook = "0.4"
 # Text drawn into photos by the media editor.
 ab_glyph = "0.2"
-# Images pasted into the composer (eframe builds it already, for text).
 wayland-client = { version = "0.31", features = ["system"] }
 # Bringing the window forward on Wayland (winit builds it already).
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 raw-window-handle = "0.6"
-arboard = { version = "3.7", default-features = false, features = ["image-data", "wayland-data-control"] }
+# The clipboard (eframe's own would bring in X11).
+wl-clipboard-rs = "0.9"
 linkify = "0.10"
 
 [dev-dependencies]

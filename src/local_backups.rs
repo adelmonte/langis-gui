@@ -152,10 +152,8 @@ fn copy_for_a_while(ctx: &egui::Context, text: String) {
     ctx.copy_text(text.clone());
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(45));
-        if let Ok(mut clipboard) = arboard::Clipboard::new()
-            && clipboard.get_text().is_ok_and(|now| now == text)
-        {
-            let _ = clipboard.set_text(String::new());
+        if crate::wlclip::text().is_some_and(|now| now == text) {
+            crate::wlclip::clear();
         }
     });
 }

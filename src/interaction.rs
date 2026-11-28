@@ -133,13 +133,8 @@ fn copy_image(path: std::path::PathBuf) {
             Ok(image) => image.into_rgba8(),
             Err(error) => return tracing::warn!(%error, "couldn't read the image to copy"),
         };
-        let data = arboard::ImageData { width: image.width() as usize, height: image.height() as usize, bytes: image.into_raw().into() };
-        let copied = arboard::Clipboard::new().and_then(|mut clipboard| {
-            use arboard::SetExtLinux as _;
-            clipboard.set().wait().image(data)
-        });
-        if let Err(error) = copied {
-            tracing::warn!(%error, "couldn't copy the image");
+        if !crate::wlclip::set_image(&image) {
+            tracing::warn!("couldn't copy the image");
         }
     });
 }

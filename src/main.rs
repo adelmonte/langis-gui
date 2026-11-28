@@ -64,6 +64,7 @@ mod unread_reminders;
 mod symbols;
 mod theme;
 mod tray;
+mod wlclip;
 mod view;
 mod video;
 mod voice;
