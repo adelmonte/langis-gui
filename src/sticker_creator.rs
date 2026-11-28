@@ -156,7 +156,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         c.cover = c.cover.min(c.stickers.len().saturating_sub(1));
                     }
                     // Picked, or dropped on the window.
-                    let mut files: Vec<std::path::PathBuf> = ui.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| p.exists()).collect());
+                    let mut files: Vec<std::path::PathBuf> = app.drops.as_ref().map(|d| d.take()).unwrap_or_default().into_iter().filter(|p| p.exists()).collect();
                     if add && let Some(picked) = rfd::FileDialog::new().add_filter("Images", &["png", "webp", "jpg", "jpeg"]).pick_files() {
                         files.extend(picked);
                     }

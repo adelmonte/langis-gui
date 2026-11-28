@@ -10,7 +10,7 @@ publish = false
 langis-core = { path = "../langis/crates/core" }
 langis-store = { path = "../langis/crates/store" }
 langis-emoji = { path = "../langis/crates/emoji" }
-eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "x11", "accesskit", "clipboard", "default_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "accesskit", "clipboard", "default_fonts"] }
 egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 # Color emoji (the system's Noto Color Emoji, drawn from its bitmaps).
 epaint = { version = "0.37", features = ["color_fonts"] }

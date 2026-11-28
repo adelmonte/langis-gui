@@ -215,9 +215,8 @@ fn toasts(app: &mut App, ui: &mut Ui) {
 /// Desktop's drop zone: while files are dragged over the window and a chat
 /// is open, the window says they'll be attached.
 fn drop_overlay(app: &App, ui: &Ui) {
-    let wayland = app.drops.as_ref().is_some_and(|d| d.hovering());
-    let x11 = ui.input(|i| !i.raw.hovered_files.is_empty());
-    if !(wayland || x11) || app.chat.is_none() {
+    let hovering = app.drops.as_ref().is_some_and(|d| d.hovering());
+    if !hovering || app.chat.is_none() {
         return;
     }
     let palette = Palette::of(ui.ctx());

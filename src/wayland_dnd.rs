@@ -1,5 +1,5 @@
-//! Files dropped on the window under Wayland. winit 0.30 hands file drops
-//! to egui only on X11, so here the app listens itself: its own event
+//! Files dropped on the window. winit 0.30 doesn't hand Wayland's file
+//! drops to egui, so here the app listens itself: its own event
 //! queue on the window's Wayland connection (as eframe's clipboard does),
 //! a `wl_data_device` for the seat, and a drop's `text/uri-list` read into
 //! paths. Each drop comes out of [`Drops::take`]; while something is
@@ -60,8 +60,7 @@ struct State {
     pending: Vec<(WlDataOffer, bool)>,
 }
 
-/// Starts listening, when the window is on Wayland; `None` on X11 (where
-/// egui gets drops itself) or if the compositor has no data devices.
+/// Starts listening; `None` if the compositor has no data devices.
 pub fn start(cc: &eframe::CreationContext<'_>) -> Option<Drops> {
     use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
     let RawDisplayHandle::Wayland(handle) = cc.display_handle().ok()?.as_raw() else { return None };

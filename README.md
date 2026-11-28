@@ -50,8 +50,7 @@ Everything a linked Signal Desktop does, with its layout and wording
 - Languages written right to left, and others that need complex text
   shaping, aren't offered: egui can't draw them yet. Chinese, Japanese and
   Korean need a system font.
-- Hiding the window to the tray may not work on every Wayland compositor,
-  and dropping files on the window may not either (winit's support).
+- Hiding the window to the tray may not work on every Wayland compositor.
 
 Calls work on Linux in real use. Not yet tried on a real account: sounds,
 paste and drag-and-drop, chat export, notification profiles, backups, sent

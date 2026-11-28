@@ -189,8 +189,8 @@ pub struct App {
     pub account_notify: langis_store::ChatNotify,
     /// Sounds, call notifications and the taskbar flash.
     pub sound: crate::sounds::Prefs,
-    /// Files dropped on the window under Wayland (winit gives egui only
-    /// X11's); `None` on X11.
+    /// Files dropped on the window (winit doesn't hand egui Wayland's);
+    /// `None` if the compositor has no data devices.
     pub drops: Option<crate::wayland_dnd::Drops>,
     /// Signal links and Show from later launches (`handoff`); `None` for
     /// the demo, or when another copy has the socket.

@@ -1274,19 +1274,8 @@ fn media_editor(app: &mut App, ui: &Ui, chat: &mut ChatView) {
 /// Files dropped on the window, and an image pasted with Ctrl+V, go to
 /// the list (Desktop's drop zone and paste handler).
 fn take_dropped_and_pasted(app: &mut App, ui: &Ui, chat: &mut ChatView) {
-    let dropped = ui.input(|i| i.raw.dropped_files.clone());
-    // Wayland's drops, from the app's own listener.
     for path in app.drops.as_ref().map(|d| d.take()).unwrap_or_default() {
         stage_path(app, chat, &path);
-    }
-    for file in dropped {
-        let path = file.path();
-        if path.exists() {
-            stage_path(app, chat, path);
-        } else if let Ok(bytes) = file.bytes() {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
-            chat.staged.push(Staged::new(bytes, name));
-        }
     }
     // A clipboard with an image and no text comes as an image paste.
     let images: Vec<_> = ui.input(|i| i.events.iter().filter_map(|e| if let egui::Event::PasteImage(image) = e { Some(image.clone()) } else { None }).collect());
