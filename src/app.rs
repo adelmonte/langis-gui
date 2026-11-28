@@ -147,6 +147,10 @@ pub struct App {
     /// "Delete all data?" over the link screen, until answered.
     pub link_other_account: bool,
     pub history: Option<HistoryProgress>,
+    /// The newest message to notify about while the server queue drains,
+    /// shown once it's empty (Desktop's notifications stay disabled until
+    /// `onEmpty`, then show only the latest).
+    held_notify: Option<(ConversationId, i64, bool, bool)>,
     pub tab: Tab,
     pub conversations: Vec<Conversation>,
     pub search: String,
@@ -318,6 +322,7 @@ impl App {
             unlinked: false,
             link_other_account: false,
             history: None,
+            held_notify: None,
             tab: Tab::Chats,
             conversations: Vec::new(),
             search: String::new(),
@@ -747,7 +752,14 @@ impl App {
             // Desktop keeps the window as it was and shows DialogRelink in
             // the left pane; relinking starts from its click.
             Event::Unlinked => self.unlinked = true,
-            Event::Connection(state) => self.connection = state,
+            Event::Connection(state) => {
+                self.connection = state;
+                if self.connection == ConnectionState::Online
+                    && let Some((conversation, message_id, mentions_me, replies_to_me)) = self.held_notify.take()
+                {
+                    self.notify_message(&conversation, message_id, mentions_me, replies_to_me);
+                }
+            }
             Event::History(progress) => self.history = Some(progress),
             Event::ConversationsChanged | Event::ContactsSynced | Event::ProfileChanged(_) => self.reload_conversations(),
             Event::AuthorNamesChanged(pairs) => self.names.extend(pairs),
@@ -1197,12 +1209,13 @@ impl App {
     /// read, and not for a muted chat unless it's a group and the message
     /// mentions or answers us while that kind is on there (Desktop's
     /// `maybeNotify`, `isAllowedByConversation`).
-    fn notify_message(&self, conversation: &ConversationId, message_id: i64, mentions_me: bool, replies_to_me: bool) {
+    fn notify_message(&mut self, conversation: &ConversationId, message_id: i64, mentions_me: bool, replies_to_me: bool) {
         let (on, content) = self.notify.clone();
         let Some(chat) = self.conversation(conversation) else { return };
         let reading = self.focused && self.selected.as_ref() == Some(conversation);
+        let draining = self.connection != ConnectionState::Online;
         // Desktop's in-chat sound, for the chat being read.
-        if reading && self.sound.in_chat && !chat.muted {
+        if reading && !draining && self.sound.in_chat && !chat.muted {
             crate::sounds::once(crate::sounds::Sound::Pop);
         }
         use langis_store::ChatNotifyKind as K;
@@ -1215,6 +1228,10 @@ impl App {
         // Desktop's `maybeNotify`: quiet while a notification profile that
         // doesn't allow this chat (or mentions, for one) is on.
         if crate::notification_profiles::silenced(self, conversation, false, mentions_me || replies_to_me) {
+            return;
+        }
+        if draining {
+            self.held_notify = Some((conversation.clone(), message_id, mentions_me, replies_to_me));
             return;
         }
         if self.sound.notification {
